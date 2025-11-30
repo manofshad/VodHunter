@@ -1,0 +1,25 @@
+# --- Project Specific Data (Don't commit these!) ---
+temp_ingest/
+temp_search/
+metadata.db
+metadata.db-journal
+vectors.npy
+ids.npy
+*.wav
+*.mp4
+
+# --- Python ---
+__pycache__/
+*.pyc
+
+# --- Environment ---
+.venv/
+venv/
+env/
+
+# --- IDE Settings ---
+.idea/
+.vscode/
+
+# --- OS Specific ---
+.DS_Store
