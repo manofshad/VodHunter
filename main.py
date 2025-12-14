@@ -16,7 +16,7 @@ os.makedirs("temp_search", exist_ok=True)
 async def read_root():
     # We assume index.html is in the same folder
     if os.path.exists("index.html"):
-        with open("index.html", "r") as f:
+        with open("index.html", "r", encoding="utf-8") as f:
             return f.read()
     return "<h1>Error: index.html not found. Please create it.</h1>"
 

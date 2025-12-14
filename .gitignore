@@ -7,6 +7,7 @@ vectors.npy
 ids.npy
 *.wav
 *.mp4
+*.exe
 
 # --- Python ---
 __pycache__/

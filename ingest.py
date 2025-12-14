@@ -60,16 +60,32 @@ def init_db():
 
 def download_audio(url, filename_base):
     print(f"⬇️  Downloading {url}...")
+
+    # Make sure we use an absolute path and no extension in filename_base
+    audio_dir_abs = os.path.abspath(AUDIO_DIR)
+    base = os.path.join(audio_dir_abs, filename_base)  # e.g. .../temp_ingest/vid_1_636f3060
+
     ydl_opts = {
-        'format': 'bestaudio/best',
-        'outtmpl': os.path.join(AUDIO_DIR, filename_base),
-        'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'wav'}],
-        'postprocessor_args': ['-ar', '16000', '-ac', '1'],
-        'quiet': True
+        "format": "bestaudio/best",
+        # yt-dlp will create something like base.webm/mp4, then FFmpegExtractAudio → base.wav
+        "outtmpl": base + ".%(ext)s",
+        "nopart": True,          # <— disables .part/.temp style partial files
+        "overwrites": True,
+        "postprocessors": [{
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": "wav",
+        }],
+        "postprocessor_args": ["-ar", "16000", "-ac", "1"],
+        "quiet": True,
+        # If ffmpeg/ffprobe are not on PATH on Windows, uncomment this and set the dir:
+        # "ffmpeg_location": r"C:\ffmpeg\bin",
     }
+
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
-        return os.path.join(AUDIO_DIR, filename_base + ".wav"), info.get('title', 'Unknown')
+
+    wav_path = base + ".wav"
+    return wav_path, info.get("title", "Unknown")
 
 
 def get_embeddings(audio_path):
@@ -230,7 +246,7 @@ def index_local_file(local_path, original_url, creator_name):
 
 if __name__ == "__main__":
     existing_file = "temp_ingest/vid_1_393c9e61.wav" # Check this matches your actual file
-    original_url = "https://www.twitch.tv/videos/2630447172"
+    original_url = "https://www.twitch.tv/videos/2631086912"
 
     if os.path.exists(existing_file):
         index_local_file(existing_file, original_url, "jason")
