@@ -1,26 +1,59 @@
-# --- Project Specific Data (Don't commit these!) ---
-temp_ingest/
-temp_search/
-metadata.db
-metadata.db-journal
-vectors.npy
-ids.npy
-*.wav
-*.mp4
-*.exe
+# OS
+.DS_Store
+Thumbs.db
 
-# --- Python ---
+# Secrets / local env
+.env
+.env.*
+!.env.example
+
+# Python
 __pycache__/
-*.pyc
-
-# --- Environment ---
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.python-version
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+build/
+dist/
+*.egg-info/
 .venv/
 venv/
 env/
 
-# --- IDE Settings ---
+# JS/Web
+node_modules/
+web/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.next/
+.nuxt/
+.svelte-kit/
+coverage/
+dist/
+web/dist/
+web/.vite/
+
+# IDE / editor
 .idea/
 .vscode/
+*.swp
+*.swo
 
-# --- OS Specific ---
-.DS_Store
+# Project runtime artifacts
+logs/
+tmp/
+*.log
+*.pid
+
+# Project data artifacts (generated at runtime)
+data/
+temp_live_chunks/
