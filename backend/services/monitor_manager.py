@@ -6,7 +6,7 @@ import time
 from pipeline.embedder import Embedder
 from pipeline.ingest_session import IngestSession
 from services.twitch_monitor import TwitchMonitor
-from sources.live_twitch_source import LiveTwitchSource
+from sources.live_archive_vod_source import LiveArchiveVODSource
 from storage.vector_store import VectorStore
 
 
@@ -19,6 +19,9 @@ class MonitorStatus:
     last_check_at: str | None = None
     last_error: str | None = None
     current_video_id: int | None = None
+    current_vod_url: str | None = None
+    ingest_cursor_seconds: int | None = None
+    lag_seconds: int | None = None
 
 
 class MonitorConflictError(Exception):
@@ -35,6 +38,9 @@ class MonitorManager:
         session_poll_interval: float,
         monitor_retry_seconds: float,
         temp_dir: str,
+        archive_lag_seconds: int,
+        archive_poll_seconds: float,
+        archive_finalize_checks: int,
     ):
         self.store = store
         self.embedder = embedder
@@ -43,6 +49,9 @@ class MonitorManager:
         self.session_poll_interval = session_poll_interval
         self.monitor_retry_seconds = monitor_retry_seconds
         self.temp_dir = temp_dir
+        self.archive_lag_seconds = archive_lag_seconds
+        self.archive_poll_seconds = archive_poll_seconds
+        self.archive_finalize_checks = archive_finalize_checks
 
         self._status = MonitorStatus()
         self._lock = Lock()
@@ -86,6 +95,9 @@ class MonitorManager:
                 last_check_at=None,
                 last_error=None,
                 current_video_id=None,
+                current_vod_url=None,
+                ingest_cursor_seconds=None,
+                lag_seconds=self.archive_lag_seconds,
             )
 
             self._thread = Thread(
@@ -132,6 +144,7 @@ class MonitorManager:
                     is_live=is_live,
                     last_check_at=self._utc_now_iso(),
                     last_error=None,
+                    lag_seconds=self.archive_lag_seconds,
                 )
             except Exception as exc:
                 self._set_status(
@@ -140,6 +153,7 @@ class MonitorManager:
                     last_check_at=self._utc_now_iso(),
                     last_error=str(exc),
                     is_live=None,
+                    lag_seconds=self.archive_lag_seconds,
                 )
                 time.sleep(self.monitor_retry_seconds)
                 continue
@@ -148,11 +162,15 @@ class MonitorManager:
                 time.sleep(self.monitor_poll_seconds)
                 continue
 
-            source = LiveTwitchSource(
+            source = LiveArchiveVODSource(
                 streamer=streamer,
+                store=self.store,
+                twitch_monitor=self._monitor,
                 chunk_seconds=self.chunk_seconds,
+                lag_seconds=self.archive_lag_seconds,
+                poll_seconds=self.archive_poll_seconds,
+                finalize_checks=self.archive_finalize_checks,
                 temp_dir=self.temp_dir,
-                db_path=self.store.db_path,
             )
             session = IngestSession(
                 source=source,
@@ -164,6 +182,7 @@ class MonitorManager:
             with self._lock:
                 self._active_session = session
                 self._status.state = "ingesting"
+                self._status.lag_seconds = self.archive_lag_seconds
 
             try:
                 session.run()
@@ -172,8 +191,11 @@ class MonitorManager:
                     streamer=streamer,
                     is_live=False,
                     current_video_id=source.video_id,
+                    current_vod_url=source.current_vod_url,
+                    ingest_cursor_seconds=source.ingest_cursor_seconds,
                     last_error=None,
                     last_check_at=self._utc_now_iso(),
+                    lag_seconds=self.archive_lag_seconds,
                 )
             except Exception as exc:
                 self._set_status(
@@ -181,6 +203,10 @@ class MonitorManager:
                     streamer=streamer,
                     last_error=str(exc),
                     last_check_at=self._utc_now_iso(),
+                    current_video_id=source.video_id,
+                    current_vod_url=source.current_vod_url,
+                    ingest_cursor_seconds=source.ingest_cursor_seconds,
+                    lag_seconds=self.archive_lag_seconds,
                 )
             finally:
                 with self._lock:
@@ -198,6 +224,9 @@ class MonitorManager:
                 self._status.is_live = None
                 self._status.streamer = None
                 self._status.current_video_id = None
+                self._status.current_vod_url = None
+                self._status.ingest_cursor_seconds = None
+                self._status.lag_seconds = None
 
     def _set_status(self, **updates: object) -> None:
         with self._lock:

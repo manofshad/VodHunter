@@ -68,6 +68,9 @@ async def lifespan(app: FastAPI):
         session_poll_interval=config.SESSION_POLL_INTERVAL,
         monitor_retry_seconds=config.MONITOR_RETRY_SECONDS,
         temp_dir=config.TEMP_LIVE_DIR,
+        archive_lag_seconds=config.LIVE_ARCHIVE_LAG_SECONDS,
+        archive_poll_seconds=config.LIVE_ARCHIVE_POLL_SECONDS,
+        archive_finalize_checks=config.LIVE_ARCHIVE_FINALIZE_CHECKS,
     )
 
     search_manager = SearchManager(

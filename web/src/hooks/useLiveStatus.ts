@@ -11,6 +11,9 @@ const defaultStatus: LiveStatusResponse = {
   last_check_at: null,
   last_error: null,
   current_video_id: null,
+  current_vod_url: null,
+  ingest_cursor_seconds: null,
+  lag_seconds: null,
 };
 
 export function useLiveStatus(pollMs: number = 2500) {

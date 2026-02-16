@@ -72,6 +72,18 @@ export default function LiveMonitorCard({ status, onRefresh }: Props) {
         <div><strong>Live:</strong> {status.is_live === null ? "-" : status.is_live ? "yes" : "no"}</div>
         <div><strong>Last Check:</strong> {status.last_check_at ?? "-"}</div>
         <div><strong>Current Video ID:</strong> {status.current_video_id ?? "-"}</div>
+        <div>
+          <strong>Current VOD:</strong>{" "}
+          {status.current_vod_url ? (
+            <a href={status.current_vod_url} target="_blank" rel="noreferrer">
+              {status.current_vod_url}
+            </a>
+          ) : (
+            "-"
+          )}
+        </div>
+        <div><strong>Ingest Cursor (s):</strong> {status.ingest_cursor_seconds ?? "-"}</div>
+        <div><strong>Lag (s):</strong> {status.lag_seconds ?? "-"}</div>
       </div>
 
       {(status.last_error || message) && <p className="message">{status.last_error ?? message}</p>}

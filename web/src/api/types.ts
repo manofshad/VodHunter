@@ -8,6 +8,9 @@ export interface LiveStatusResponse {
   last_check_at: string | null;
   last_error: string | null;
   current_video_id: number | null;
+  current_vod_url: string | null;
+  ingest_cursor_seconds: number | null;
+  lag_seconds: number | null;
 }
 
 export interface LiveStartResponse {

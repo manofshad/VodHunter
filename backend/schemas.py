@@ -22,6 +22,9 @@ class LiveStatusResponse(BaseModel):
     last_check_at: str | None
     last_error: str | None
     current_video_id: int | None
+    current_vod_url: str | None
+    ingest_cursor_seconds: int | None
+    lag_seconds: int | None
 
 
 class LiveStartResponse(BaseModel):

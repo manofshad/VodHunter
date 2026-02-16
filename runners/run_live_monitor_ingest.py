@@ -8,7 +8,7 @@ if str(ROOT_DIR) not in sys.path:
 
 from pipeline.embedder import Embedder
 from storage.vector_store import VectorStore
-from sources.live_twitch_source import LiveTwitchSource
+from sources.live_archive_vod_source import LiveArchiveVODSource
 from services.twitch_monitor import TwitchMonitor
 from pipeline.ingest_session import IngestSession
 
@@ -23,6 +23,9 @@ INGEST_CHUNK_SECONDS = 60
 MONITOR_POLL_SECONDS = 30.0
 SESSION_POLL_INTERVAL = 0.5
 MONITOR_RETRY_SECONDS = 5.0
+LIVE_ARCHIVE_LAG_SECONDS = 120
+LIVE_ARCHIVE_POLL_SECONDS = 15.0
+LIVE_ARCHIVE_FINALIZE_CHECKS = 3
 
 
 def main() -> None:
@@ -59,12 +62,16 @@ def main() -> None:
                 time.sleep(MONITOR_POLL_SECONDS)
                 continue
 
-            print(f"[monitor] {STREAMER} is live. Starting ingest session.")
-            source = LiveTwitchSource(
+            print(f"[monitor] {STREAMER} is live. Starting archive-backed ingest session.")
+            source = LiveArchiveVODSource(
                 streamer=STREAMER,
+                store=store,
+                twitch_monitor=monitor,
                 chunk_seconds=INGEST_CHUNK_SECONDS,
+                lag_seconds=LIVE_ARCHIVE_LAG_SECONDS,
+                poll_seconds=LIVE_ARCHIVE_POLL_SECONDS,
+                finalize_checks=LIVE_ARCHIVE_FINALIZE_CHECKS,
                 temp_dir=TEMP_DIR,
-                db_path=DB_PATH,
             )
             active_session = IngestSession(
                 source=source,
@@ -76,7 +83,6 @@ def main() -> None:
             try:
                 active_session.run()
             except Exception as exc:
-                # Handles race conditions where stream goes offline between check and start.
                 print(f"[ingest] session ended with error: {exc}")
             finally:
                 active_session = None

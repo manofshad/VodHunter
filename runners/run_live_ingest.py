@@ -6,8 +6,9 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from pipeline.embedder import Embedder
+from services.twitch_monitor import TwitchMonitor
 from storage.vector_store import VectorStore
-from sources.live_twitch_source import LiveTwitchSource
+from sources.live_archive_vod_source import LiveArchiveVODSource
 from pipeline.ingest_session import IngestSession
 
 
@@ -19,9 +20,11 @@ TEMP_DIR = str(DATA_DIR / "temp_live_chunks")
 
 
 def main() -> None:
-    # Temporary test runner for live ingest validation.
     streamer = "thesketchreal"
     chunk_seconds = 60
+    lag_seconds = 120
+    poll_seconds = 15.0
+    finalize_checks = 3
 
     store = VectorStore(
         db_path=DB_PATH,
@@ -31,12 +34,17 @@ def main() -> None:
     store.init_db()
 
     embedder = Embedder()
+    monitor = TwitchMonitor.from_env()
 
-    source = LiveTwitchSource(
+    source = LiveArchiveVODSource(
         streamer=streamer,
+        store=store,
+        twitch_monitor=monitor,
         chunk_seconds=chunk_seconds,
+        lag_seconds=lag_seconds,
+        poll_seconds=poll_seconds,
+        finalize_checks=finalize_checks,
         temp_dir=TEMP_DIR,
-        db_path=DB_PATH,
     )
 
     session = IngestSession(
@@ -46,7 +54,7 @@ def main() -> None:
         poll_interval=0.5,
     )
 
-    print(f"Starting live ingest for twitch.tv/{streamer}")
+    print(f"Starting archive-backed live ingest for twitch.tv/{streamer}")
     print("Press Ctrl+C to stop.")
 
     try:
