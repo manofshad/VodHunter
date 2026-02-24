@@ -9,20 +9,24 @@ interface Props {
 
 export default function SearchCard({ liveStatus }: Props) {
   const [file, setFile] = useState<File | null>(null);
+  const [tiktokUrl, setTiktokUrl] = useState<string>("");
   const [result, setResult] = useState<SearchResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState<boolean>(false);
 
   const blocked = liveStatus.state !== "idle";
+  const hasUrl = tiktokUrl.trim().length > 0;
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!file) return;
+    if (!file && !hasUrl) return;
 
     try {
       setSubmitting(true);
       setError(null);
-      const next = await searchClip(file);
+      const next = file
+        ? await searchClip({ type: "file", file })
+        : await searchClip({ type: "tiktok_url", tiktokUrl: tiktokUrl.trim() });
       setResult(next);
     } catch (err) {
       setResult(null);
@@ -39,10 +43,29 @@ export default function SearchCard({ liveStatus }: Props) {
         <input
           type="file"
           accept="audio/*,video/*"
-          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-          disabled={submitting || blocked}
+          onChange={(e) => {
+            const next = e.target.files?.[0] ?? null;
+            setFile(next);
+            if (next) {
+              setTiktokUrl("");
+            }
+          }}
+          disabled={submitting || blocked || hasUrl}
         />
-        <button type="submit" disabled={submitting || blocked || !file}>
+        <input
+          type="url"
+          placeholder="https://www.tiktok.com/@user/video/..."
+          value={tiktokUrl}
+          onChange={(e) => {
+            const next = e.target.value;
+            setTiktokUrl(next);
+            if (next.trim().length > 0 && file) {
+              setFile(null);
+            }
+          }}
+          disabled={submitting || blocked || !!file}
+        />
+        <button type="submit" disabled={submitting || blocked || (!file && !hasUrl)}>
           Search
         </button>
       </form>
@@ -56,6 +79,16 @@ export default function SearchCard({ liveStatus }: Props) {
           <div><strong>Streamer:</strong> {result.streamer ?? "-"}</div>
           <div><strong>Title:</strong> {result.title ?? "-"}</div>
           <div><strong>URL:</strong> {result.video_url ?? "-"}</div>
+          <div>
+            <strong>Timestamp URL:</strong>{" "}
+            {result.video_url_at_timestamp ? (
+              <a href={result.video_url_at_timestamp} target="_blank" rel="noreferrer">
+                {result.video_url_at_timestamp}
+              </a>
+            ) : (
+              "-"
+            )}
+          </div>
           <div><strong>Timestamp:</strong> {result.timestamp_seconds ?? "-"}</div>
           <div><strong>Score:</strong> {result.score ?? "-"}</div>
           <div><strong>Reason:</strong> {result.reason ?? "-"}</div>

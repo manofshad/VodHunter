@@ -8,7 +8,10 @@ VECTOR_FILE = str(DATA_DIR / "vectors.npy")
 ID_FILE = str(DATA_DIR / "ids.npy")
 TEMP_LIVE_DIR = str(DATA_DIR / "temp_live_chunks")
 TEMP_SEARCH_UPLOAD_DIR = str(DATA_DIR / "temp_search_uploads")
+TEMP_SEARCH_DOWNLOAD_DIR = str(DATA_DIR / "temp_search_downloads")
 TEMP_SEARCH_PREPROCESS_DIR = str(DATA_DIR / "temp_search")
+TIKTOK_DOWNLOAD_TIMEOUT_SECONDS = 90
+TIKTOK_MAX_FILE_MB = 200
 
 INGEST_CHUNK_SECONDS = 60
 MONITOR_POLL_SECONDS = 30.0

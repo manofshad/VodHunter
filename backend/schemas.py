@@ -49,6 +49,7 @@ class SearchResponse(BaseModel):
     streamer: str | None = None
     video_id: int | None = None
     video_url: str | None = None
+    video_url_at_timestamp: str | None = None
     title: str | None = None
     timestamp_seconds: int | None = None
     score: float | None = None
@@ -61,6 +62,7 @@ class SearchResponse(BaseModel):
             streamer=result.streamer,
             video_id=result.video_id,
             video_url=result.video_url,
+            video_url_at_timestamp=result.video_url_at_timestamp,
             title=result.title,
             timestamp_seconds=result.timestamp_seconds,
             score=result.score,

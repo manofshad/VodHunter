@@ -43,9 +43,17 @@ export async function getLiveSessions(limit = 50, offset = 0): Promise<LiveSessi
   return parseJson<LiveSessionItem[]>(resp);
 }
 
-export async function searchClip(file: File): Promise<SearchResponse> {
+export type SearchClipInput =
+  | { type: "file"; file: File }
+  | { type: "tiktok_url"; tiktokUrl: string };
+
+export async function searchClip(input: SearchClipInput): Promise<SearchResponse> {
   const form = new FormData();
-  form.append("file", file);
+  if (input.type === "file") {
+    form.append("file", input.file);
+  } else {
+    form.append("tiktok_url", input.tiktokUrl);
+  }
 
   const resp = await fetch(`${API_BASE}/search/clip`, {
     method: "POST",

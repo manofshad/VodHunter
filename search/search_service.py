@@ -2,6 +2,7 @@ from search.alignment_service import AlignmentService
 from search.models import SearchResult
 from search.query_embedder import QueryEmbedder
 from search.query_preprocessor import QueryPreprocessor
+from search.twitch_time import build_twitch_timestamp_url
 from search.vector_matcher import VectorMatcher
 from storage.vector_store import VectorStore
 
@@ -45,11 +46,13 @@ class SearchService:
                 return SearchResult(found=False, reason="Aligned video metadata not found")
 
             video_id, video_url, title, streamer = video_row
+            video_url_at_timestamp = build_twitch_timestamp_url(video_url, alignment.timestamp_seconds)
             return SearchResult(
                 found=True,
                 streamer=streamer,
                 video_id=video_id,
                 video_url=video_url,
+                video_url_at_timestamp=video_url_at_timestamp,
                 title=title,
                 timestamp_seconds=alignment.timestamp_seconds,
                 score=alignment.score,

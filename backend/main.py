@@ -3,7 +3,7 @@ import os
 import sys
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
@@ -24,6 +24,7 @@ from backend.schemas import (
     SearchResponse,
 )
 from backend.services.monitor_manager import MonitorConflictError, MonitorManager
+from backend.services.remote_clip_downloader import DownloadError, InvalidTikTokUrlError, RemoteClipDownloader
 from backend.services.search_manager import SearchBusyError, SearchInputError, SearchManager
 from backend.services.session_query import SessionQueryService
 from pipeline.embedder import Embedder
@@ -39,6 +40,7 @@ from storage.vector_store import VectorStore
 async def lifespan(app: FastAPI):
     os.makedirs(config.DATA_DIR, exist_ok=True)
     os.makedirs(config.TEMP_SEARCH_UPLOAD_DIR, exist_ok=True)
+    os.makedirs(config.TEMP_SEARCH_DOWNLOAD_DIR, exist_ok=True)
 
     store = VectorStore(
         db_path=config.DB_PATH,
@@ -77,6 +79,11 @@ async def lifespan(app: FastAPI):
         search_service=search_service,
         monitor_manager=monitor_manager,
         upload_temp_dir=config.TEMP_SEARCH_UPLOAD_DIR,
+        remote_downloader=RemoteClipDownloader(
+            temp_dir=config.TEMP_SEARCH_DOWNLOAD_DIR,
+            timeout_seconds=config.TIKTOK_DOWNLOAD_TIMEOUT_SECONDS,
+            max_file_mb=config.TIKTOK_MAX_FILE_MB,
+        ),
     )
 
     session_query = SessionQueryService(db_path=config.DB_PATH)
@@ -158,9 +165,28 @@ def list_live_sessions(
     response_model=SearchResponse,
     responses={400: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
 )
-def search_clip(file: UploadFile = File(...)) -> SearchResponse:
+def search_clip(
+    file: UploadFile | None = File(default=None),
+    tiktok_url: str | None = Form(default=None),
+) -> SearchResponse:
+    has_file = file is not None
+    has_url = bool((tiktok_url or "").strip())
+    if has_file == has_url:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "INVALID_SEARCH_INPUT",
+                "message": "Provide exactly one of file or tiktok_url",
+            },
+        )
+
     try:
-        result = app.state.search_manager.search_upload(file)
+        if has_file:
+            assert file is not None
+            result = app.state.search_manager.search_upload(file)
+        else:
+            assert tiktok_url is not None
+            result = app.state.search_manager.search_tiktok_url(tiktok_url)
         return SearchResponse.from_result(result)
     except SearchBusyError as exc:
         raise HTTPException(
@@ -171,6 +197,16 @@ def search_clip(file: UploadFile = File(...)) -> SearchResponse:
         raise HTTPException(
             status_code=400,
             detail={"code": "INVALID_UPLOAD", "message": str(exc)},
+        ) from exc
+    except InvalidTikTokUrlError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "INVALID_TIKTOK_URL", "message": str(exc)},
+        ) from exc
+    except DownloadError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "DOWNLOAD_ERROR", "message": str(exc)},
         ) from exc
     except RuntimeError as exc:
         raise HTTPException(
