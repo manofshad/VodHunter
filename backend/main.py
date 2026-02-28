@@ -26,7 +26,7 @@ from backend.schemas import (
 from backend.services.eventsub_handler import EventSubAuthError, EventSubHandler
 from backend.services.monitor_manager import MonitorConflictError, MonitorManager
 from backend.services.remote_clip_downloader import DownloadError, InvalidTikTokUrlError, RemoteClipDownloader
-from backend.services.search_manager import SearchBusyError, SearchInputError, SearchManager
+from backend.services.search_manager import SearchInputError, SearchManager
 from backend.services.session_query import SessionQueryService
 from pipeline.embedder import Embedder
 from search.alignment_service import AlignmentConfig, AlignmentService
@@ -91,7 +91,6 @@ async def lifespan(app: FastAPI):
 
     search_manager = SearchManager(
         search_service=search_service,
-        monitor_manager=monitor_manager,
         upload_temp_dir=config.TEMP_SEARCH_UPLOAD_DIR,
         remote_downloader=RemoteClipDownloader(
             temp_dir=config.TEMP_SEARCH_DOWNLOAD_DIR,
@@ -204,7 +203,7 @@ def list_live_sessions(
 @app.post(
     "/api/search/clip",
     response_model=SearchResponse,
-    responses={400: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
+    responses={400: {"model": ErrorResponse}},
 )
 def search_clip(
     file: UploadFile | None = File(default=None),
@@ -229,11 +228,6 @@ def search_clip(
             assert tiktok_url is not None
             result = app.state.search_manager.search_tiktok_url(tiktok_url)
         return SearchResponse.from_result(result)
-    except SearchBusyError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={"code": "SEARCH_BLOCKED", "message": str(exc)},
-        ) from exc
     except SearchInputError as exc:
         raise HTTPException(
             status_code=400,

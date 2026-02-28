@@ -4,13 +4,8 @@ import uuid
 
 from fastapi import UploadFile
 
-from backend.services.monitor_manager import MonitorManager
 from backend.services.remote_clip_downloader import RemoteClipDownloader
 from search.search_service import SearchService
-
-
-class SearchBusyError(Exception):
-    pass
 
 
 class SearchInputError(Exception):
@@ -21,19 +16,15 @@ class SearchManager:
     def __init__(
         self,
         search_service: SearchService,
-        monitor_manager: MonitorManager,
         upload_temp_dir: str,
         remote_downloader: RemoteClipDownloader,
     ):
         self.search_service = search_service
-        self.monitor_manager = monitor_manager
         self.upload_temp_dir = upload_temp_dir
         self.remote_downloader = remote_downloader
         os.makedirs(self.upload_temp_dir, exist_ok=True)
 
     def search_upload(self, file: UploadFile):
-        self._ensure_can_search()
-
         if not file.filename:
             raise SearchInputError("Uploaded file must have a filename")
 
@@ -53,8 +44,6 @@ class SearchManager:
                 os.remove(temp_path)
 
     def search_tiktok_url(self, url: str):
-        self._ensure_can_search()
-
         downloaded_path = ""
         try:
             result = self.remote_downloader.download_tiktok(url)
@@ -63,10 +52,6 @@ class SearchManager:
         finally:
             if downloaded_path:
                 self.remote_downloader.cleanup(downloaded_path)
-
-    def _ensure_can_search(self) -> None:
-        if not self.monitor_manager.can_search():
-            raise SearchBusyError("Search is unavailable while live monitor is running. Stop monitor first.")
 
     def _search_local_file(self, path: str):
         return self.search_service.search_file(path)

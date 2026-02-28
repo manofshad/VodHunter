@@ -2,6 +2,7 @@ import os
 import sqlite3
 import numpy as np
 from datetime import datetime, timezone
+from threading import RLock
 from typing import List
 
 
@@ -15,6 +16,7 @@ class VectorStore:
         self.db_path = db_path
         self.vector_file = vector_file
         self.id_file = id_file
+        self._vector_lock = RLock()
 
     # ---------- DB INIT ----------
     def init_db(self) -> None:
@@ -96,18 +98,19 @@ class VectorStore:
         if embeddings.size == 0:
             return
 
-        if os.path.exists(self.vector_file) and os.path.exists(self.id_file):
-            existing_vecs = np.load(self.vector_file)
-            existing_ids = np.load(self.id_file)
+        with self._vector_lock:
+            if os.path.exists(self.vector_file) and os.path.exists(self.id_file):
+                existing_vecs = np.load(self.vector_file)
+                existing_ids = np.load(self.id_file)
 
-            combined_vecs = np.concatenate([existing_vecs, embeddings], axis=0)
-            combined_ids = np.concatenate([existing_ids, np.array(ids)], axis=0)
-        else:
-            combined_vecs = embeddings
-            combined_ids = np.array(ids)
+                combined_vecs = np.concatenate([existing_vecs, embeddings], axis=0)
+                combined_ids = np.concatenate([existing_ids, np.array(ids)], axis=0)
+            else:
+                combined_vecs = embeddings
+                combined_ids = np.array(ids)
 
-        np.save(self.vector_file, combined_vecs)
-        np.save(self.id_file, combined_ids)
+            np.save(self.vector_file, combined_vecs)
+            np.save(self.id_file, combined_ids)
 
         print(f"💾 Saved {len(combined_vecs)} total vectors")
 
@@ -294,11 +297,12 @@ class VectorStore:
 
     # ---------- READ HELPERS ----------
     def load_vectors_and_ids(self) -> tuple[np.ndarray, np.ndarray]:
-        if not os.path.exists(self.vector_file) or not os.path.exists(self.id_file):
-            return np.array([]), np.array([])
+        with self._vector_lock:
+            if not os.path.exists(self.vector_file) or not os.path.exists(self.id_file):
+                return np.array([]), np.array([])
 
-        vectors = np.load(self.vector_file)
-        ids = np.load(self.id_file)
+            vectors = np.load(self.vector_file)
+            ids = np.load(self.id_file)
         return vectors, ids
 
     def get_fingerprint_rows(

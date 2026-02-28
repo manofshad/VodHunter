@@ -12,16 +12,8 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from backend.services.remote_clip_downloader import DownloadResult
-from backend.services.search_manager import SearchBusyError, SearchManager
+from backend.services.search_manager import SearchManager
 from search.models import SearchResult
-
-
-class FakeMonitorManager:
-    def __init__(self, can_search: bool):
-        self._can_search = can_search
-
-    def can_search(self) -> bool:
-        return self._can_search
 
 
 class FakeSearchService:
@@ -61,7 +53,6 @@ class TestSearchManager(unittest.TestCase):
             downloader = FakeDownloader(downloaded_path=clip_path)
             manager = SearchManager(
                 search_service=service,  # type: ignore[arg-type]
-                monitor_manager=FakeMonitorManager(can_search=True),  # type: ignore[arg-type]
                 upload_temp_dir=tmp,
                 remote_downloader=downloader,  # type: ignore[arg-type]
             )
@@ -83,7 +74,6 @@ class TestSearchManager(unittest.TestCase):
             downloader = FakeDownloader(downloaded_path=clip_path)
             manager = SearchManager(
                 search_service=service,  # type: ignore[arg-type]
-                monitor_manager=FakeMonitorManager(can_search=True),  # type: ignore[arg-type]
                 upload_temp_dir=tmp,
                 remote_downloader=downloader,  # type: ignore[arg-type]
             )
@@ -93,21 +83,24 @@ class TestSearchManager(unittest.TestCase):
 
             self.assertEqual(downloader.cleaned_paths, [clip_path])
 
-    def test_search_blocked_for_tiktok_when_monitor_not_idle(self) -> None:
+    def test_search_tiktok_url_not_blocked_when_monitor_would_be_busy(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
+            clip_path = os.path.join(tmp, "clip.mp4")
+            with open(clip_path, "wb") as f:
+                f.write(b"clip")
+
             service = FakeSearchService()
-            downloader = FakeDownloader(downloaded_path=os.path.join(tmp, "clip.mp4"))
+            downloader = FakeDownloader(downloaded_path=clip_path)
             manager = SearchManager(
                 search_service=service,  # type: ignore[arg-type]
-                monitor_manager=FakeMonitorManager(can_search=False),  # type: ignore[arg-type]
                 upload_temp_dir=tmp,
                 remote_downloader=downloader,  # type: ignore[arg-type]
             )
 
-            with self.assertRaises(SearchBusyError):
-                manager.search_tiktok_url("https://www.tiktok.com/@user/video/1")
+            manager.search_tiktok_url("https://www.tiktok.com/@user/video/1")
 
-            self.assertEqual(downloader.download_calls, [])
+            self.assertEqual(downloader.download_calls, ["https://www.tiktok.com/@user/video/1"])
+            self.assertEqual(service.searched_paths, [clip_path])
 
     def test_upload_temp_file_is_removed_after_search(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -115,7 +108,6 @@ class TestSearchManager(unittest.TestCase):
             downloader = FakeDownloader(downloaded_path=os.path.join(tmp, "clip.mp4"))
             manager = SearchManager(
                 search_service=service,  # type: ignore[arg-type]
-                monitor_manager=FakeMonitorManager(can_search=True),  # type: ignore[arg-type]
                 upload_temp_dir=tmp,
                 remote_downloader=downloader,  # type: ignore[arg-type]
             )
