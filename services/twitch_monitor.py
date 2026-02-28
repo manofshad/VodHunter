@@ -62,19 +62,34 @@ class TwitchMonitor:
             return self._access_token
         return self._request_access_token()
 
-    def _helix_get(self, path: str, params: dict[str, str]) -> dict[str, Any]:
+    def _helix_request(
+        self,
+        path: str,
+        method: str = "GET",
+        params: dict[str, str] | None = None,
+        body: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         token = self._ensure_token()
+        params = params or {}
         query = urllib.parse.urlencode(params)
-        url = f"https://api.twitch.tv/helix/{path}?{query}"
+        url = f"https://api.twitch.tv/helix/{path}"
+        if query:
+            url = f"{url}?{query}"
 
         def _call(token_value: str):
+            payload = None
+            headers = {
+                "Client-ID": self.client_id,
+                "Authorization": f"Bearer {token_value}",
+            }
+            if body is not None:
+                payload = json.dumps(body).encode("utf-8")
+                headers["Content-Type"] = "application/json"
             req = urllib.request.Request(
                 url,
-                headers={
-                    "Client-ID": self.client_id,
-                    "Authorization": f"Bearer {token_value}",
-                },
-                method="GET",
+                headers=headers,
+                data=payload,
+                method=method,
             )
             return urllib.request.urlopen(req, timeout=self.request_timeout)
 
@@ -89,7 +104,12 @@ class TwitchMonitor:
             else:
                 raise
 
+        if not body.strip():
+            return {}
         return json.loads(body)
+
+    def _helix_get(self, path: str, params: dict[str, str]) -> dict[str, Any]:
+        return self._helix_request(path=path, method="GET", params=params)
 
     def is_live(self, streamer: str) -> bool:
         streamer = streamer.strip()

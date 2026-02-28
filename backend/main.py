@@ -3,7 +3,7 @@ import os
 import sys
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
@@ -23,6 +23,7 @@ from backend.schemas import (
     LiveStopResponse,
     SearchResponse,
 )
+from backend.services.eventsub_handler import EventSubAuthError, EventSubHandler
 from backend.services.monitor_manager import MonitorConflictError, MonitorManager
 from backend.services.remote_clip_downloader import DownloadError, InvalidTikTokUrlError, RemoteClipDownloader
 from backend.services.search_manager import SearchBusyError, SearchInputError, SearchManager
@@ -33,6 +34,8 @@ from search.query_embedder import QueryEmbedder
 from search.query_preprocessor import QueryPreprocessor
 from search.search_service import SearchService
 from search.vector_matcher import VectorMatcher
+from services.twitch_eventsub import EventSubClient
+from services.twitch_monitor import TwitchMonitor
 from storage.vector_store import VectorStore
 
 
@@ -73,6 +76,17 @@ async def lifespan(app: FastAPI):
         archive_lag_seconds=config.LIVE_ARCHIVE_LAG_SECONDS,
         archive_poll_seconds=config.LIVE_ARCHIVE_POLL_SECONDS,
         archive_finalize_checks=config.LIVE_ARCHIVE_FINALIZE_CHECKS,
+        eventsub_client=EventSubClient(TwitchMonitor.from_env()),
+        eventsub_callback_url=config.TWITCH_EVENTSUB_CALLBACK_URL,
+        eventsub_secret=config.TWITCH_EVENTSUB_SECRET,
+        eventsub_reconcile_seconds=config.EVENTSUB_RECONCILE_SECONDS,
+        eventsub_fallback_poll_seconds=config.EVENTSUB_FALLBACK_POLL_SECONDS,
+    )
+    eventsub_handler = EventSubHandler(
+        monitor_manager=monitor_manager,
+        secret=config.TWITCH_EVENTSUB_SECRET,
+        message_ttl_seconds=config.EVENTSUB_MESSAGE_TTL_SECONDS,
+        max_clock_skew_seconds=config.EVENTSUB_MAX_CLOCK_SKEW_SECONDS,
     )
 
     search_manager = SearchManager(
@@ -91,6 +105,7 @@ async def lifespan(app: FastAPI):
     app.state.store = store
     app.state.embedder = embedder
     app.state.monitor_manager = monitor_manager
+    app.state.eventsub_handler = eventsub_handler
     app.state.search_manager = search_manager
     app.state.session_query = session_query
 
@@ -149,6 +164,32 @@ def stop_live_monitor() -> LiveStopResponse:
     stopped = app.state.monitor_manager.stop()
     status = app.state.monitor_manager.get_status()
     return LiveStopResponse(stopped=stopped, status=LiveStatusResponse(**status.__dict__))
+
+
+@app.post("/api/twitch/eventsub")
+async def handle_twitch_eventsub(request: Request) -> Response:
+    raw_body = await request.body()
+    headers = {k.lower(): v for k, v in request.headers.items()}
+    try:
+        result = app.state.eventsub_handler.process(headers=headers, raw_body=raw_body)
+    except EventSubAuthError as exc:
+        app.state.monitor_manager.mark_eventsub_degraded(str(exc))
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "EVENTSUB_AUTH_FAILED", "message": str(exc)},
+        ) from exc
+    except Exception as exc:
+        app.state.monitor_manager.mark_eventsub_degraded(f"EventSub handler error: {exc}")
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "EVENTSUB_HANDLER_ERROR", "message": str(exc)},
+        ) from exc
+
+    return Response(
+        status_code=result.status_code,
+        content=result.body,
+        media_type=result.media_type,
+    )
 
 
 @app.get("/api/live/sessions", response_model=list[LiveSessionItem])

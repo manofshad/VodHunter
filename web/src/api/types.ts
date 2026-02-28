@@ -11,6 +11,10 @@ export interface LiveStatusResponse {
   current_vod_url: string | null;
   ingest_cursor_seconds: number | null;
   lag_seconds: number | null;
+  eventsub_enabled?: boolean | null;
+  eventsub_health?: "healthy" | "degraded" | "unsubscribed" | null;
+  eventsub_last_event_at?: string | null;
+  eventsub_last_error?: string | null;
 }
 
 export interface LiveStartResponse {

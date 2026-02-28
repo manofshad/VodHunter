@@ -25,6 +25,10 @@ class LiveStatusResponse(BaseModel):
     current_vod_url: str | None
     ingest_cursor_seconds: int | None
     lag_seconds: int | None
+    eventsub_enabled: bool | None = None
+    eventsub_health: Literal["healthy", "degraded", "unsubscribed"] | None = None
+    eventsub_last_event_at: str | None = None
+    eventsub_last_error: str | None = None
 
 
 class LiveStartResponse(BaseModel):
