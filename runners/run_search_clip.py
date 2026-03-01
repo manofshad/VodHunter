@@ -9,19 +9,13 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from pipeline.embedder import Embedder
+from backend import config
 from search.alignment_service import AlignmentService, AlignmentConfig
 from search.query_embedder import QueryEmbedder
 from search.query_preprocessor import QueryPreprocessor
 from search.search_service import SearchService
 from search.vector_matcher import VectorMatcher
 from storage.vector_store import VectorStore
-
-
-DATA_DIR = ROOT_DIR / "data"
-DB_PATH = str(DATA_DIR / "metadata.db")
-VECTOR_FILE = str(DATA_DIR / "vectors.npy")
-ID_FILE = str(DATA_DIR / "ids.npy")
-TEMP_SEARCH_DIR = str(DATA_DIR / "temp_search")
 
 TOP_K = 10
 MIN_VOTE_COUNT = 3
@@ -38,16 +32,17 @@ def main() -> int:
     args = parse_args()
 
     try:
+        config.validate_storage_config()
         store = VectorStore(
-            db_path=DB_PATH,
-            vector_file=VECTOR_FILE,
-            id_file=ID_FILE,
+            database_url=config.DATABASE_URL,
+            vector_dim=config.VECTOR_DIM,
+            pgvector_probes=config.PGVECTOR_PROBES,
         )
         embedder = Embedder()
 
         service = SearchService(
             store=store,
-            preprocessor=QueryPreprocessor(temp_dir=TEMP_SEARCH_DIR),
+            preprocessor=QueryPreprocessor(temp_dir=config.TEMP_SEARCH_PREPROCESS_DIR),
             query_embedder=QueryEmbedder(embedder=embedder),
             matcher=VectorMatcher(top_k=TOP_K),
             alignment=AlignmentService(

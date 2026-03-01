@@ -45,10 +45,12 @@ async def lifespan(app: FastAPI):
     os.makedirs(config.TEMP_SEARCH_UPLOAD_DIR, exist_ok=True)
     os.makedirs(config.TEMP_SEARCH_DOWNLOAD_DIR, exist_ok=True)
 
+    config.validate_storage_config()
+
     store = VectorStore(
-        db_path=config.DB_PATH,
-        vector_file=config.VECTOR_FILE,
-        id_file=config.ID_FILE,
+        database_url=config.DATABASE_URL,
+        vector_dim=config.VECTOR_DIM,
+        pgvector_probes=config.PGVECTOR_PROBES,
     )
     store.init_db()
 
@@ -99,7 +101,7 @@ async def lifespan(app: FastAPI):
         ),
     )
 
-    session_query = SessionQueryService(db_path=config.DB_PATH)
+    session_query = SessionQueryService(store=store)
 
     app.state.store = store
     app.state.embedder = embedder

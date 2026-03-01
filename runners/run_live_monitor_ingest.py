@@ -7,6 +7,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from pipeline.embedder import Embedder
+from backend import config
 from storage.vector_store import VectorStore
 from sources.live_archive_vod_source import LiveArchiveVODSource
 from services.twitch_monitor import TwitchMonitor
@@ -14,9 +15,6 @@ from pipeline.ingest_session import IngestSession
 
 
 DATA_DIR = ROOT_DIR / "data"
-DB_PATH = str(DATA_DIR / "metadata.db")
-VECTOR_FILE = str(DATA_DIR / "vectors.npy")
-ID_FILE = str(DATA_DIR / "ids.npy")
 TEMP_DIR = str(DATA_DIR / "temp_live_chunks")
 STREAMER = "thesketchreal"
 INGEST_CHUNK_SECONDS = 60
@@ -29,10 +27,11 @@ LIVE_ARCHIVE_FINALIZE_CHECKS = 3
 
 
 def main() -> None:
+    config.validate_storage_config()
     store = VectorStore(
-        db_path=DB_PATH,
-        vector_file=VECTOR_FILE,
-        id_file=ID_FILE,
+        database_url=config.DATABASE_URL,
+        vector_dim=config.VECTOR_DIM,
+        pgvector_probes=config.PGVECTOR_PROBES,
     )
     store.init_db()
 

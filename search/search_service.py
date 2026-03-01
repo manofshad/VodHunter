@@ -31,11 +31,15 @@ class SearchService:
             if query_embeddings.size == 0:
                 return SearchResult(found=False, reason="No embeddings generated for query clip")
 
-            db_vectors, db_ids = self.store.load_vectors_and_ids()
-            if db_vectors.size == 0 or db_ids.size == 0:
+            top_k = int(getattr(self.matcher, "top_k", 10))
+            _, neighbor_ids = self.store.query_similar_fingerprint_ids(
+                query_embeddings=query_embeddings,
+                top_k=top_k,
+            )
+
+            if neighbor_ids.size == 0:
                 return SearchResult(found=False, reason="Vector index is empty")
 
-            _, neighbor_ids = self.matcher.match(query_embeddings, db_vectors, db_ids)
             alignment = self.alignment.align(neighbor_ids, query_timestamps)
 
             if not alignment.found or alignment.video_id is None:

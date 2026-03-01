@@ -11,7 +11,6 @@ if str(ROOT_DIR) not in sys.path:
 
 from backend.services.monitor_manager import MonitorManager
 from pipeline.embedder import Embedder
-from storage.vector_store import VectorStore
 
 
 class FakeTwitchMonitor:
@@ -43,6 +42,10 @@ class FakeEventSubClient:
         self.cleanup_calls += 1
 
 
+class DummyStore:
+    pass
+
+
 class TestMonitorManagerEventSub(unittest.TestCase):
     def _build_manager(
         self,
@@ -53,12 +56,7 @@ class TestMonitorManagerEventSub(unittest.TestCase):
         callback_url: str = "https://cb.example/api/twitch/eventsub",
         fallback_poll_seconds: float = 120.0,
     ) -> MonitorManager:
-        store = VectorStore(
-            db_path=f"{tmp}/meta.db",
-            vector_file=f"{tmp}/vectors.npy",
-            id_file=f"{tmp}/ids.npy",
-        )
-        store.init_db()
+        store = DummyStore()
         embedder = Embedder.__new__(Embedder)  # avoid model load in tests
         with patch("backend.services.monitor_manager.TwitchMonitor.from_env", return_value=monitor):
             manager = MonitorManager(

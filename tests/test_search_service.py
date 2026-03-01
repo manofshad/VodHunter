@@ -43,8 +43,8 @@ class FakeAlignment:
 
 
 class FakeStore:
-    def load_vectors_and_ids(self):
-        return np.array([[1.0, 0.0]], dtype=np.float32), np.array([10], dtype=np.int64)
+    def query_similar_fingerprint_ids(self, query_embeddings: np.ndarray, top_k: int):
+        return np.array([[1.0]], dtype=np.float32), np.array([[10]], dtype=np.int64)
 
     def get_video_with_creator(self, video_id: int):
         return (

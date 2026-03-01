@@ -3,7 +3,6 @@ import math
 import shutil
 import soundfile as sf
 import numpy as np
-import sqlite3
 from typing import Optional
 
 from sources.audio_source import AudioSource
@@ -19,7 +18,7 @@ class VODSource(AudioSource):
         title: str,
         chunk_seconds: int = 60,
         temp_dir: str = "temp_vod_chunks",
-        db_path: str = "metadata.db",
+        store=None,
     ):
         self.audio_path = audio_path
         self.creator_name = creator_name
@@ -27,7 +26,7 @@ class VODSource(AudioSource):
         self.title = title
         self.chunk_seconds = chunk_seconds
         self.temp_dir = temp_dir
-        self.db_path = db_path
+        self.store = store
 
         self.video_id: int | None = None
         self._chunks = []
@@ -42,30 +41,17 @@ class VODSource(AudioSource):
         """
         Prepare the VOD by splitting it into chunks.
         """
+        if self.store is None:
+            raise ValueError("VODSource requires a store instance")
+
         # ---- CREATE CREATOR + VIDEO ROW ----
-        conn = sqlite3.connect(self.db_path)
-        cur = conn.cursor()
-
-        # creator
-        cur.execute(
-            "INSERT OR IGNORE INTO creators (name, url) VALUES (?, ?)",
-            (self.creator_name, self.creator_name),
+        creator_id = self.store.create_or_get_creator(self.creator_name, self.creator_name)
+        self.video_id = self.store.create_video(
+            creator_id=creator_id,
+            url=self.video_url,
+            title=self.title,
+            processed=True,
         )
-        cur.execute(
-            "SELECT id FROM creators WHERE name = ?",
-            (self.creator_name,),
-        )
-        creator_id = cur.fetchone()[0]
-
-        # video
-        cur.execute(
-            "INSERT INTO videos (creator_id, url, title, processed) VALUES (?, ?, ?, ?)",
-            (creator_id, self.video_url, self.title, True),
-        )
-        self.video_id = cur.lastrowid
-
-        conn.commit()
-        conn.close()
 
         os.makedirs(self.temp_dir, exist_ok=True)
 

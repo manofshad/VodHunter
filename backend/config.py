@@ -4,9 +4,9 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT_DIR / "data"
 
-DB_PATH = str(DATA_DIR / "metadata.db")
-VECTOR_FILE = str(DATA_DIR / "vectors.npy")
-ID_FILE = str(DATA_DIR / "ids.npy")
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+VECTOR_DIM = int(os.getenv("VECTOR_DIM", "768"))
+PGVECTOR_PROBES = int(os.getenv("PGVECTOR_PROBES", "10"))
 TEMP_LIVE_DIR = str(DATA_DIR / "temp_live_chunks")
 TEMP_SEARCH_UPLOAD_DIR = str(DATA_DIR / "temp_search_uploads")
 TEMP_SEARCH_DOWNLOAD_DIR = str(DATA_DIR / "temp_search_downloads")
@@ -32,3 +32,8 @@ EVENTSUB_RECONCILE_SECONDS = float(os.getenv("EVENTSUB_RECONCILE_SECONDS", "300"
 EVENTSUB_FALLBACK_POLL_SECONDS = float(os.getenv("EVENTSUB_FALLBACK_POLL_SECONDS", "120"))
 EVENTSUB_MESSAGE_TTL_SECONDS = int(os.getenv("EVENTSUB_MESSAGE_TTL_SECONDS", "600"))
 EVENTSUB_MAX_CLOCK_SKEW_SECONDS = int(os.getenv("EVENTSUB_MAX_CLOCK_SKEW_SECONDS", "600"))
+
+
+def validate_storage_config() -> None:
+    if not DATABASE_URL:
+        raise ValueError("DATABASE_URL is required")
