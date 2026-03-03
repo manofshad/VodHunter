@@ -9,7 +9,8 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-import backend.main as api_main
+from backend.apps.admin import create_admin_app
+from backend.routers.eventsub import handle_twitch_eventsub
 from backend.services.eventsub_handler import EventSubAuthError, EventSubResult
 
 
@@ -34,7 +35,8 @@ class StubMonitorManager:
 
 
 class FakeRequest:
-    def __init__(self, payload: bytes, headers: dict[str, str]):
+    def __init__(self, app, payload: bytes, headers: dict[str, str]):
+        self.app = app
         self._payload = payload
         self.headers = headers
 
@@ -44,31 +46,32 @@ class FakeRequest:
 
 class TestEventSubApiEndpoint(unittest.TestCase):
     def setUp(self) -> None:
+        self.app = create_admin_app(enable_lifespan=False)
         self.handler = StubEventSubHandler()
         self.monitor = StubMonitorManager()
-        api_main.app.state.eventsub_handler = self.handler
-        api_main.app.state.monitor_manager = self.monitor
+        self.app.state.eventsub_handler = self.handler
+        self.app.state.monitor_manager = self.monitor
 
     def test_eventsub_success_returns_handler_response(self) -> None:
-        req = FakeRequest(payload=b"{}", headers={"x-test": "1"})
-        response = asyncio.run(api_main.handle_twitch_eventsub(req))  # type: ignore[arg-type]
+        req = FakeRequest(app=self.app, payload=b"{}", headers={"x-test": "1"})
+        response = asyncio.run(handle_twitch_eventsub(req))  # type: ignore[arg-type]
         self.assertEqual(response.status_code, 204)
         self.assertEqual(self.handler.calls, 1)
 
     def test_eventsub_auth_error_maps_403(self) -> None:
         self.handler.raise_exc = EventSubAuthError("bad signature")
-        req = FakeRequest(payload=b"{}", headers={})
+        req = FakeRequest(app=self.app, payload=b"{}", headers={})
         with self.assertRaises(HTTPException) as ctx:
-            asyncio.run(api_main.handle_twitch_eventsub(req))  # type: ignore[arg-type]
+            asyncio.run(handle_twitch_eventsub(req))  # type: ignore[arg-type]
         self.assertEqual(ctx.exception.status_code, 403)
         self.assertEqual(ctx.exception.detail["code"], "EVENTSUB_AUTH_FAILED")
         self.assertTrue(self.monitor.degraded_calls)
 
     def test_eventsub_generic_error_maps_400(self) -> None:
         self.handler.raise_exc = RuntimeError("broken payload")
-        req = FakeRequest(payload=b"{}", headers={})
+        req = FakeRequest(app=self.app, payload=b"{}", headers={})
         with self.assertRaises(HTTPException) as ctx:
-            asyncio.run(api_main.handle_twitch_eventsub(req))  # type: ignore[arg-type]
+            asyncio.run(handle_twitch_eventsub(req))  # type: ignore[arg-type]
         self.assertEqual(ctx.exception.status_code, 400)
         self.assertEqual(ctx.exception.detail["code"], "EVENTSUB_HANDLER_ERROR")
         self.assertTrue(self.monitor.degraded_calls)
