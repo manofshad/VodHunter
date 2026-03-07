@@ -5,7 +5,10 @@ export default function App() {
     <div className="app-shell">
       <header className="navbar">
         <div className="navbar-inner">
-          <div className="brand">Vod Hunter</div>
+          <div className="brand" aria-label="VodHunter">
+            <span className="brand-primary">Vod</span>
+            <span className="brand-accent">Hunter</span>
+          </div>
         </div>
       </header>
       <SearchPage />
