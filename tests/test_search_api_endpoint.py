@@ -13,6 +13,7 @@ from backend.apps.admin import create_admin_app
 from backend.apps.public import create_public_app
 from backend.routers.search import search_clip
 from backend.services.remote_clip_downloader import DownloadError, InvalidTikTokUrlError
+from backend.services.search_manager import InputDurationExceededError
 from search.models import SearchResult
 
 
@@ -93,6 +94,12 @@ class TestSearchApiEndpoint(unittest.TestCase):
             search_clip(request, file=None, tiktok_url="https://www.tiktok.com/@u/video/1")
         self.assertEqual(ctx.exception.status_code, 400)
         self.assertEqual(ctx.exception.detail["code"], "DOWNLOAD_ERROR")
+
+        self.search_manager.raise_url = InputDurationExceededError(duration_seconds=214.2, max_duration_seconds=180)
+        with self.assertRaises(HTTPException) as ctx:
+            search_clip(request, file=None, tiktok_url="https://www.tiktok.com/@u/video/1")
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertEqual(ctx.exception.detail["code"], "INPUT_DURATION_EXCEEDED")
 
     def test_search_endpoint_behavior_public_and_admin(self) -> None:
         for app in (create_public_app(enable_lifespan=False), create_admin_app(enable_lifespan=False)):

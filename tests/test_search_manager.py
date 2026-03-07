@@ -11,8 +11,9 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from backend.services.media_duration import MediaDurationError
 from backend.services.remote_clip_downloader import DownloadResult
-from backend.services.search_manager import SearchManager
+from backend.services.search_manager import InputDurationExceededError, SearchInputError, SearchManager
 from search.models import SearchResult
 
 
@@ -118,6 +119,68 @@ class TestSearchManager(unittest.TestCase):
             temp_files = [name for name in os.listdir(tmp) if name.startswith("upload_")]
             self.assertEqual(temp_files, [])
             self.assertEqual(len(service.searched_paths), 1)
+
+    def test_upload_rejects_when_duration_exceeds_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            service = FakeSearchService()
+            downloader = FakeDownloader(downloaded_path=os.path.join(tmp, "clip.mp4"))
+            manager = SearchManager(
+                search_service=service,  # type: ignore[arg-type]
+                upload_temp_dir=tmp,
+                remote_downloader=downloader,  # type: ignore[arg-type]
+                max_duration_seconds=180,
+                duration_probe=lambda _: 181.0,
+            )
+
+            upload = UploadFile(filename="query.mp4", file=io.BytesIO(b"video"))
+            with self.assertRaises(InputDurationExceededError):
+                manager.search_upload(upload)
+
+            self.assertEqual(service.searched_paths, [])
+
+    def test_tiktok_rejects_when_duration_exceeds_limit_and_cleans(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            clip_path = os.path.join(tmp, "clip.mp4")
+            with open(clip_path, "wb") as f:
+                f.write(b"clip")
+
+            service = FakeSearchService()
+            downloader = FakeDownloader(downloaded_path=clip_path)
+            manager = SearchManager(
+                search_service=service,  # type: ignore[arg-type]
+                upload_temp_dir=tmp,
+                remote_downloader=downloader,  # type: ignore[arg-type]
+                max_duration_seconds=180,
+                duration_probe=lambda _: 214.2,
+            )
+
+            with self.assertRaises(InputDurationExceededError):
+                manager.search_tiktok_url("https://www.tiktok.com/@user/video/1")
+
+            self.assertEqual(service.searched_paths, [])
+            self.assertEqual(downloader.cleaned_paths, [clip_path])
+
+    def test_upload_rejects_when_duration_probe_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            service = FakeSearchService()
+            downloader = FakeDownloader(downloaded_path=os.path.join(tmp, "clip.mp4"))
+
+            def bad_probe(_: str) -> float:
+                raise MediaDurationError("Could not determine input video duration")
+
+            manager = SearchManager(
+                search_service=service,  # type: ignore[arg-type]
+                upload_temp_dir=tmp,
+                remote_downloader=downloader,  # type: ignore[arg-type]
+                max_duration_seconds=180,
+                duration_probe=bad_probe,
+            )
+
+            upload = UploadFile(filename="query.mp4", file=io.BytesIO(b"video"))
+            with self.assertRaises(SearchInputError):
+                manager.search_upload(upload)
+
+            self.assertEqual(service.searched_paths, [])
 
 
 if __name__ == "__main__":

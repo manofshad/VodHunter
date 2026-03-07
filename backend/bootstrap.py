@@ -40,7 +40,11 @@ def build_common_state() -> dict[str, object]:
     }
 
 
-def build_search_stack(store: VectorStore, embedder: Embedder) -> dict[str, object]:
+def build_search_stack(
+    store: VectorStore,
+    embedder: Embedder,
+    max_duration_seconds: int | None,
+) -> dict[str, object]:
     search_service = SearchService(
         store=store,
         preprocessor=QueryPreprocessor(temp_dir=config.TEMP_SEARCH_PREPROCESS_DIR),
@@ -60,6 +64,7 @@ def build_search_stack(store: VectorStore, embedder: Embedder) -> dict[str, obje
             timeout_seconds=config.TIKTOK_DOWNLOAD_TIMEOUT_SECONDS,
             max_file_mb=config.TIKTOK_MAX_FILE_MB,
         ),
+        max_duration_seconds=max_duration_seconds,
     )
 
     return {

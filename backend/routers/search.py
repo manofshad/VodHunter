@@ -2,7 +2,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
 from backend.schemas import ErrorResponse, SearchResponse
 from backend.services.remote_clip_downloader import DownloadError, InvalidTikTokUrlError
-from backend.services.search_manager import SearchInputError
+from backend.services.search_manager import InputDurationExceededError, SearchInputError
 
 router = APIRouter(prefix="/api", tags=["search"])
 
@@ -38,6 +38,11 @@ def search_clip(
             assert tiktok_url is not None
             result = search_manager.search_tiktok_url(tiktok_url)
         return SearchResponse.from_result(result)
+    except InputDurationExceededError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "INPUT_DURATION_EXCEEDED", "message": str(exc)},
+        ) from exc
     except SearchInputError as exc:
         raise HTTPException(
             status_code=400,

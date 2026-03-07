@@ -1,20 +1,50 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useRef, useState } from "react";
 
 import { searchClip } from "../api/client";
 import { SearchResponse } from "../api/types";
 
 export default function SearchPage() {
+  const MAX_UPLOAD_DURATION_SECONDS = 180;
   const [file, setFile] = useState<File | null>(null);
   const [tiktokUrl, setTiktokUrl] = useState<string>("");
   const [result, setResult] = useState<SearchResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState<boolean>(false);
+  const [validatingFile, setValidatingFile] = useState<boolean>(false);
+  const fileSelectionTokenRef = useRef(0);
 
   const hasUrl = tiktokUrl.trim().length > 0;
+
+  const readMediaDurationSeconds = (inputFile: File): Promise<number> =>
+    new Promise((resolve, reject) => {
+      const media = document.createElement(inputFile.type.startsWith("audio/") ? "audio" : "video");
+      const objectUrl = URL.createObjectURL(inputFile);
+      const cleanup = () => {
+        URL.revokeObjectURL(objectUrl);
+        media.removeAttribute("src");
+      };
+
+      media.preload = "metadata";
+      media.onloadedmetadata = () => {
+        const duration = media.duration;
+        cleanup();
+        if (!Number.isFinite(duration) || duration <= 0) {
+          reject(new Error("Could not read file duration"));
+          return;
+        }
+        resolve(duration);
+      };
+      media.onerror = () => {
+        cleanup();
+        reject(new Error("Could not read file duration"));
+      };
+      media.src = objectUrl;
+    });
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!file && !hasUrl) return;
+    if (validatingFile) return;
 
     try {
       setSubmitting(true);
@@ -41,7 +71,7 @@ export default function SearchPage() {
 
       <section className="search-panel">
         <h2>Search Clip</h2>
-        <p className="hint">Use one input at a time. Adding one source disables the other.</p>
+        <p className="hint">Use one input at a time. Adding one source disables the other. Max duration: 3 minutes.</p>
         <form onSubmit={onSubmit} className="search-form">
           <div className="field">
             <label htmlFor="clip-file">Upload clip</label>
@@ -49,12 +79,41 @@ export default function SearchPage() {
               id="clip-file"
               type="file"
               accept="audio/*,video/*"
-              disabled={submitting || hasUrl}
-              onChange={(e) => {
+              disabled={submitting || hasUrl || validatingFile}
+              onChange={async (e) => {
                 const next = e.target.files?.[0] ?? null;
-                setFile(next);
-                if (next) {
-                  setTiktokUrl("");
+                const nextSelectionToken = fileSelectionTokenRef.current + 1;
+                fileSelectionTokenRef.current = nextSelectionToken;
+                if (!next) {
+                  setFile(null);
+                  return;
+                }
+                setTiktokUrl("");
+                setError(null);
+                setResult(null);
+                setValidatingFile(true);
+
+                try {
+                  const duration = await readMediaDurationSeconds(next);
+                  if (fileSelectionTokenRef.current != nextSelectionToken) {
+                    return;
+                  }
+                  if (duration > MAX_UPLOAD_DURATION_SECONDS) {
+                    setFile(null);
+                    setError(`Uploaded file is ${Math.ceil(duration)}s; maximum allowed is ${MAX_UPLOAD_DURATION_SECONDS}s`);
+                    return;
+                  }
+                  setFile(next);
+                } catch {
+                  if (fileSelectionTokenRef.current != nextSelectionToken) {
+                    return;
+                  }
+                  setFile(null);
+                  setError("Could not read uploaded file duration");
+                } finally {
+                  if (fileSelectionTokenRef.current == nextSelectionToken) {
+                    setValidatingFile(false);
+                  }
                 }
               }}
             />
@@ -78,8 +137,8 @@ export default function SearchPage() {
             />
           </div>
 
-          <button type="submit" disabled={submitting || (!file && !hasUrl)}>
-            {submitting ? "Searching..." : "Search"}
+          <button type="submit" disabled={submitting || validatingFile || (!file && !hasUrl)}>
+            {submitting ? "Searching..." : validatingFile ? "Validating file..." : "Search"}
           </button>
         </form>
       </section>
