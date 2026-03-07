@@ -72,3 +72,7 @@ class SearchResponse(BaseModel):
             score=result.score,
             reason=result.reason,
         )
+
+
+class StreamerListItem(BaseModel):
+    name: str = Field(min_length=1, max_length=100)

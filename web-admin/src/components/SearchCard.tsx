@@ -1,7 +1,7 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
-import { searchClip } from "../api/client";
-import { LiveStatusResponse, SearchResponse } from "../api/types";
+import { listSearchableStreamers, searchClip } from "../api/client";
+import { LiveStatusResponse, SearchResponse, StreamerListItem } from "../api/types";
 
 interface Props {
   liveStatus: LiveStatusResponse;
@@ -10,23 +10,59 @@ interface Props {
 export default function SearchCard({ liveStatus }: Props) {
   const [file, setFile] = useState<File | null>(null);
   const [tiktokUrl, setTiktokUrl] = useState<string>("");
+  const [streamer, setStreamer] = useState<string>("");
+  const [streamers, setStreamers] = useState<StreamerListItem[]>([]);
+  const [loadingStreamers, setLoadingStreamers] = useState<boolean>(true);
   const [result, setResult] = useState<SearchResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState<boolean>(false);
 
   const blocked = liveStatus.state !== "idle";
   const hasUrl = tiktokUrl.trim().length > 0;
+  const hasStreamer = streamer.trim().length > 0;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadStreamers = async () => {
+      try {
+        setLoadingStreamers(true);
+        const next = await listSearchableStreamers();
+        if (cancelled) return;
+        setStreamers(next);
+        setStreamer((current) => {
+          if (current && next.some((item) => item.name === current)) {
+            return current;
+          }
+          return "";
+        });
+      } catch (err) {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : "Could not load streamers");
+      } finally {
+        if (!cancelled) {
+          setLoadingStreamers(false);
+        }
+      }
+    };
+
+    void loadStreamers();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!file && !hasUrl) return;
+    if (!hasStreamer || (!file && !hasUrl)) return;
 
     try {
       setSubmitting(true);
       setError(null);
       const next = file
-        ? await searchClip({ type: "file", file })
-        : await searchClip({ type: "tiktok_url", tiktokUrl: tiktokUrl.trim() });
+        ? await searchClip({ type: "file", file, streamer })
+        : await searchClip({ type: "tiktok_url", tiktokUrl: tiktokUrl.trim(), streamer });
       setResult(next);
     } catch (err) {
       setResult(null);
@@ -40,6 +76,24 @@ export default function SearchCard({ liveStatus }: Props) {
     <section className="card">
       <h2>Clip Search</h2>
       <form onSubmit={onSubmit} className="row">
+        <select
+          value={streamer}
+          onChange={(e) => {
+            setStreamer(e.target.value);
+            setError(null);
+            setResult(null);
+          }}
+          disabled={submitting || blocked || loadingStreamers || streamers.length === 0}
+        >
+          <option value="" disabled>
+            {loadingStreamers ? "Loading streamers..." : streamers.length === 0 ? "No searchable streamers" : "Select streamer"}
+          </option>
+          {streamers.map((item) => (
+            <option key={item.name} value={item.name}>
+              {item.name}
+            </option>
+          ))}
+        </select>
         <input
           type="file"
           accept="audio/*,video/*"
@@ -50,7 +104,7 @@ export default function SearchCard({ liveStatus }: Props) {
               setTiktokUrl("");
             }
           }}
-          disabled={submitting || blocked || hasUrl}
+          disabled={submitting || blocked || hasUrl || !hasStreamer}
         />
         <input
           type="url"
@@ -63,9 +117,9 @@ export default function SearchCard({ liveStatus }: Props) {
               setFile(null);
             }
           }}
-          disabled={submitting || blocked || !!file}
+          disabled={submitting || blocked || !!file || !hasStreamer}
         />
-        <button type="submit" disabled={submitting || blocked || (!file && !hasUrl)}>
+        <button type="submit" disabled={submitting || blocked || !hasStreamer || (!file && !hasUrl)}>
           Search
         </button>
       </form>

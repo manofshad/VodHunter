@@ -119,6 +119,7 @@ label {
 }
 
 input,
+select,
 button {
   font: inherit;
   border-radius: 12px;
@@ -127,12 +128,14 @@ button {
   transition: all 150ms ease;
 }
 
-input {
+input,
+select {
   color: var(--text);
   background: color-mix(in srgb, var(--surface) 72%, black);
 }
 
 input:focus-visible,
+select:focus-visible,
 button:focus-visible,
 .result-link:focus-visible {
   outline: none;
@@ -150,7 +153,8 @@ input::file-selector-button {
   cursor: pointer;
 }
 
-input:disabled {
+input:disabled,
+select:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }

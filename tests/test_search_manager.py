@@ -19,11 +19,11 @@ from search.models import SearchResult
 
 class FakeSearchService:
     def __init__(self):
-        self.searched_paths: list[str] = []
+        self.searched_paths: list[tuple[str, str]] = []
         self.raise_on_search = False
 
-    def search_file(self, path: str) -> SearchResult:
-        self.searched_paths.append(path)
+    def search_file(self, path: str, streamer: str) -> SearchResult:
+        self.searched_paths.append((path, streamer))
         if self.raise_on_search:
             raise RuntimeError("search failed")
         return SearchResult(found=False, reason="no match")
@@ -58,10 +58,10 @@ class TestSearchManager(unittest.TestCase):
                 remote_downloader=downloader,  # type: ignore[arg-type]
             )
 
-            manager.search_tiktok_url("https://www.tiktok.com/@user/video/1")
+            manager.search_tiktok_url("https://www.tiktok.com/@user/video/1", "xqc")
 
             self.assertEqual(downloader.download_calls, ["https://www.tiktok.com/@user/video/1"])
-            self.assertEqual(service.searched_paths, [clip_path])
+            self.assertEqual(service.searched_paths, [(clip_path, "xqc")])
             self.assertEqual(downloader.cleaned_paths, [clip_path])
 
     def test_search_tiktok_url_cleans_up_on_search_failure(self) -> None:
@@ -80,7 +80,7 @@ class TestSearchManager(unittest.TestCase):
             )
 
             with self.assertRaises(RuntimeError):
-                manager.search_tiktok_url("https://www.tiktok.com/@user/video/1")
+                manager.search_tiktok_url("https://www.tiktok.com/@user/video/1", "xqc")
 
             self.assertEqual(downloader.cleaned_paths, [clip_path])
 
@@ -98,10 +98,10 @@ class TestSearchManager(unittest.TestCase):
                 remote_downloader=downloader,  # type: ignore[arg-type]
             )
 
-            manager.search_tiktok_url("https://www.tiktok.com/@user/video/1")
+            manager.search_tiktok_url("https://www.tiktok.com/@user/video/1", "xqc")
 
             self.assertEqual(downloader.download_calls, ["https://www.tiktok.com/@user/video/1"])
-            self.assertEqual(service.searched_paths, [clip_path])
+            self.assertEqual(service.searched_paths, [(clip_path, "xqc")])
 
     def test_upload_temp_file_is_removed_after_search(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -114,11 +114,11 @@ class TestSearchManager(unittest.TestCase):
             )
 
             upload = UploadFile(filename="query.mp4", file=io.BytesIO(b"video"))
-            manager.search_upload(upload)
+            manager.search_upload(upload, "xqc")
 
             temp_files = [name for name in os.listdir(tmp) if name.startswith("upload_")]
             self.assertEqual(temp_files, [])
-            self.assertEqual(len(service.searched_paths), 1)
+            self.assertEqual(service.searched_paths[0][1], "xqc")
 
     def test_upload_rejects_when_duration_exceeds_limit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -134,7 +134,7 @@ class TestSearchManager(unittest.TestCase):
 
             upload = UploadFile(filename="query.mp4", file=io.BytesIO(b"video"))
             with self.assertRaises(InputDurationExceededError):
-                manager.search_upload(upload)
+                manager.search_upload(upload, "xqc")
 
             self.assertEqual(service.searched_paths, [])
 
@@ -155,7 +155,7 @@ class TestSearchManager(unittest.TestCase):
             )
 
             with self.assertRaises(InputDurationExceededError):
-                manager.search_tiktok_url("https://www.tiktok.com/@user/video/1")
+                manager.search_tiktok_url("https://www.tiktok.com/@user/video/1", "xqc")
 
             self.assertEqual(service.searched_paths, [])
             self.assertEqual(downloader.cleaned_paths, [clip_path])
@@ -178,9 +178,23 @@ class TestSearchManager(unittest.TestCase):
 
             upload = UploadFile(filename="query.mp4", file=io.BytesIO(b"video"))
             with self.assertRaises(SearchInputError):
-                manager.search_upload(upload)
+                manager.search_upload(upload, "xqc")
 
             self.assertEqual(service.searched_paths, [])
+
+    def test_search_requires_streamer(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            service = FakeSearchService()
+            downloader = FakeDownloader(downloaded_path=os.path.join(tmp, "clip.mp4"))
+            manager = SearchManager(
+                search_service=service,  # type: ignore[arg-type]
+                upload_temp_dir=tmp,
+                remote_downloader=downloader,  # type: ignore[arg-type]
+            )
+
+            upload = UploadFile(filename="query.mp4", file=io.BytesIO(b"video"))
+            with self.assertRaises(SearchInputError):
+                manager.search_upload(upload, "   ")
 
 
 if __name__ == "__main__":

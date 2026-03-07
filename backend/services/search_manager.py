@@ -39,7 +39,7 @@ class SearchManager:
         self.duration_probe = duration_probe
         os.makedirs(self.upload_temp_dir, exist_ok=True)
 
-    def search_upload(self, file: UploadFile):
+    def search_upload(self, file: UploadFile, streamer: str):
         if not file.filename:
             raise SearchInputError("Uploaded file must have a filename")
 
@@ -54,18 +54,18 @@ class SearchManager:
                 raise SearchInputError("Uploaded file is empty")
 
             self._validate_duration(temp_path)
-            return self._search_local_file(temp_path)
+            return self._search_local_file(temp_path, streamer)
         finally:
             if os.path.exists(temp_path):
                 os.remove(temp_path)
 
-    def search_tiktok_url(self, url: str):
+    def search_tiktok_url(self, url: str, streamer: str):
         downloaded_path = ""
         try:
             result = self.remote_downloader.download_tiktok(url)
             downloaded_path = result.path
             self._validate_duration(downloaded_path)
-            return self._search_local_file(downloaded_path)
+            return self._search_local_file(downloaded_path, streamer)
         finally:
             if downloaded_path:
                 self.remote_downloader.cleanup(downloaded_path)
@@ -84,5 +84,8 @@ class SearchManager:
                 max_duration_seconds=self.max_duration_seconds,
             )
 
-    def _search_local_file(self, path: str):
-        return self.search_service.search_file(path)
+    def _search_local_file(self, path: str, streamer: str):
+        normalized_streamer = streamer.strip().lower()
+        if not normalized_streamer:
+            raise SearchInputError("streamer is required")
+        return self.search_service.search_file(path, normalized_streamer)

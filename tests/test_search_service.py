@@ -43,7 +43,11 @@ class FakeAlignment:
 
 
 class FakeStore:
-    def query_similar_fingerprint_ids(self, query_embeddings: np.ndarray, top_k: int):
+    def __init__(self):
+        self.last_streamer: str | None = None
+
+    def query_similar_fingerprint_ids(self, query_embeddings: np.ndarray, top_k: int, streamer: str):
+        self.last_streamer = streamer
         return np.array([[1.0]], dtype=np.float32), np.array([[10]], dtype=np.int64)
 
     def get_video_with_creator(self, video_id: int):
@@ -57,8 +61,9 @@ class FakeStore:
 
 class TestSearchService(unittest.TestCase):
     def test_found_result_includes_timestamp_url(self) -> None:
+        store = FakeStore()
         service = SearchService(
-            store=FakeStore(),  # type: ignore[arg-type]
+            store=store,  # type: ignore[arg-type]
             preprocessor=FakePreprocessor(),  # type: ignore[arg-type]
             query_embedder=FakeQueryEmbedder(
                 embeddings=np.array([[0.1, 0.2]], dtype=np.float32),
@@ -76,9 +81,10 @@ class TestSearchService(unittest.TestCase):
             ),  # type: ignore[arg-type]
         )
 
-        result = service.search_file("clip.mp4")
+        result = service.search_file("clip.mp4", "xQc")
 
         self.assertTrue(result.found)
+        self.assertEqual(store.last_streamer, "xqc")
         self.assertEqual(result.video_url_at_timestamp, "https://www.twitch.tv/videos/2699020769?t=22m48s")
 
     def test_not_found_result_has_no_timestamp_url(self) -> None:
@@ -98,7 +104,7 @@ class TestSearchService(unittest.TestCase):
             ),  # type: ignore[arg-type]
         )
 
-        result = service.search_file("clip.mp4")
+        result = service.search_file("clip.mp4", "xqc")
 
         self.assertFalse(result.found)
         self.assertIsNone(result.video_url_at_timestamp)

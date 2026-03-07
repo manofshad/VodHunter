@@ -48,9 +48,11 @@ class FakeAlignment:
 class FakeStoreWithKnn:
     def __init__(self):
         self.called = 0
+        self.streamer: str | None = None
 
-    def query_similar_fingerprint_ids(self, query_embeddings: np.ndarray, top_k: int):
+    def query_similar_fingerprint_ids(self, query_embeddings: np.ndarray, top_k: int, streamer: str):
         self.called += 1
+        self.streamer = streamer
         return (
             np.array([[0.99]], dtype=np.float32),
             np.array([[10]], dtype=np.int64),
@@ -76,10 +78,11 @@ class TestSearchServiceStoreKnn(unittest.TestCase):
             alignment=FakeAlignment(),  # type: ignore[arg-type]
         )
 
-        result = service.search_file("clip.mp4")
+        result = service.search_file("clip.mp4", "xQc")
 
         self.assertTrue(result.found)
         self.assertEqual(store.called, 1)
+        self.assertEqual(store.streamer, "xqc")
 
 
 if __name__ == "__main__":

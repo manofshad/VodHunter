@@ -22,9 +22,13 @@ class SearchService:
         self.matcher = matcher
         self.alignment = alignment
 
-    def search_file(self, clip_path: str) -> SearchResult:
+    def search_file(self, clip_path: str, streamer: str) -> SearchResult:
         prepared_wav = None
         try:
+            normalized_streamer = streamer.strip().lower()
+            if not normalized_streamer:
+                raise ValueError("streamer is required")
+
             prepared_wav = self.preprocessor.prepare(clip_path)
             query_embeddings, query_timestamps = self.query_embedder.embed(prepared_wav)
 
@@ -35,19 +39,28 @@ class SearchService:
             _, neighbor_ids = self.store.query_similar_fingerprint_ids(
                 query_embeddings=query_embeddings,
                 top_k=top_k,
+                streamer=normalized_streamer,
             )
 
             if neighbor_ids.size == 0:
-                return SearchResult(found=False, reason="Vector index is empty")
+                return SearchResult(found=False, streamer=normalized_streamer, reason=f"No indexed clips found for streamer: {normalized_streamer}")
 
             alignment = self.alignment.align(neighbor_ids, query_timestamps)
 
             if not alignment.found or alignment.video_id is None:
-                return SearchResult(found=False, reason=alignment.reason or "No aligned match found")
+                return SearchResult(
+                    found=False,
+                    streamer=normalized_streamer,
+                    reason=alignment.reason or "No aligned match found",
+                )
 
             video_row = self.store.get_video_with_creator(alignment.video_id)
             if video_row is None:
-                return SearchResult(found=False, reason="Aligned video metadata not found")
+                return SearchResult(
+                    found=False,
+                    streamer=normalized_streamer,
+                    reason="Aligned video metadata not found",
+                )
 
             video_id, video_url, title, streamer = video_row
             video_url_at_timestamp = build_twitch_timestamp_url(video_url, alignment.timestamp_seconds)

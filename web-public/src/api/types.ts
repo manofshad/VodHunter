@@ -9,3 +9,7 @@ export interface SearchResponse {
   score: number | null;
   reason: string | null;
 }
+
+export interface StreamerListItem {
+  name: string;
+}

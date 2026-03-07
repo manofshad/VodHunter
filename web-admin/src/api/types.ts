@@ -46,6 +46,10 @@ export interface SearchResponse {
   reason: string | null;
 }
 
+export interface StreamerListItem {
+  name: string;
+}
+
 export interface ApiError {
   detail?: {
     code?: string;

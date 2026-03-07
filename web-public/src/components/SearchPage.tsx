@@ -1,12 +1,15 @@
-import { FormEvent, useRef, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 
-import { searchClip } from "../api/client";
-import { SearchResponse } from "../api/types";
+import { listSearchableStreamers, searchClip } from "../api/client";
+import { SearchResponse, StreamerListItem } from "../api/types";
 
 export default function SearchPage() {
   const MAX_UPLOAD_DURATION_SECONDS = 180;
   const [file, setFile] = useState<File | null>(null);
   const [tiktokUrl, setTiktokUrl] = useState<string>("");
+  const [streamer, setStreamer] = useState<string>("");
+  const [streamers, setStreamers] = useState<StreamerListItem[]>([]);
+  const [loadingStreamers, setLoadingStreamers] = useState<boolean>(true);
   const [result, setResult] = useState<SearchResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState<boolean>(false);
@@ -14,6 +17,39 @@ export default function SearchPage() {
   const fileSelectionTokenRef = useRef(0);
 
   const hasUrl = tiktokUrl.trim().length > 0;
+  const hasStreamer = streamer.trim().length > 0;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadStreamers = async () => {
+      try {
+        setLoadingStreamers(true);
+        const next = await listSearchableStreamers();
+        if (cancelled) return;
+        setStreamers(next);
+        setStreamer((current) => {
+          if (current && next.some((item) => item.name === current)) {
+            return current;
+          }
+          return "";
+        });
+      } catch (err) {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : "Could not load streamers");
+      } finally {
+        if (!cancelled) {
+          setLoadingStreamers(false);
+        }
+      }
+    };
+
+    void loadStreamers();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const readMediaDurationSeconds = (inputFile: File): Promise<number> =>
     new Promise((resolve, reject) => {
@@ -43,7 +79,7 @@ export default function SearchPage() {
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!file && !hasUrl) return;
+    if (!hasStreamer || (!file && !hasUrl)) return;
     if (validatingFile) return;
 
     try {
@@ -52,8 +88,8 @@ export default function SearchPage() {
       setResult(null);
 
       const next = file
-        ? await searchClip({ type: "file", file })
-        : await searchClip({ type: "tiktok_url", tiktokUrl: tiktokUrl.trim() });
+        ? await searchClip({ type: "file", file, streamer })
+        : await searchClip({ type: "tiktok_url", tiktokUrl: tiktokUrl.trim(), streamer });
       setResult(next);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Search failed");
@@ -71,15 +107,38 @@ export default function SearchPage() {
 
       <section className="search-panel">
         <h2>Search Clip</h2>
-        <p className="hint">Use one input at a time. Adding one source disables the other. Max duration: 3 minutes.</p>
+        <p className="hint">Choose a streamer first, then use one input at a time. Max duration: 3 minutes.</p>
         <form onSubmit={onSubmit} className="search-form">
+          <div className="field">
+            <label htmlFor="streamer-select">Streamer</label>
+            <select
+              id="streamer-select"
+              value={streamer}
+              disabled={submitting || validatingFile || loadingStreamers || streamers.length === 0}
+              onChange={(e) => {
+                setStreamer(e.target.value);
+                setError(null);
+                setResult(null);
+              }}
+            >
+              <option value="" disabled>
+                {loadingStreamers ? "Loading streamers..." : streamers.length === 0 ? "No searchable streamers" : "Select a streamer"}
+              </option>
+              {streamers.map((item) => (
+                <option key={item.name} value={item.name}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div className="field">
             <label htmlFor="clip-file">Upload clip</label>
             <input
               id="clip-file"
               type="file"
               accept="audio/*,video/*"
-              disabled={submitting || hasUrl || validatingFile}
+              disabled={submitting || hasUrl || validatingFile || !hasStreamer}
               onChange={async (e) => {
                 const next = e.target.files?.[0] ?? null;
                 const nextSelectionToken = fileSelectionTokenRef.current + 1;
@@ -126,7 +185,7 @@ export default function SearchPage() {
               type="url"
               placeholder="https://www.tiktok.com/@user/video/..."
               value={tiktokUrl}
-              disabled={submitting || !!file}
+              disabled={submitting || !!file || !hasStreamer}
               onChange={(e) => {
                 const next = e.target.value;
                 setTiktokUrl(next);
@@ -137,7 +196,7 @@ export default function SearchPage() {
             />
           </div>
 
-          <button type="submit" disabled={submitting || validatingFile || (!file && !hasUrl)}>
+          <button type="submit" disabled={submitting || validatingFile || !hasStreamer || (!file && !hasUrl)}>
             {submitting ? "Searching..." : validatingFile ? "Validating file..." : "Search"}
           </button>
         </form>

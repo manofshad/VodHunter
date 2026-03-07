@@ -111,6 +111,7 @@ class VectorStore:
                     """
                 )
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_videos_creator_id ON videos(creator_id)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_creators_lower_name ON creators((LOWER(name)))")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_videos_url ON videos(url)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_fingerprints_video_id ON fingerprints(video_id)")
 
@@ -290,9 +291,14 @@ class VectorStore:
         self,
         query_embeddings: np.ndarray,
         top_k: int,
+        streamer: str,
     ) -> tuple[np.ndarray, np.ndarray]:
         if query_embeddings.size == 0:
             return np.empty((0, 0), dtype=np.float32), np.empty((0, 0), dtype=np.int64)
+
+        normalized_streamer = streamer.strip().lower()
+        if not normalized_streamer:
+            raise ValueError("streamer is required")
 
         query_rows = [query_embeddings[idx].astype(np.float32).tolist() for idx in range(query_embeddings.shape[0])]
         all_scores: list[list[float]] = []
@@ -305,12 +311,16 @@ class VectorStore:
                 for q in query_rows:
                     cur.execute(
                         """
-                        SELECT fingerprint_id, (1 - (embedding <=> %s::vector)) AS score
-                        FROM fingerprint_embeddings
-                        ORDER BY embedding <=> %s::vector
+                        SELECT fe.fingerprint_id, (1 - (fe.embedding <=> %s::vector)) AS score
+                        FROM fingerprint_embeddings fe
+                        JOIN fingerprints f ON f.id = fe.fingerprint_id
+                        JOIN videos v ON v.id = f.video_id
+                        JOIN creators c ON c.id = v.creator_id
+                        WHERE LOWER(c.name) = %s
+                        ORDER BY fe.embedding <=> %s::vector
                         LIMIT %s
                         """,
-                        (q, q, int(top_k)),
+                        (q, normalized_streamer, q, int(top_k)),
                     )
                     rows = cur.fetchall()
                     all_ids.append([int(r[0]) for r in rows])
@@ -387,3 +397,21 @@ class VectorStore:
             }
             for r in rows
         ]
+
+    def list_searchable_streamers(self) -> list[str]:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT c.name
+                    FROM creators c
+                    JOIN videos v ON v.creator_id = c.id
+                    JOIN fingerprints f ON f.video_id = v.id
+                    JOIN fingerprint_embeddings fe ON fe.fingerprint_id = f.id
+                    WHERE c.name IS NOT NULL AND BTRIM(c.name) <> ''
+                    GROUP BY c.name
+                    ORDER BY LOWER(c.name), c.name
+                    """
+                )
+                rows = cur.fetchall()
+        return [str(r[0]) for r in rows]
