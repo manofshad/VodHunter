@@ -7,7 +7,7 @@ import uuid
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("uvicorn.error")
 
 
 class InvalidTikTokUrlError(Exception):

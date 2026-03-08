@@ -12,7 +12,7 @@ from backend.services.media_duration import MediaDurationError, probe_media_dura
 from backend.services.remote_clip_downloader import RemoteClipDownloader
 from search.search_service import SearchService
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("uvicorn.error")
 
 
 class SearchInputError(Exception):

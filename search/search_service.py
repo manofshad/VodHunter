@@ -9,7 +9,7 @@ from search.twitch_time import build_twitch_timestamp_url
 from search.vector_matcher import VectorMatcher
 from storage.vector_store import VectorStore
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("uvicorn.error")
 
 
 class SearchService:
