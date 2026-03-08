@@ -12,7 +12,8 @@ RUN apt-get update \
 COPY backend/requirements.txt ./backend/requirements.txt
 
 RUN pip install --no-cache-dir -r backend/requirements.txt \
-    && pip install --no-cache-dir numpy soundfile torch transformers
+    && pip install --no-cache-dir numpy soundfile transformers \
+    && pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch
 
 COPY backend ./backend
 COPY search ./search
@@ -26,4 +27,3 @@ RUN mkdir -p data/temp_search_uploads data/temp_search_downloads data/temp_searc
 EXPOSE 8000
 
 CMD ["uvicorn", "backend.apps.public:app", "--host", "0.0.0.0", "--port", "8000"]
-
