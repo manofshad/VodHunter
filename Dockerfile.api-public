@@ -1,0 +1,29 @@
+FROM python:3.11-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg yt-dlp libsndfile1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY backend/requirements.txt ./backend/requirements.txt
+
+RUN pip install --no-cache-dir -r backend/requirements.txt \
+    && pip install --no-cache-dir numpy soundfile torch transformers
+
+COPY backend ./backend
+COPY search ./search
+COPY pipeline ./pipeline
+COPY storage ./storage
+COPY sources ./sources
+COPY services ./services
+
+RUN mkdir -p data/temp_search_uploads data/temp_search_downloads data/temp_search
+
+EXPOSE 8000
+
+CMD ["uvicorn", "backend.apps.public:app", "--host", "0.0.0.0", "--port", "8000"]
+
