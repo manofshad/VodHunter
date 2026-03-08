@@ -1,9 +1,13 @@
 import glob
+import logging
 import os
 import subprocess
+import time
 import uuid
 from dataclasses import dataclass
 from urllib.parse import urlparse
+
+logger = logging.getLogger(__name__)
 
 
 class InvalidTikTokUrlError(Exception):
@@ -58,6 +62,7 @@ class RemoteClipDownloader:
         url = self.validate_tiktok_url(raw_url)
         token = uuid.uuid4().hex
         output_template = os.path.join(self.temp_dir, f"tiktok_{token}.%(ext)s")
+        download_started_at = time.perf_counter()
 
         cmd = [
             "yt-dlp",
@@ -100,6 +105,11 @@ class RemoteClipDownloader:
                 self.cleanup(downloaded_path)
                 raise DownloadError(f"Downloaded file exceeds {self.max_file_mb}MB limit")
 
+        logger.info(
+            "timing event=tiktok_download seconds=%.2f size_bytes=%d",
+            time.perf_counter() - download_started_at,
+            size_bytes,
+        )
         return DownloadResult(path=downloaded_path)
 
     def cleanup(self, path: str) -> None:

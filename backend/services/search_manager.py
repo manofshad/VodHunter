@@ -1,7 +1,9 @@
+import logging
 import os
 import shutil
 import uuid
 import math
+import time
 from typing import Callable
 
 from fastapi import UploadFile
@@ -9,6 +11,8 @@ from fastapi import UploadFile
 from backend.services.media_duration import MediaDurationError, probe_media_duration_seconds
 from backend.services.remote_clip_downloader import RemoteClipDownloader
 from search.search_service import SearchService
+
+logger = logging.getLogger(__name__)
 
 
 class SearchInputError(Exception):
@@ -45,6 +49,7 @@ class SearchManager:
 
         suffix = os.path.splitext(file.filename)[1] or ".bin"
         temp_path = os.path.join(self.upload_temp_dir, f"upload_{uuid.uuid4().hex}{suffix}")
+        request_started_at = time.perf_counter()
 
         try:
             with open(temp_path, "wb") as out:
@@ -54,18 +59,31 @@ class SearchManager:
                 raise SearchInputError("Uploaded file is empty")
 
             self._validate_duration(temp_path)
-            return self._search_local_file(temp_path, streamer)
+            result = self._search_local_file(temp_path, streamer)
+            logger.info(
+                "timing event=search_upload seconds=%.2f streamer=%s",
+                time.perf_counter() - request_started_at,
+                streamer.strip().lower(),
+            )
+            return result
         finally:
             if os.path.exists(temp_path):
                 os.remove(temp_path)
 
     def search_tiktok_url(self, url: str, streamer: str):
         downloaded_path = ""
+        request_started_at = time.perf_counter()
         try:
             result = self.remote_downloader.download_tiktok(url)
             downloaded_path = result.path
             self._validate_duration(downloaded_path)
-            return self._search_local_file(downloaded_path, streamer)
+            search_result = self._search_local_file(downloaded_path, streamer)
+            logger.info(
+                "timing event=search_tiktok_url seconds=%.2f streamer=%s",
+                time.perf_counter() - request_started_at,
+                streamer.strip().lower(),
+            )
+            return search_result
         finally:
             if downloaded_path:
                 self.remote_downloader.cleanup(downloaded_path)
@@ -73,10 +91,17 @@ class SearchManager:
     def _validate_duration(self, path: str) -> None:
         if self.max_duration_seconds is None:
             return
+        started_at = time.perf_counter()
         try:
             duration_seconds = self.duration_probe(path)
         except MediaDurationError as exc:
             raise SearchInputError(str(exc)) from exc
+        logger.info(
+            "timing event=duration_probe seconds=%.2f duration_seconds=%.2f path=%s",
+            time.perf_counter() - started_at,
+            duration_seconds,
+            os.path.basename(path),
+        )
 
         if duration_seconds > self.max_duration_seconds:
             raise InputDurationExceededError(
