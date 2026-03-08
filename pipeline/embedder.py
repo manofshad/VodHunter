@@ -8,15 +8,8 @@ from typing import Tuple, Optional, List
 class Embedder:
     def __init__(self):
         self.device = self._pick_device()
-
-        print("⏳ Loading AST model...")
-        self.feature_extractor = ASTFeatureExtractor.from_pretrained(
-            "MIT/ast-finetuned-audioset-10-10-0.4593"
-        )
-        self.model = ASTModel.from_pretrained(
-            "MIT/ast-finetuned-audioset-10-10-0.4593"
-        ).to(self.device)
-        self.model.eval()
+        self.feature_extractor: Optional[ASTFeatureExtractor] = None
+        self.model: Optional[ASTModel] = None
 
     def _pick_device(self) -> torch.device:
         if torch.backends.mps.is_available():
@@ -27,6 +20,19 @@ class Embedder:
             return torch.device("cuda")
         print("🐢 Using CPU")
         return torch.device("cpu")
+
+    def _ensure_loaded(self) -> None:
+        if self.feature_extractor is not None and self.model is not None:
+            return
+
+        print("⏳ Loading AST model...")
+        self.feature_extractor = ASTFeatureExtractor.from_pretrained(
+            "MIT/ast-finetuned-audioset-10-10-0.4593"
+        )
+        self.model = ASTModel.from_pretrained(
+            "MIT/ast-finetuned-audioset-10-10-0.4593"
+        ).to(self.device)
+        self.model.eval()
 
     def embed(
         self,
@@ -42,6 +48,10 @@ class Embedder:
             embeddings: (N, D)
             timestamps: (N,)
         """
+        self._ensure_loaded()
+        assert self.feature_extractor is not None
+        assert self.model is not None
+
         audio_data, sr = sf.read(audio_path)
 
         if sr != 16000:
