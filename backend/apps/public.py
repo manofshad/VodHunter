@@ -14,7 +14,7 @@ if ROOT_DIR not in sys.path:
 load_dotenv(Path(ROOT_DIR) / ".env")
 
 from backend import config
-from backend.bootstrap import build_common_state, build_search_stack, prepare_runtime_dirs
+from backend import bootstrap_shared
 from backend.routers.health import router as health_router
 from backend.routers.search import router as search_router
 
@@ -34,10 +34,10 @@ def create_public_app(enable_lifespan: bool = True) -> FastAPI:
 
         @asynccontextmanager
         async def lifespan(app: FastAPI):
-            prepare_runtime_dirs()
+            bootstrap_shared.prepare_runtime_dirs()
 
-            common_state = build_common_state()
-            search_state = build_search_stack(
+            common_state = bootstrap_shared.build_common_state()
+            search_state = bootstrap_shared.build_search_stack(
                 store=common_state["store"],
                 embedder=common_state["embedder"],
                 max_duration_seconds=config.SEARCH_MAX_DURATION_SECONDS_PUBLIC,

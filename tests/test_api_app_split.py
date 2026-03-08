@@ -1,4 +1,5 @@
 import asyncio
+import importlib
 import unittest
 from pathlib import Path
 import sys
@@ -23,6 +24,12 @@ class StubMonitorManager:
 
 
 class TestApiAppSplit(unittest.TestCase):
+    def test_backend_main_defaults_to_public_app(self) -> None:
+        main_module = importlib.import_module("backend.main")
+
+        self.assertIs(main_module.app, public_app_module.app)
+        self.assertIs(main_module.create_public_app, public_app_module.create_public_app)
+
     def test_public_and_admin_route_boundaries(self) -> None:
         public_app = public_app_module.create_public_app(enable_lifespan=False)
         admin_app = admin_app_module.create_admin_app(enable_lifespan=False)
@@ -55,13 +62,13 @@ class TestApiAppSplit(unittest.TestCase):
     def test_public_lifespan_initializes_search_only(self) -> None:
         app = public_app_module.create_public_app(enable_lifespan=True)
 
-        with patch.object(public_app_module, "prepare_runtime_dirs") as prepare_dirs, patch.object(
-            public_app_module,
-            "build_common_state",
+        with patch(
+            "backend.bootstrap_shared.prepare_runtime_dirs"
+        ) as prepare_dirs, patch(
+            "backend.bootstrap_shared.build_common_state",
             return_value={"store": object(), "embedder": object()},
-        ), patch.object(
-            public_app_module,
-            "build_search_stack",
+        ), patch(
+            "backend.bootstrap_shared.build_search_stack",
             return_value={"search_service": object(), "search_manager": object()},
         ):
 
@@ -75,21 +82,32 @@ class TestApiAppSplit(unittest.TestCase):
             asyncio.run(run_lifespan())
             prepare_dirs.assert_called_once()
 
+    def test_public_import_does_not_require_admin_bootstrap(self) -> None:
+        sys.modules.pop("backend.apps.public", None)
+
+        def fail_build_monitor_stack(*args, **kwargs):
+            raise AssertionError("public app imported admin bootstrap")
+
+        with patch("backend.bootstrap_admin.build_monitor_stack", side_effect=fail_build_monitor_stack):
+            module = importlib.import_module("backend.apps.public")
+
+        app = module.create_public_app(enable_lifespan=False)
+        self.assertEqual(app.title, "VodHunter Public API")
+
     def test_admin_lifespan_stops_monitor_manager(self) -> None:
         app = admin_app_module.create_admin_app(enable_lifespan=True)
         monitor = StubMonitorManager()
 
-        with patch.object(admin_app_module, "prepare_runtime_dirs") as prepare_dirs, patch.object(
-            admin_app_module,
-            "build_common_state",
+        with patch(
+            "backend.bootstrap_shared.prepare_runtime_dirs"
+        ) as prepare_dirs, patch(
+            "backend.bootstrap_shared.build_common_state",
             return_value={"store": object(), "embedder": object()},
-        ), patch.object(
-            admin_app_module,
-            "build_search_stack",
+        ), patch(
+            "backend.bootstrap_shared.build_search_stack",
             return_value={"search_service": object(), "search_manager": object()},
-        ), patch.object(
-            admin_app_module,
-            "build_monitor_stack",
+        ), patch(
+            "backend.bootstrap_admin.build_monitor_stack",
             return_value={"monitor_manager": monitor, "eventsub_handler": object(), "session_query": object()},
         ):
 
