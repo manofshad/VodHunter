@@ -5,7 +5,9 @@ from backend.services.remote_clip_downloader import RemoteClipDownloader
 from backend.services.search_manager import SearchManager
 from pipeline.embedder import Embedder
 from search.alignment_service import AlignmentConfig, AlignmentService
-from search.query_embedder import QueryEmbedder
+from search.local_query_embedder import LocalQueryEmbedder
+from search.modal_embedding_client import ModalEmbeddingClient
+from search.modal_query_embedder import ModalQueryEmbedder
 from search.query_preprocessor import QueryPreprocessor
 from search.search_service import SearchService
 from search.vector_matcher import VectorMatcher
@@ -35,6 +37,26 @@ def build_common_state() -> dict[str, object]:
     }
 
 
+def _build_query_embedder(embedder: Embedder):
+    config.validate_search_embedder_config()
+
+    if config.SEARCH_QUERY_EMBEDDER_BACKEND == "local":
+        return LocalQueryEmbedder(embedder=embedder)
+
+    client = ModalEmbeddingClient(
+        app_name=config.MODAL_SEARCH_APP_NAME,
+        function_name=config.MODAL_SEARCH_FUNCTION_NAME,
+        timeout_seconds=config.MODAL_SEARCH_TIMEOUT_SECONDS,
+    )
+    return ModalQueryEmbedder(
+        client=client,
+        vector_dim=config.VECTOR_DIM,
+        model_version=config.MODAL_SEARCH_MODEL_NAME,
+        fallback_embedder=embedder,
+        fallback_to_local=config.MODAL_SEARCH_FALLBACK_TO_LOCAL,
+    )
+
+
 def build_search_stack(
     store: VectorStore,
     embedder: Embedder,
@@ -43,7 +65,7 @@ def build_search_stack(
     search_service = SearchService(
         store=store,
         preprocessor=QueryPreprocessor(temp_dir=config.TEMP_SEARCH_PREPROCESS_DIR),
-        query_embedder=QueryEmbedder(embedder=embedder),
+        query_embedder=_build_query_embedder(embedder=embedder),
         matcher=VectorMatcher(top_k=10),
         alignment=AlignmentService(
             store=store,

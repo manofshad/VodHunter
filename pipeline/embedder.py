@@ -1,38 +1,33 @@
+from typing import Optional, Tuple
+
 import numpy as np
-import soundfile as sf
 import torch
 from transformers import ASTFeatureExtractor, ASTModel
-from typing import Tuple, Optional, List
+
+from pipeline.ast_inference import (
+    DEFAULT_AST_MODEL_NAME,
+    compute_ast_embeddings,
+    load_ast_model,
+    load_wav_file,
+    pick_torch_device,
+)
 
 
 class Embedder:
-    def __init__(self):
+    def __init__(self, model_name: str = DEFAULT_AST_MODEL_NAME):
+        self.model_name = model_name
         self.device = self._pick_device()
         self.feature_extractor: Optional[ASTFeatureExtractor] = None
         self.model: Optional[ASTModel] = None
 
     def _pick_device(self) -> torch.device:
-        if torch.backends.mps.is_available():
-            print("🚀 Using Apple Metal (GPU)")
-            return torch.device("mps")
-        if torch.cuda.is_available():
-            print("🚀 Using CUDA (GPU)")
-            return torch.device("cuda")
-        print("🐢 Using CPU")
-        return torch.device("cpu")
+        return pick_torch_device()
 
     def _ensure_loaded(self) -> None:
         if self.feature_extractor is not None and self.model is not None:
             return
 
-        print("⏳ Loading AST model...")
-        self.feature_extractor = ASTFeatureExtractor.from_pretrained(
-            "MIT/ast-finetuned-audioset-10-10-0.4593"
-        )
-        self.model = ASTModel.from_pretrained(
-            "MIT/ast-finetuned-audioset-10-10-0.4593"
-        ).to(self.device)
-        self.model.eval()
+        self.feature_extractor, self.model = load_ast_model(self.model_name, self.device)
 
     def embed(
         self,
@@ -52,53 +47,12 @@ class Embedder:
         assert self.feature_extractor is not None
         assert self.model is not None
 
-        audio_data, sr = sf.read(audio_path)
-
-        if sr != 16000:
-            raise ValueError(f"Expected 16kHz audio, got {sr}")
-
-        one_second = 16000
-        batch_size = 8
-
-        total_samples = len(audio_data)
-        num_chunks = int(np.ceil(total_samples / one_second))
-
-        embeddings: List[np.ndarray] = []
-        timestamps: List[float] = []
-
-        for i in range(0, num_chunks, batch_size):
-            batch_audio = []
-            batch_times = []
-
-            for j in range(i, min(i + batch_size, num_chunks)):
-                start = j * one_second
-                end = start + one_second
-                chunk = audio_data[start:end]
-
-                if len(chunk) < one_second:
-                    chunk = np.pad(chunk, (0, one_second - len(chunk)))
-
-                batch_audio.append(chunk)
-                batch_times.append((start / 16000.0) + offset_seconds)
-
-            inputs = self.feature_extractor(
-                batch_audio,
-                sampling_rate=16000,
-                return_tensors="pt"
-            )
-            inputs = {k: v.to(self.device) for k, v in inputs.items()}
-
-            with torch.no_grad():
-                outputs = self.model(**inputs)
-
-            batch_embs = outputs.pooler_output.cpu().numpy()
-            embeddings.append(batch_embs)
-            timestamps.extend(batch_times)
-
-        if not embeddings:
-            return np.zeros((0,)), np.zeros((0,))
-
-        embeddings_np = np.concatenate(embeddings, axis=0)
-        timestamps_np = np.array(timestamps, dtype=np.float32)
-
-        return embeddings_np, timestamps_np
+        audio_data, sr = load_wav_file(audio_path)
+        return compute_ast_embeddings(
+            audio_data=audio_data,
+            sample_rate=sr,
+            feature_extractor=self.feature_extractor,
+            model=self.model,
+            device=self.device,
+            offset_seconds=offset_seconds,
+        )

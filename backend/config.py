@@ -36,8 +36,47 @@ EVENTSUB_MESSAGE_TTL_SECONDS = int(os.getenv("EVENTSUB_MESSAGE_TTL_SECONDS", "60
 EVENTSUB_MAX_CLOCK_SKEW_SECONDS = int(os.getenv("EVENTSUB_MAX_CLOCK_SKEW_SECONDS", "600"))
 PUBLIC_API_ORIGIN = os.getenv("PUBLIC_API_ORIGIN", "").strip()
 ADMIN_API_ORIGIN = os.getenv("ADMIN_API_ORIGIN", "").strip()
+SEARCH_QUERY_EMBEDDER_BACKEND = os.getenv("SEARCH_QUERY_EMBEDDER_BACKEND", "local").strip().lower()
+MODAL_SEARCH_APP_NAME = os.getenv("MODAL_SEARCH_APP_NAME", "").strip()
+MODAL_SEARCH_FUNCTION_NAME = os.getenv("MODAL_SEARCH_FUNCTION_NAME", "").strip()
+MODAL_SEARCH_TIMEOUT_SECONDS = float(os.getenv("MODAL_SEARCH_TIMEOUT_SECONDS", "30"))
+MODAL_SEARCH_MODEL_NAME = os.getenv("MODAL_SEARCH_MODEL_NAME", "").strip()
+
+
+def _read_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean value")
+
+
+MODAL_SEARCH_FALLBACK_TO_LOCAL = _read_bool("MODAL_SEARCH_FALLBACK_TO_LOCAL", True)
 
 
 def validate_storage_config() -> None:
     if not DATABASE_URL:
         raise ValueError("DATABASE_URL is required")
+
+
+def validate_search_embedder_config() -> None:
+    if SEARCH_QUERY_EMBEDDER_BACKEND not in {"local", "modal"}:
+        raise ValueError("SEARCH_QUERY_EMBEDDER_BACKEND must be one of: local, modal")
+
+    if SEARCH_QUERY_EMBEDDER_BACKEND != "modal":
+        return
+
+    if not MODAL_SEARCH_APP_NAME:
+        raise ValueError("MODAL_SEARCH_APP_NAME is required when SEARCH_QUERY_EMBEDDER_BACKEND=modal")
+    if not MODAL_SEARCH_FUNCTION_NAME:
+        raise ValueError("MODAL_SEARCH_FUNCTION_NAME is required when SEARCH_QUERY_EMBEDDER_BACKEND=modal")
+    if MODAL_SEARCH_TIMEOUT_SECONDS <= 0:
+        raise ValueError("MODAL_SEARCH_TIMEOUT_SECONDS must be greater than 0")
+    if not os.getenv("MODAL_TOKEN_ID", "").strip():
+        raise ValueError("MODAL_TOKEN_ID is required when SEARCH_QUERY_EMBEDDER_BACKEND=modal")
+    if not os.getenv("MODAL_TOKEN_SECRET", "").strip():
+        raise ValueError("MODAL_TOKEN_SECRET is required when SEARCH_QUERY_EMBEDDER_BACKEND=modal")

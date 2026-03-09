@@ -61,14 +61,11 @@ class FakeModel:
 
 class TestEmbedder(unittest.TestCase):
     def test_constructor_does_not_load_model(self) -> None:
-        with patch("pipeline.embedder.ASTFeatureExtractor.from_pretrained") as feature_loader, patch(
-            "pipeline.embedder.ASTModel.from_pretrained"
-        ) as model_loader:
+        with patch("pipeline.embedder.load_ast_model") as model_loader:
             embedder = Embedder()
 
         self.assertIsNone(embedder.feature_extractor)
         self.assertIsNone(embedder.model)
-        feature_loader.assert_not_called()
         model_loader.assert_not_called()
 
     def test_embed_loads_model_once_and_reuses_it(self) -> None:
@@ -76,23 +73,19 @@ class TestEmbedder(unittest.TestCase):
         audio = np.ones(16000, dtype=np.float32)
 
         with tempfile.NamedTemporaryFile(suffix=".wav") as wav_file, patch(
-            "pipeline.embedder.sf.read",
+            "pipeline.embedder.load_wav_file",
             return_value=(audio, 16000),
         ), patch(
-            "pipeline.embedder.ASTFeatureExtractor.from_pretrained",
-            return_value=FakeFeatureExtractor(),
-        ) as feature_loader, patch(
-            "pipeline.embedder.ASTModel.from_pretrained",
-            return_value=fake_model,
+            "pipeline.embedder.load_ast_model",
+            return_value=(FakeFeatureExtractor(), fake_model),
         ) as model_loader:
             embedder = Embedder()
 
             first_embeddings, first_timestamps = embedder.embed(wav_file.name)
             second_embeddings, second_timestamps = embedder.embed(wav_file.name)
 
-        self.assertEqual(feature_loader.call_count, 1)
         self.assertEqual(model_loader.call_count, 1)
-        self.assertEqual(fake_model.eval_calls, 1)
+        self.assertEqual(fake_model.eval_calls, 0)
         self.assertEqual(first_embeddings.shape, (1, 3))
         self.assertEqual(second_embeddings.shape, (1, 3))
         np.testing.assert_array_equal(first_timestamps, np.array([0.0], dtype=np.float32))
