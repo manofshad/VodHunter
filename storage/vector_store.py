@@ -119,7 +119,7 @@ class VectorStore:
                     """
                     CREATE INDEX IF NOT EXISTS idx_fingerprint_embeddings_ivfflat_cos
                     ON fingerprint_embeddings USING ivfflat (embedding vector_cosine_ops)
-                    WITH (lists = 1000)
+                    WITH (lists = 100)
                     """
                 )
                 cur.execute(
