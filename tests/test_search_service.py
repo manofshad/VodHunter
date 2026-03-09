@@ -45,9 +45,14 @@ class FakeAlignment:
 class FakeStore:
     def __init__(self):
         self.last_streamer: str | None = None
+        self.last_creator_id: int | None = None
 
-    def query_similar_fingerprint_ids(self, query_embeddings: np.ndarray, top_k: int, streamer: str):
-        self.last_streamer = streamer
+    def get_creator_id_by_name(self, name: str):
+        self.last_streamer = name
+        return 12
+
+    def query_similar_fingerprint_ids(self, query_embeddings: np.ndarray, top_k: int, creator_id: int, streamer_name: str | None = None):
+        self.last_creator_id = creator_id
         return np.array([[1.0]], dtype=np.float32), np.array([[10]], dtype=np.int64)
 
     def get_video_with_creator(self, video_id: int):
@@ -85,6 +90,7 @@ class TestSearchService(unittest.TestCase):
 
         self.assertTrue(result.found)
         self.assertEqual(store.last_streamer, "xqc")
+        self.assertEqual(store.last_creator_id, 12)
         self.assertEqual(result.video_url_at_timestamp, "https://www.twitch.tv/videos/2699020769?t=22m48s")
 
     def test_not_found_result_has_no_timestamp_url(self) -> None:
@@ -108,6 +114,34 @@ class TestSearchService(unittest.TestCase):
 
         self.assertFalse(result.found)
         self.assertIsNone(result.video_url_at_timestamp)
+
+    def test_missing_streamer_returns_not_found_before_knn(self) -> None:
+        class MissingStore(FakeStore):
+            def get_creator_id_by_name(self, name: str):
+                self.last_streamer = name
+                return None
+
+        store = MissingStore()
+        service = SearchService(
+            store=store,  # type: ignore[arg-type]
+            preprocessor=FakePreprocessor(),  # type: ignore[arg-type]
+            query_embedder=FakeQueryEmbedder(
+                embeddings=np.array([[0.1, 0.2]], dtype=np.float32),
+                timestamps=np.array([0.0], dtype=np.float32),
+            ),  # type: ignore[arg-type]
+            matcher=FakeMatcher(),  # type: ignore[arg-type]
+            alignment=FakeAlignment(
+                AlignmentResult(
+                    found=False,
+                    reason="No aligned match found",
+                )
+            ),  # type: ignore[arg-type]
+        )
+
+        result = service.search_file("clip.mp4", "xqc")
+
+        self.assertFalse(result.found)
+        self.assertEqual(result.reason, "No indexed clips found for streamer: xqc")
 
 
 if __name__ == "__main__":

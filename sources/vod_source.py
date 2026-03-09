@@ -29,6 +29,7 @@ class VODSource(AudioSource):
         self.store = store
 
         self.video_id: int | None = None
+        self._creator_id: int | None = None
         self._chunks = []
         self._index = 0
 
@@ -46,6 +47,7 @@ class VODSource(AudioSource):
 
         # ---- CREATE CREATOR + VIDEO ROW ----
         creator_id = self.store.create_or_get_creator(self.creator_name, self.creator_name)
+        self._creator_id = creator_id
         self.video_id = self.store.create_video(
             creator_id=creator_id,
             url=self.video_url,
@@ -109,6 +111,10 @@ class VODSource(AudioSource):
         """
         if os.path.exists(self.temp_dir):
             shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    @property
+    def creator_id(self) -> int | None:
+        return self._creator_id
 
     @property
     def is_finished(self) -> bool:

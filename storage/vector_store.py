@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import logging
+import time
 from typing import Any, List
 
 import numpy as np
+
+
+logger = logging.getLogger("uvicorn.error")
 
 
 class VectorStore:
@@ -98,9 +103,16 @@ class VectorStore:
                     CREATE TABLE IF NOT EXISTS fingerprint_embeddings (
                         fingerprint_id BIGINT PRIMARY KEY REFERENCES fingerprints(id) ON DELETE CASCADE,
                         embedding vector({self.vector_dim}) NOT NULL,
+                        creator_id BIGINT REFERENCES creators(id),
                         model_name TEXT,
                         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                     )
+                    """
+                )
+                cur.execute(
+                    """
+                    ALTER TABLE fingerprint_embeddings
+                    ADD COLUMN IF NOT EXISTS creator_id BIGINT REFERENCES creators(id)
                     """
                 )
                 cur.execute(
@@ -110,21 +122,30 @@ class VectorStore:
                     WITH (lists = 1000)
                     """
                 )
+                cur.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_fingerprint_embeddings_creator_id
+                    ON fingerprint_embeddings(creator_id)
+                    """
+                )
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_videos_creator_id ON videos(creator_id)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_creators_lower_name ON creators((LOWER(name)))")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_videos_url ON videos(url)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_fingerprints_video_id ON fingerprints(video_id)")
 
-    def append_vectors(self, embeddings: np.ndarray, ids: List[int]) -> None:
+    def append_vectors(self, embeddings: np.ndarray, ids: List[int], creator_id: int | None) -> None:
         if embeddings.size == 0:
             return
         if len(embeddings) != len(ids):
             raise ValueError("embeddings/ids length mismatch")
+        if creator_id is None:
+            raise ValueError("creator_id is required")
 
         rows = [
             (
                 int(fp_id),
                 embeddings[idx].astype(np.float32).tolist(),
+                int(creator_id),
                 "MIT/ast-finetuned-audioset-10-10-0.4593",
             )
             for idx, fp_id in enumerate(ids)
@@ -134,10 +155,11 @@ class VectorStore:
             with conn.cursor() as cur:
                 cur.executemany(
                     """
-                    INSERT INTO fingerprint_embeddings (fingerprint_id, embedding, model_name)
-                    VALUES (%s, %s, %s)
+                    INSERT INTO fingerprint_embeddings (fingerprint_id, embedding, creator_id, model_name)
+                    VALUES (%s, %s, %s, %s)
                     ON CONFLICT (fingerprint_id) DO UPDATE
                     SET embedding = excluded.embedding,
+                        creator_id = excluded.creator_id,
                         model_name = excluded.model_name
                     """,
                     rows,
@@ -197,6 +219,27 @@ class VectorStore:
                 row = cur.fetchone()
         if row is None:
             raise RuntimeError("Failed to resolve creator id")
+        return int(row[0])
+
+    def get_creator_id_by_name(self, name: str) -> int | None:
+        normalized_name = (name or "").strip().lower()
+        if not normalized_name:
+            raise ValueError("streamer is required")
+
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id
+                    FROM creators
+                    WHERE LOWER(name) = %s
+                    LIMIT 1
+                    """,
+                    (normalized_name,),
+                )
+                row = cur.fetchone()
+        if row is None:
+            return None
         return int(row[0])
 
     def create_video(self, creator_id: int, url: str, title: str, processed: bool) -> int:
@@ -291,40 +334,73 @@ class VectorStore:
         self,
         query_embeddings: np.ndarray,
         top_k: int,
-        streamer: str,
+        creator_id: int,
+        streamer_name: str | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         if query_embeddings.size == 0:
             return np.empty((0, 0), dtype=np.float32), np.empty((0, 0), dtype=np.int64)
 
-        normalized_streamer = streamer.strip().lower()
-        if not normalized_streamer:
-            raise ValueError("streamer is required")
+        normalized_streamer = (streamer_name or "").strip().lower()
+        if int(creator_id) <= 0:
+            raise ValueError("creator_id is required")
 
         query_rows = [query_embeddings[idx].astype(np.float32).tolist() for idx in range(query_embeddings.shape[0])]
         all_scores: list[list[float]] = []
         all_ids: list[list[int]] = []
+        primary_query_seconds = 0.0
+        fallback_query_seconds = 0.0
+        fallback_hits = 0
 
         with self._connect() as conn:
             with conn.cursor() as cur:
                 probes = max(int(self.pgvector_probes), 1)
                 cur.execute(f"SET LOCAL ivfflat.probes = {probes}")
                 for q in query_rows:
+                    started_at = time.perf_counter()
                     cur.execute(
                         """
-                        SELECT fe.fingerprint_id, (1 - (fe.embedding <=> %s::vector)) AS score
-                        FROM fingerprint_embeddings fe
-                        JOIN fingerprints f ON f.id = fe.fingerprint_id
-                        JOIN videos v ON v.id = f.video_id
-                        JOIN creators c ON c.id = v.creator_id
-                        WHERE LOWER(c.name) = %s
-                        ORDER BY fe.embedding <=> %s::vector
+                        SELECT fingerprint_id, (1 - (embedding <=> %s::vector)) AS score
+                        FROM fingerprint_embeddings
+                        WHERE creator_id = %s
+                        ORDER BY embedding <=> %s::vector
                         LIMIT %s
                         """,
-                        (q, normalized_streamer, q, int(top_k)),
+                        (q, int(creator_id), q, int(top_k)),
                     )
                     rows = cur.fetchall()
+                    primary_query_seconds += time.perf_counter() - started_at
+                    if not rows and normalized_streamer:
+                        fallback_hits += 1
+                        started_at = time.perf_counter()
+                        cur.execute(
+                            """
+                            SELECT fe.fingerprint_id, (1 - (fe.embedding <=> %s::vector)) AS score
+                            FROM fingerprint_embeddings fe
+                            JOIN fingerprints f ON f.id = fe.fingerprint_id
+                            JOIN videos v ON v.id = f.video_id
+                            JOIN creators c ON c.id = v.creator_id
+                            WHERE LOWER(c.name) = %s
+                            ORDER BY fe.embedding <=> %s::vector
+                            LIMIT %s
+                            """,
+                            (q, normalized_streamer, q, int(top_k)),
+                        )
+                        rows = cur.fetchall()
+                        fallback_query_seconds += time.perf_counter() - started_at
                     all_ids.append([int(r[0]) for r in rows])
                     all_scores.append([float(r[1]) for r in rows])
+
+        logger.info(
+            "timing event=vector_store_knn query_count=%d creator_id=%d probes=%d primary_seconds=%.2f fallback_seconds=%.2f fallback_hits=%d first_result_count=%d streamer=%s",
+            len(query_rows),
+            int(creator_id),
+            max(int(self.pgvector_probes), 1),
+            primary_query_seconds,
+            fallback_query_seconds,
+            fallback_hits,
+            len(all_ids[0]) if all_ids else 0,
+            normalized_streamer or "n/a",
+        )
 
         if not all_ids or not all_ids[0]:
             return np.empty((0, 0), dtype=np.float32), np.empty((0, 0), dtype=np.int64)

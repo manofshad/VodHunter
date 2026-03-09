@@ -49,10 +49,15 @@ class FakeStoreWithKnn:
     def __init__(self):
         self.called = 0
         self.streamer: str | None = None
+        self.creator_id: int | None = None
 
-    def query_similar_fingerprint_ids(self, query_embeddings: np.ndarray, top_k: int, streamer: str):
+    def get_creator_id_by_name(self, name: str):
+        self.streamer = name
+        return 42
+
+    def query_similar_fingerprint_ids(self, query_embeddings: np.ndarray, top_k: int, creator_id: int, streamer_name: str | None = None):
         self.called += 1
-        self.streamer = streamer
+        self.creator_id = creator_id
         return (
             np.array([[0.99]], dtype=np.float32),
             np.array([[10]], dtype=np.int64),
@@ -83,6 +88,7 @@ class TestSearchServiceStoreKnn(unittest.TestCase):
         self.assertTrue(result.found)
         self.assertEqual(store.called, 1)
         self.assertEqual(store.streamer, "xqc")
+        self.assertEqual(store.creator_id, 42)
 
 
 if __name__ == "__main__":

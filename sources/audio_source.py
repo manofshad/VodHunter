@@ -25,6 +25,14 @@ class AudioSource(ABC):
 
     @property
     @abstractmethod
+    def creator_id(self) -> int | None:
+        """
+        Creator identifier for rows emitted by this source.
+        """
+        pass
+
+    @property
+    @abstractmethod
     def is_finished(self) -> bool:
         """
         True if the source will never produce more chunks.

@@ -54,11 +54,33 @@ class SearchService:
                 return SearchResult(found=False, reason="No embeddings generated for query clip")
 
             top_k = int(getattr(self.matcher, "top_k", 10))
+            creator_id = self.store.get_creator_id_by_name(normalized_streamer)
+            if creator_id is None:
+                logger.info(
+                    "timing event=search_pipeline seconds=%.2f preprocess_seconds=%.2f embed_seconds=%.2f vector_query_seconds=0.00 alignment_seconds=0.00 result=unknown_streamer streamer=%s",
+                    time.perf_counter() - total_started_at,
+                    preprocess_seconds,
+                    embed_seconds,
+                    normalized_streamer,
+                )
+                return SearchResult(
+                    found=False,
+                    streamer=normalized_streamer,
+                    reason=f"No indexed clips found for streamer: {normalized_streamer}",
+                )
+            logger.info(
+                "timing event=search_creator_lookup streamer=%s creator_id=%d query_embedding_count=%d top_k=%d",
+                normalized_streamer,
+                creator_id,
+                int(query_embeddings.shape[0]),
+                top_k,
+            )
             started_at = time.perf_counter()
             _, neighbor_ids = self.store.query_similar_fingerprint_ids(
                 query_embeddings=query_embeddings,
                 top_k=top_k,
-                streamer=normalized_streamer,
+                creator_id=creator_id,
+                streamer_name=normalized_streamer,
             )
             vector_query_seconds = time.perf_counter() - started_at
 

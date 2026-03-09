@@ -50,7 +50,11 @@ class IngestSession:
                     timestamps=timestamps,
                 )
 
-                self.store.append_vectors(embeddings, ids)
+                self.store.append_vectors(
+                    embeddings=embeddings,
+                    ids=ids,
+                    creator_id=self.source.creator_id,
+                )
 
         finally:
             self.source.stop()

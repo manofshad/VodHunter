@@ -32,6 +32,7 @@ class LiveArchiveVODSource(AudioSource):
         self.temp_dir = temp_dir
 
         self.video_id: int | None = None
+        self._creator_id: int | None = None
         self.current_vod_url: str | None = None
         self.ingest_cursor_seconds: int | None = 0
 
@@ -97,6 +98,10 @@ class LiveArchiveVODSource(AudioSource):
             shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     @property
+    def creator_id(self) -> int | None:
+        return self._creator_id
+
+    @property
     def is_finished(self) -> bool:
         return self._finished
 
@@ -138,6 +143,7 @@ class LiveArchiveVODSource(AudioSource):
 
         creator_url = f"https://twitch.tv/{self.streamer}"
         creator_id = self.store.create_or_get_creator(self.streamer, creator_url)
+        self._creator_id = creator_id
 
         existing_video = self.store.get_video_by_url(self.current_vod_url)
         if existing_video is None:
