@@ -40,7 +40,7 @@ class FakeStore:
         self._video_id = 0
         self.creators: dict[str, tuple[int, str, str]] = {}
         self.videos_by_url: dict[str, tuple[int, int, str, str, str | None, bool]] = {}
-        self.live_state: dict[str, dict] = {}
+        self.vod_state: dict[str, dict] = {}
 
     def create_or_get_creator(self, name: str, url: str) -> int:
         existing = self.creators.get(url)
@@ -93,10 +93,10 @@ class FakeStore:
             )
             return
 
-    def get_live_ingest_state(self, vod_platform_id: str):
-        return self.live_state.get(vod_platform_id)
+    def get_vod_ingest_state(self, vod_platform_id: str):
+        return self.vod_state.get(vod_platform_id)
 
-    def upsert_live_ingest_state(
+    def upsert_vod_ingest_state(
         self,
         vod_platform_id: str,
         video_id: int,
@@ -104,7 +104,7 @@ class FakeStore:
         last_ingested_seconds: int,
         last_seen_duration_seconds: int,
     ) -> None:
-        self.live_state[vod_platform_id] = {
+        self.vod_state[vod_platform_id] = {
             "vod_platform_id": vod_platform_id,
             "video_id": int(video_id),
             "streamer": streamer,
@@ -112,6 +112,9 @@ class FakeStore:
             "last_seen_duration_seconds": int(last_seen_duration_seconds),
             "updated_at": "now",
         }
+
+    def delete_vod_ingest_state(self, vod_platform_id: str) -> None:
+        self.vod_state.pop(vod_platform_id, None)
 
 
 class TestLiveArchiveVODSource(unittest.TestCase):

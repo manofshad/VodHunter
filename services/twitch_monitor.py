@@ -3,7 +3,7 @@ import os
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 
@@ -111,6 +111,19 @@ class TwitchMonitor:
     def _helix_get(self, path: str, params: dict[str, str]) -> dict[str, Any]:
         return self._helix_request(path=path, method="GET", params=params)
 
+    @staticmethod
+    def parse_twitch_datetime(value: str) -> datetime:
+        raw = (value or "").strip()
+        if not raw:
+            return datetime.min.replace(tzinfo=timezone.utc)
+        try:
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return datetime.min.replace(tzinfo=timezone.utc)
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed
+
     def is_live(self, streamer: str) -> bool:
         streamer = streamer.strip()
         if not streamer:
@@ -152,16 +165,57 @@ class TwitchMonitor:
             return None
 
         def _created(v: dict[str, Any]) -> datetime:
-            raw = str(v.get("created_at", "")).strip()
-            if not raw:
-                return datetime.min
-            try:
-                return datetime.fromisoformat(raw.replace("Z", "+00:00"))
-            except ValueError:
-                return datetime.min
+            return self.parse_twitch_datetime(str(v.get("created_at", "")))
 
         latest = max(rows, key=_created)
         return self.normalize_vod_metadata(latest)
+
+    def list_archive_vods_since(self, user_id: str, created_after: datetime) -> list[dict[str, Any]]:
+        user_id = user_id.strip()
+        if not user_id:
+            raise ValueError("user_id is required")
+
+        if created_after.tzinfo is None:
+            created_after = created_after.replace(tzinfo=timezone.utc)
+        else:
+            created_after = created_after.astimezone(timezone.utc)
+
+        vods: list[dict[str, Any]] = []
+        cursor: str | None = None
+
+        while True:
+            params = {
+                "user_id": user_id,
+                "type": "archive",
+                "first": "100",
+            }
+            if cursor:
+                params["after"] = cursor
+
+            payload = self._helix_get("videos", params)
+            rows = payload.get("data") or []
+            if not rows:
+                break
+
+            reached_older_vod = False
+            for raw_vod in rows:
+                created_at = self.parse_twitch_datetime(str(raw_vod.get("created_at", "")))
+                if created_at < created_after:
+                    reached_older_vod = True
+                    continue
+                normalized = self.normalize_vod_metadata(raw_vod)
+                if normalized is not None:
+                    vods.append(normalized)
+
+            cursor = str((payload.get("pagination") or {}).get("cursor") or "").strip() or None
+            if reached_older_vod or cursor is None:
+                break
+
+        vods.sort(
+            key=lambda vod: self.parse_twitch_datetime(str(vod.get("created_at", ""))),
+            reverse=True,
+        )
+        return vods
 
     @classmethod
     def normalize_vod_metadata(cls, raw_vod: dict[str, Any]) -> dict[str, Any] | None:

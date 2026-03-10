@@ -165,7 +165,7 @@ class LiveArchiveVODSource(AudioSource):
                 processed=False,
             )
 
-        state = self.store.get_live_ingest_state(self._vod_platform_id)
+        state = self.store.get_vod_ingest_state(self._vod_platform_id)
         if state is None:
             self.ingest_cursor_seconds = 0
         else:
@@ -271,7 +271,7 @@ class LiveArchiveVODSource(AudioSource):
         if self._vod_platform_id is None or self.video_id is None:
             return
 
-        self.store.upsert_live_ingest_state(
+        self.store.upsert_vod_ingest_state(
             vod_platform_id=self._vod_platform_id,
             video_id=self.video_id,
             streamer=self.streamer,
@@ -283,4 +283,6 @@ class LiveArchiveVODSource(AudioSource):
         self._commit_pending_progress()
         if self.video_id is not None:
             self.store.mark_video_processed(self.video_id, processed=True)
+        if self._vod_platform_id is not None:
+            self.store.delete_vod_ingest_state(self._vod_platform_id)
         self._finished = True

@@ -95,7 +95,7 @@ class VectorStore:
                 )
                 cur.execute(
                     """
-                    CREATE TABLE IF NOT EXISTS live_ingest_state (
+                    CREATE TABLE IF NOT EXISTS vod_ingest_state (
                         vod_platform_id TEXT PRIMARY KEY,
                         video_id BIGINT NOT NULL REFERENCES videos(id),
                         streamer TEXT NOT NULL,
@@ -103,6 +103,37 @@ class VectorStore:
                         last_seen_duration_seconds INTEGER NOT NULL,
                         updated_at TIMESTAMPTZ NOT NULL
                     )
+                    """
+                )
+                cur.execute(
+                    """
+                    DO $$
+                    BEGIN
+                        IF EXISTS (
+                            SELECT 1
+                            FROM information_schema.tables
+                            WHERE table_schema = current_schema()
+                              AND table_name = 'live_ingest_state'
+                        ) THEN
+                            INSERT INTO vod_ingest_state (
+                                vod_platform_id,
+                                video_id,
+                                streamer,
+                                last_ingested_seconds,
+                                last_seen_duration_seconds,
+                                updated_at
+                            )
+                            SELECT
+                                vod_platform_id,
+                                video_id,
+                                streamer,
+                                last_ingested_seconds,
+                                last_seen_duration_seconds,
+                                updated_at
+                            FROM live_ingest_state
+                            ON CONFLICT (vod_platform_id) DO NOTHING;
+                        END IF;
+                    END $$;
                     """
                 )
                 cur.execute(
@@ -312,14 +343,14 @@ class VectorStore:
                     (bool(processed), int(video_id)),
                 )
 
-    def get_live_ingest_state(self, vod_platform_id: str) -> dict | None:
+    def get_vod_ingest_state(self, vod_platform_id: str) -> dict | None:
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
                     SELECT vod_platform_id, video_id, streamer, last_ingested_seconds,
                            last_seen_duration_seconds, updated_at
-                    FROM live_ingest_state
+                    FROM vod_ingest_state
                     WHERE vod_platform_id = %s
                     LIMIT 1
                     """,
@@ -337,7 +368,7 @@ class VectorStore:
             "updated_at": str(row[5]),
         }
 
-    def upsert_live_ingest_state(
+    def upsert_vod_ingest_state(
         self,
         vod_platform_id: str,
         video_id: int,
@@ -350,7 +381,7 @@ class VectorStore:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO live_ingest_state (
+                    INSERT INTO vod_ingest_state (
                         vod_platform_id,
                         video_id,
                         streamer,
@@ -375,6 +406,33 @@ class VectorStore:
                         updated_at,
                     ),
                 )
+
+    def delete_vod_ingest_state(self, vod_platform_id: str) -> None:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM vod_ingest_state WHERE vod_platform_id = %s",
+                    (vod_platform_id,),
+                )
+
+    def get_live_ingest_state(self, vod_platform_id: str) -> dict | None:
+        return self.get_vod_ingest_state(vod_platform_id)
+
+    def upsert_live_ingest_state(
+        self,
+        vod_platform_id: str,
+        video_id: int,
+        streamer: str,
+        last_ingested_seconds: int,
+        last_seen_duration_seconds: int,
+    ) -> None:
+        self.upsert_vod_ingest_state(
+            vod_platform_id=vod_platform_id,
+            video_id=video_id,
+            streamer=streamer,
+            last_ingested_seconds=last_ingested_seconds,
+            last_seen_duration_seconds=last_seen_duration_seconds,
+        )
 
     def query_similar_fingerprint_ids(
         self,
