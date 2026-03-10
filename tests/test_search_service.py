@@ -51,7 +51,7 @@ class FakeStore:
         self.last_streamer = name
         return 12
 
-    def query_similar_fingerprint_ids(self, query_embeddings: np.ndarray, top_k: int, creator_id: int, streamer_name: str | None = None):
+    def query_similar_fingerprint_ids(self, query_embeddings: np.ndarray, top_k: int, creator_id: int):
         self.last_creator_id = creator_id
         return np.array([[1.0]], dtype=np.float32), np.array([[10]], dtype=np.int64)
 

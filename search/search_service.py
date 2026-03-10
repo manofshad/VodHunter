@@ -80,7 +80,6 @@ class SearchService:
                 query_embeddings=query_embeddings,
                 top_k=top_k,
                 creator_id=creator_id,
-                streamer_name=normalized_streamer,
             )
             vector_query_seconds = time.perf_counter() - started_at
 

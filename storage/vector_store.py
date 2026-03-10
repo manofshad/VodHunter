@@ -335,12 +335,10 @@ class VectorStore:
         query_embeddings: np.ndarray,
         top_k: int,
         creator_id: int,
-        streamer_name: str | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         if query_embeddings.size == 0:
             return np.empty((0, 0), dtype=np.float32), np.empty((0, 0), dtype=np.int64)
 
-        normalized_streamer = (streamer_name or "").strip().lower()
         if int(creator_id) <= 0:
             raise ValueError("creator_id is required")
 
@@ -348,8 +346,6 @@ class VectorStore:
         all_scores: list[list[float]] = []
         all_ids: list[list[int]] = []
         primary_query_seconds = 0.0
-        fallback_query_seconds = 0.0
-        fallback_hits = 0
 
         with self._connect() as conn:
             with conn.cursor() as cur:
@@ -369,37 +365,16 @@ class VectorStore:
                     )
                     rows = cur.fetchall()
                     primary_query_seconds += time.perf_counter() - started_at
-                    if not rows and normalized_streamer:
-                        fallback_hits += 1
-                        started_at = time.perf_counter()
-                        cur.execute(
-                            """
-                            SELECT fe.fingerprint_id, (1 - (fe.embedding <=> %s::vector)) AS score
-                            FROM fingerprint_embeddings fe
-                            JOIN fingerprints f ON f.id = fe.fingerprint_id
-                            JOIN videos v ON v.id = f.video_id
-                            JOIN creators c ON c.id = v.creator_id
-                            WHERE LOWER(c.name) = %s
-                            ORDER BY fe.embedding <=> %s::vector
-                            LIMIT %s
-                            """,
-                            (q, normalized_streamer, q, int(top_k)),
-                        )
-                        rows = cur.fetchall()
-                        fallback_query_seconds += time.perf_counter() - started_at
                     all_ids.append([int(r[0]) for r in rows])
                     all_scores.append([float(r[1]) for r in rows])
 
         logger.info(
-            "timing event=vector_store_knn query_count=%d creator_id=%d probes=%d primary_seconds=%.2f fallback_seconds=%.2f fallback_hits=%d first_result_count=%d streamer=%s",
+            "timing event=vector_store_knn query_count=%d creator_id=%d probes=%d primary_seconds=%.2f first_result_count=%d",
             len(query_rows),
             int(creator_id),
             max(int(self.pgvector_probes), 1),
             primary_query_seconds,
-            fallback_query_seconds,
-            fallback_hits,
             len(all_ids[0]) if all_ids else 0,
-            normalized_streamer or "n/a",
         )
 
         if not all_ids or not all_ids[0]:

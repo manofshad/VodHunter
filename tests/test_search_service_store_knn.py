@@ -55,7 +55,7 @@ class FakeStoreWithKnn:
         self.streamer = name
         return 42
 
-    def query_similar_fingerprint_ids(self, query_embeddings: np.ndarray, top_k: int, creator_id: int, streamer_name: str | None = None):
+    def query_similar_fingerprint_ids(self, query_embeddings: np.ndarray, top_k: int, creator_id: int):
         self.called += 1
         self.creator_id = creator_id
         return (

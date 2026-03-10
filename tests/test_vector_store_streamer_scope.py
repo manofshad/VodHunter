@@ -62,7 +62,6 @@ class TestVectorStoreStreamerScope(unittest.TestCase):
             query_embeddings=np.array([[0.1, 0.2]], dtype=np.float32),
             top_k=2,
             creator_id=99,
-            streamer_name="xQc",
         )
 
         self.assertAlmostEqual(scores[0][0], 0.91, places=6)
@@ -72,26 +71,6 @@ class TestVectorStoreStreamerScope(unittest.TestCase):
         self.assertNotIn("JOIN creators c ON c.id = v.creator_id", query_sql)
         self.assertIn("WHERE creator_id = %s", query_sql)
         self.assertEqual(query_params[1], 99)
-
-    def test_query_similar_fingerprint_ids_falls_back_to_legacy_streamer_query(self) -> None:
-        cursor = FakeCursor()
-        cursor._fetchall_results = [[], [(11, 0.91), (12, 0.88)]]
-        store = VectorStore.__new__(VectorStore)
-        store.pgvector_probes = 10
-        store._connect = lambda: FakeConnection(cursor)  # type: ignore[method-assign]
-
-        _, ids = store.query_similar_fingerprint_ids(
-            query_embeddings=np.array([[0.1, 0.2]], dtype=np.float32),
-            top_k=2,
-            creator_id=99,
-            streamer_name="xQc",
-        )
-
-        self.assertEqual(ids.tolist(), [[11, 12]])
-        fallback_sql, fallback_params = cursor.executed[2]
-        self.assertIn("JOIN creators c ON c.id = v.creator_id", fallback_sql)
-        self.assertIn("WHERE LOWER(c.name) = %s", fallback_sql)
-        self.assertEqual(fallback_params[1], "xqc")
 
     def test_get_creator_id_by_name_normalizes_input(self) -> None:
         cursor = FakeCursor()
