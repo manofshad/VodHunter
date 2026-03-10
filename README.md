@@ -10,7 +10,8 @@ VodHunter helps viewers recover the full context behind viral clips while also h
 
 ---
 
-<img width="1470" height="773" alt="image" src="https://github.com/user-attachments/assets/345c3654-5ca4-41d6-a694-26c727ab5d45" />
+<img width="1460" height="768" alt="image" src="https://github.com/user-attachments/assets/7cb3d336-f7e3-43b2-b9a0-e8efe11d9a46" />
+
 
 
 ---
