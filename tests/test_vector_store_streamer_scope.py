@@ -105,6 +105,24 @@ class TestVectorStoreStreamerScope(unittest.TestCase):
         self.assertIn("SELECT c.name", cursor.executed[0][0])
         self.assertIn("GROUP BY c.name", cursor.executed[0][0])
 
+    def test_update_video_metadata_updates_thumbnail_and_processed(self) -> None:
+        cursor = FakeCursor()
+        store = VectorStore.__new__(VectorStore)
+        store._connect = lambda: FakeConnection(cursor)  # type: ignore[method-assign]
+
+        store.update_video_metadata(
+            55,
+            title="Updated title",
+            thumbnail_url="https://cdn/thumb.jpg",
+            processed=False,
+        )
+
+        query, params = cursor.executed[0]
+        self.assertIn("title = %s", query)
+        self.assertIn("thumbnail_url = %s", query)
+        self.assertIn("processed = %s", query)
+        self.assertEqual(params, ["Updated title", "https://cdn/thumb.jpg", False, 55])
+
 
 if __name__ == "__main__":
     unittest.main()

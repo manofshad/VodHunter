@@ -161,20 +161,32 @@ class TwitchMonitor:
                 return datetime.min
 
         latest = max(rows, key=_created)
-        vod_id = str(latest.get("id", "")).strip()
+        return self.normalize_vod_metadata(latest)
+
+    @classmethod
+    def normalize_vod_metadata(cls, raw_vod: dict[str, Any]) -> dict[str, Any] | None:
+        vod_id = str(raw_vod.get("id", "")).strip()
         if not vod_id:
             return None
 
-        duration_raw = str(latest.get("duration", "")).strip()
+        duration_raw = str(raw_vod.get("duration", "")).strip()
         return {
             "id": vod_id,
-            "url": self.canonical_vod_url(vod_id),
-            "title": str(latest.get("title", "Untitled stream")),
-            "created_at": str(latest.get("created_at", "")),
+            "url": cls.canonical_vod_url(vod_id),
+            "title": str(raw_vod.get("title", "Untitled stream")),
+            "thumbnail_url": cls.normalize_thumbnail_url(raw_vod.get("thumbnail_url")),
+            "created_at": str(raw_vod.get("created_at", "")),
             "duration": duration_raw,
-            "duration_seconds": self.parse_duration_to_seconds(duration_raw),
-            "viewable": str(latest.get("viewable", "public")),
+            "duration_seconds": cls.parse_duration_to_seconds(duration_raw),
+            "viewable": str(raw_vod.get("viewable", "public")),
         }
+
+    @staticmethod
+    def normalize_thumbnail_url(thumbnail_url: Any, width: int = 320, height: int = 180) -> str | None:
+        raw = str(thumbnail_url or "").strip()
+        if not raw:
+            return None
+        return raw.replace("%{width}", str(int(width))).replace("%{height}", str(int(height)))
 
     @staticmethod
     def canonical_vod_url(vod_id: str) -> str:

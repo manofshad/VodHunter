@@ -34,6 +34,7 @@ class StubSearchManager:
             found=False,
             streamer=streamer,
             reason="upload test",
+            thumbnail_url=None,
             video_url_at_timestamp=None,
         )
 
@@ -46,6 +47,7 @@ class StubSearchManager:
             found=False,
             streamer=streamer,
             reason="url test",
+            thumbnail_url=None,
             video_url_at_timestamp=None,
         )
 
@@ -73,6 +75,7 @@ class TestSearchApiEndpoint(unittest.TestCase):
         file = UploadFile(filename="clip.mp4", file=io.BytesIO(b"data"))
         response = search_clip(request, file=file, tiktok_url=None, streamer="xQc")
         self.assertFalse(response.found)
+        self.assertIsNone(response.thumbnail_url)
         self.assertIsNone(response.video_url_at_timestamp)
         self.assertEqual(self.search_manager.upload_calls, 1)
         self.assertEqual(self.search_manager.url_calls, 0)

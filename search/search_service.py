@@ -131,7 +131,7 @@ class SearchService:
                     reason="Aligned video metadata not found",
                 )
 
-            video_id, video_url, title, streamer = video_row
+            video_id, video_url, title, streamer, thumbnail_url = video_row
             video_url_at_timestamp = build_twitch_timestamp_url(video_url, alignment.timestamp_seconds)
             logger.info(
                 "timing event=search_pipeline seconds=%.2f preprocess_seconds=%.2f embed_seconds=%.2f vector_query_seconds=%.2f alignment_seconds=%.2f result=found streamer=%s",
@@ -148,6 +148,7 @@ class SearchService:
                 video_id=video_id,
                 video_url=video_url,
                 video_url_at_timestamp=video_url_at_timestamp,
+                thumbnail_url=thumbnail_url,
                 title=title,
                 timestamp_seconds=alignment.timestamp_seconds,
                 score=alignment.score,

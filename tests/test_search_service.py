@@ -61,6 +61,7 @@ class FakeStore:
             "https://www.twitch.tv/videos/2699020769",
             "Sample title",
             "xqc",
+            "https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg",
         )
 
 
@@ -92,6 +93,7 @@ class TestSearchService(unittest.TestCase):
         self.assertEqual(store.last_streamer, "xqc")
         self.assertEqual(store.last_creator_id, 12)
         self.assertEqual(result.video_url_at_timestamp, "https://www.twitch.tv/videos/2699020769?t=22m48s")
+        self.assertEqual(result.thumbnail_url, "https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg")
 
     def test_not_found_result_has_no_timestamp_url(self) -> None:
         service = SearchService(

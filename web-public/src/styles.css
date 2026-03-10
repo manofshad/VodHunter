@@ -326,6 +326,23 @@ button:disabled {
   text-transform: uppercase;
 }
 
+.thumbnail-frame {
+  display: block;
+  width: 100%;
+  min-height: 108px;
+  border-radius: 18px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.thumbnail-image {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+}
+
 .thumbnail-link:hover {
   filter: brightness(1.05);
 }

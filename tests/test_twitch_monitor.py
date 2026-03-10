@@ -27,12 +27,14 @@ class TestTwitchMonitor(unittest.TestCase):
                     "title": "Older",
                     "duration": "1h0m0s",
                     "created_at": "2026-02-15T10:00:00Z",
+                    "thumbnail_url": "https://static-cdn.jtvnw.net/cf_vods/d2/vod-thumb-%{width}x%{height}.jpg",
                 },
                 {
                     "id": "222",
                     "title": "Newest",
                     "duration": "2h3m4s",
                     "created_at": "2026-02-15T12:00:00Z",
+                    "thumbnail_url": "https://static-cdn.jtvnw.net/cf_vods/d2/new-thumb-%{width}x%{height}.jpg",
                 },
             ]
         }
@@ -45,6 +47,10 @@ class TestTwitchMonitor(unittest.TestCase):
         self.assertEqual(vod["id"], "222")
         self.assertEqual(vod["url"], "https://www.twitch.tv/videos/222")
         self.assertEqual(vod["duration_seconds"], 7384)
+        self.assertEqual(
+            vod["thumbnail_url"],
+            "https://static-cdn.jtvnw.net/cf_vods/d2/new-thumb-320x180.jpg",
+        )
 
 
 if __name__ == "__main__":

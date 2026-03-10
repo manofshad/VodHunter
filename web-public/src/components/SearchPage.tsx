@@ -35,6 +35,7 @@ export default function SearchPage() {
   const [streamerError, setStreamerError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [lastSubmittedUrl, setLastSubmittedUrl] = useState("");
+  const [thumbnailLoadFailed, setThumbnailLoadFailed] = useState(false);
   const streamerSelectRef = useRef<HTMLSelectElement | null>(null);
 
   const hasUrl = tiktokUrl.trim().length > 0;
@@ -91,6 +92,7 @@ export default function SearchPage() {
       setStreamerError(null);
       setRequestError(null);
       setResult(null);
+      setThumbnailLoadFailed(false);
       setLastSubmittedUrl(submittedUrl);
 
       const next = await searchClip({ type: "tiktok_url", tiktokUrl: submittedUrl, streamer });
@@ -190,7 +192,23 @@ export default function SearchPage() {
             </div>
 
             <div className="result-card-top">
-              {resultHref ? (
+              {resultHref && result.thumbnail_url && !thumbnailLoadFailed ? (
+                <a
+                  className="thumbnail-link thumbnail-frame"
+                  href={resultHref}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label={`Open ${result.title ?? "matched VOD"} at timestamp`}
+                >
+                  <img
+                    className="thumbnail-image"
+                    src={result.thumbnail_url}
+                    alt={result.title ?? "Matched Twitch VOD thumbnail"}
+                    loading="lazy"
+                    onError={() => setThumbnailLoadFailed(true)}
+                  />
+                </a>
+              ) : resultHref ? (
                 <a
                   className="thumbnail-placeholder thumbnail-link"
                   href={resultHref}

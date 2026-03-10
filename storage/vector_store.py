@@ -67,8 +67,15 @@ class VectorStore:
                         creator_id BIGINT REFERENCES creators(id),
                         url TEXT,
                         title TEXT,
+                        thumbnail_url TEXT,
                         processed BOOLEAN DEFAULT FALSE
                     )
+                    """
+                )
+                cur.execute(
+                    """
+                    ALTER TABLE videos
+                    ADD COLUMN IF NOT EXISTS thumbnail_url TEXT
                     """
                 )
                 cur.execute(
@@ -186,12 +193,12 @@ class VectorStore:
                     ids.append(int(row[0]))
         return ids
 
-    def get_video_by_url(self, url: str) -> tuple[int, int, str, str, bool] | None:
+    def get_video_by_url(self, url: str) -> tuple[int, int, str, str, str | None, bool] | None:
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT id, creator_id, url, title, processed
+                    SELECT id, creator_id, url, title, thumbnail_url, processed
                     FROM videos
                     WHERE url = %s
                     LIMIT 1
@@ -201,7 +208,7 @@ class VectorStore:
                 row = cur.fetchone()
         if row is None:
             return None
-        return int(row[0]), int(row[1]), str(row[2]), str(row[3]), bool(row[4])
+        return int(row[0]), int(row[1]), str(row[2]), str(row[3]), str(row[4]) if row[4] else None, bool(row[5])
 
     def create_or_get_creator(self, name: str, url: str) -> int:
         with self._connect() as conn:
@@ -242,21 +249,60 @@ class VectorStore:
             return None
         return int(row[0])
 
-    def create_video(self, creator_id: int, url: str, title: str, processed: bool) -> int:
+    def create_video(
+        self,
+        creator_id: int,
+        url: str,
+        title: str,
+        processed: bool,
+        thumbnail_url: str | None = None,
+    ) -> int:
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO videos (creator_id, url, title, processed)
-                    VALUES (%s, %s, %s, %s)
+                    INSERT INTO videos (creator_id, url, title, thumbnail_url, processed)
+                    VALUES (%s, %s, %s, %s, %s)
                     RETURNING id
                     """,
-                    (int(creator_id), url, title, bool(processed)),
+                    (int(creator_id), url, title, thumbnail_url, bool(processed)),
                 )
                 row = cur.fetchone()
         if row is None:
             raise RuntimeError("Failed to create video")
         return int(row[0])
+
+    def update_video_metadata(
+        self,
+        video_id: int,
+        *,
+        title: str | None = None,
+        thumbnail_url: str | None = None,
+        processed: bool | None = None,
+    ) -> None:
+        assignments: list[str] = []
+        values: list[Any] = []
+
+        if title is not None:
+            assignments.append("title = %s")
+            values.append(title)
+        if thumbnail_url is not None:
+            assignments.append("thumbnail_url = %s")
+            values.append(thumbnail_url)
+        if processed is not None:
+            assignments.append("processed = %s")
+            values.append(bool(processed))
+
+        if not assignments:
+            return
+
+        values.append(int(video_id))
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"UPDATE videos SET {', '.join(assignments)} WHERE id = %s",
+                    values,
+                )
 
     def mark_video_processed(self, video_id: int, processed: bool = True) -> None:
         with self._connect() as conn:
@@ -406,12 +452,12 @@ class VectorStore:
                 rows = cur.fetchall()
         return [(int(r[0]), int(r[1]), float(r[2])) for r in rows]
 
-    def get_video_with_creator(self, video_id: int) -> tuple[int, str, str, str] | None:
+    def get_video_with_creator(self, video_id: int) -> tuple[int, str, str, str, str | None] | None:
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT videos.id, videos.url, videos.title, creators.name
+                    SELECT videos.id, videos.url, videos.title, creators.name, videos.thumbnail_url
                     FROM videos
                     JOIN creators ON creators.id = videos.creator_id
                     WHERE videos.id = %s
@@ -421,7 +467,8 @@ class VectorStore:
                 row = cur.fetchone()
         if row is None:
             return None
-        return int(row[0]), str(row[1]), str(row[2]), str(row[3])
+        return int(row[0]), str(row[1]), str(row[2]), str(row[3]), str(row[4]) if row[4] else None
+
 
     def list_live_sessions(self, limit: int, offset: int) -> list[dict[str, Any]]:
         with self._connect() as conn:

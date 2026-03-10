@@ -42,6 +42,7 @@ class LiveArchiveVODSource(AudioSource):
         self._user_id: str | None = None
         self._vod_platform_id: str | None = None
         self._vod_title: str | None = None
+        self._vod_thumbnail_url: str | None = None
         self._last_seen_duration_seconds = 0
         self._last_is_live: bool | None = None
         self._no_growth_checks = 0
@@ -140,6 +141,7 @@ class LiveArchiveVODSource(AudioSource):
         self._vod_platform_id = str(vod["id"])
         self.current_vod_url = str(vod["url"])
         self._vod_title = str(vod.get("title") or f"Live stream by {self.streamer}")
+        self._vod_thumbnail_url = str(vod["thumbnail_url"]) if vod.get("thumbnail_url") else None
 
         creator_url = f"https://twitch.tv/{self.streamer}"
         creator_id = self.store.create_or_get_creator(self.streamer, creator_url)
@@ -151,11 +153,17 @@ class LiveArchiveVODSource(AudioSource):
                 creator_id=creator_id,
                 url=self.current_vod_url,
                 title=self._vod_title,
+                thumbnail_url=self._vod_thumbnail_url,
                 processed=False,
             )
         else:
             self.video_id = int(existing_video[0])
-            self.store.mark_video_processed(self.video_id, processed=False)
+            self.store.update_video_metadata(
+                self.video_id,
+                title=self._vod_title,
+                thumbnail_url=self._vod_thumbnail_url,
+                processed=False,
+            )
 
         state = self.store.get_live_ingest_state(self._vod_platform_id)
         if state is None:

@@ -69,6 +69,7 @@ class FakeStoreWithKnn:
             "https://www.twitch.tv/videos/2699020769",
             "Sample title",
             "xqc",
+            None,
         )
 
 

@@ -16,6 +16,7 @@ class VODSource(AudioSource):
         creator_name: str,
         video_url: str,
         title: str,
+        thumbnail_url: str | None = None,
         chunk_seconds: int = 60,
         temp_dir: str = "temp_vod_chunks",
         store=None,
@@ -24,6 +25,7 @@ class VODSource(AudioSource):
         self.creator_name = creator_name
         self.video_url = video_url
         self.title = title
+        self.thumbnail_url = thumbnail_url
         self.chunk_seconds = chunk_seconds
         self.temp_dir = temp_dir
         self.store = store
@@ -52,6 +54,7 @@ class VODSource(AudioSource):
             creator_id=creator_id,
             url=self.video_url,
             title=self.title,
+            thumbnail_url=self.thumbnail_url,
             processed=True,
         )
 
