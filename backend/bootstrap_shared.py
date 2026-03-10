@@ -52,8 +52,6 @@ def _build_query_embedder(embedder: Embedder):
         client=client,
         vector_dim=config.VECTOR_DIM,
         model_version=config.MODAL_SEARCH_MODEL_NAME,
-        fallback_embedder=embedder,
-        fallback_to_local=config.MODAL_SEARCH_FALLBACK_TO_LOCAL,
     )
 
 

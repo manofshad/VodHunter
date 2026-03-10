@@ -27,8 +27,6 @@ class TestSearchEmbedderBootstrap(unittest.TestCase):
         ), patch.object(
             config, "MODAL_SEARCH_TIMEOUT_SECONDS", 5.0
         ), patch.object(
-            config, "MODAL_SEARCH_FALLBACK_TO_LOCAL", True
-        ), patch.object(
             config, "MODAL_SEARCH_MODEL_NAME", "ast"
         ), patch(
             "backend.config.os.getenv",

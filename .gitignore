@@ -57,3 +57,6 @@ tmp/
 # Project data artifacts (generated at runtime)
 data/
 temp_live_chunks/
+
+# Docs
+PRD.md

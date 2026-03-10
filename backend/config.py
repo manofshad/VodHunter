@@ -43,21 +43,6 @@ MODAL_SEARCH_TIMEOUT_SECONDS = float(os.getenv("MODAL_SEARCH_TIMEOUT_SECONDS", "
 MODAL_SEARCH_MODEL_NAME = os.getenv("MODAL_SEARCH_MODEL_NAME", "").strip()
 
 
-def _read_bool(name: str, default: bool) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    normalized = raw.strip().lower()
-    if normalized in {"1", "true", "yes", "on"}:
-        return True
-    if normalized in {"0", "false", "no", "off"}:
-        return False
-    raise ValueError(f"{name} must be a boolean value")
-
-
-MODAL_SEARCH_FALLBACK_TO_LOCAL = _read_bool("MODAL_SEARCH_FALLBACK_TO_LOCAL", True)
-
-
 def validate_storage_config() -> None:
     if not DATABASE_URL:
         raise ValueError("DATABASE_URL is required")

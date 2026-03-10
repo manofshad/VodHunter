@@ -6,8 +6,6 @@ from uuid import uuid4
 
 import numpy as np
 
-from pipeline.embedder import Embedder
-from search.local_query_embedder import LocalQueryEmbedder
 from search.modal_embedding_client import ModalEmbeddingClient, ModalEmbeddingError
 from search.modal_types import ModalEmbeddingRequest
 
@@ -20,14 +18,10 @@ class ModalQueryEmbedder:
         client: ModalEmbeddingClient,
         vector_dim: int,
         model_version: str = "",
-        fallback_embedder: Embedder | None = None,
-        fallback_to_local: bool = True,
     ):
         self.client = client
         self.vector_dim = int(vector_dim)
         self.model_version = model_version
-        self.fallback_to_local = fallback_to_local
-        self.local_fallback = LocalQueryEmbedder(fallback_embedder) if fallback_embedder is not None else None
 
     def embed(self, wav_path: str) -> tuple[np.ndarray, np.ndarray]:
         request_id = uuid4().hex
@@ -50,14 +44,6 @@ class ModalQueryEmbedder:
             self._validate_response(embeddings, timestamps, response.embedding_dim)
             return embeddings, timestamps
         except Exception as exc:
-            if self.fallback_to_local and self.local_fallback is not None:
-                logger.warning(
-                    "modal query embedding failed; using local fallback request_id=%s filename=%s error=%s",
-                    request_id,
-                    filename,
-                    exc,
-                )
-                return self.local_fallback.embed(wav_path)
             if isinstance(exc, ModalEmbeddingError):
                 raise RuntimeError(str(exc)) from exc
             raise
