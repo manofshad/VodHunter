@@ -27,9 +27,9 @@ def build_common_state() -> dict[str, object]:
     store = VectorStore(
         database_url=config.DATABASE_URL,
         vector_dim=config.VECTOR_DIM,
-        pgvector_probes=config.PGVECTOR_PROBES,
+        hnsw_ef_search=config.HNSW_EF_SEARCH,
     )
-    store.init_db()
+    store.ensure_schema_ready()
 
     embedder = Embedder()
     return {

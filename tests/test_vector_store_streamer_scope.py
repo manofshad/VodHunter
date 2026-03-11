@@ -55,7 +55,7 @@ class TestVectorStoreStreamerScope(unittest.TestCase):
     def test_query_similar_fingerprint_ids_filters_by_creator_id(self) -> None:
         cursor = FakeCursor()
         store = VectorStore.__new__(VectorStore)
-        store.pgvector_probes = 10
+        store.hnsw_ef_search = 40
         store._connect = lambda: FakeConnection(cursor)  # type: ignore[method-assign]
 
         scores, ids = store.query_similar_fingerprint_ids(
@@ -67,6 +67,8 @@ class TestVectorStoreStreamerScope(unittest.TestCase):
         self.assertAlmostEqual(scores[0][0], 0.91, places=6)
         self.assertAlmostEqual(scores[0][1], 0.88, places=6)
         self.assertEqual(ids.tolist(), [[11, 12]])
+        self.assertEqual(len(cursor.executed), 2)
+        self.assertIn("SET LOCAL hnsw.ef_search = 40", cursor.executed[0][0])
         query_sql, query_params = cursor.executed[1]
         self.assertNotIn("JOIN creators c ON c.id = v.creator_id", query_sql)
         self.assertIn("WHERE creator_id = %s", query_sql)

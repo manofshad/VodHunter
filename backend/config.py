@@ -6,7 +6,7 @@ DATA_DIR = ROOT_DIR / "data"
 
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 VECTOR_DIM = int(os.getenv("VECTOR_DIM", "768"))
-PGVECTOR_PROBES = int(os.getenv("PGVECTOR_PROBES", "10"))
+HNSW_EF_SEARCH = int(os.getenv("HNSW_EF_SEARCH", "40"))
 TEMP_LIVE_DIR = str(DATA_DIR / "temp_live_chunks")
 TEMP_BACKFILL_DIR = str(DATA_DIR / "temp_backfill_chunks")
 TEMP_SEARCH_UPLOAD_DIR = str(DATA_DIR / "temp_search_uploads")
@@ -40,7 +40,7 @@ ADMIN_API_ORIGIN = os.getenv("ADMIN_API_ORIGIN", "").strip()
 SEARCH_QUERY_EMBEDDER_BACKEND = os.getenv("SEARCH_QUERY_EMBEDDER_BACKEND", "local").strip().lower()
 MODAL_SEARCH_APP_NAME = os.getenv("MODAL_SEARCH_APP_NAME", "").strip()
 MODAL_SEARCH_FUNCTION_NAME = os.getenv("MODAL_SEARCH_FUNCTION_NAME", "").strip()
-MODAL_SEARCH_TIMEOUT_SECONDS = float(os.getenv("MODAL_SEARCH_TIMEOUT_SECONDS", "30"))
+MODAL_SEARCH_TIMEOUT_SECONDS = float(os.getenv("MODAL_SEARCH_TIMEOUT_SECONDS", "60"))
 MODAL_SEARCH_MODEL_NAME = os.getenv("MODAL_SEARCH_MODEL_NAME", "").strip()
 
 
