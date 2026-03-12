@@ -1,4 +1,4 @@
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Form, HTTPException, Request
 
 from backend.schemas import ErrorResponse, SearchResponse, StreamerListItem
 from backend.services.remote_clip_downloader import DownloadError, InvalidTikTokUrlError
@@ -14,19 +14,17 @@ router = APIRouter(prefix="/api", tags=["search"])
 )
 def search_clip(
     request: Request,
-    file: UploadFile | None = File(default=None),
     tiktok_url: str | None = Form(default=None),
     streamer: str | None = Form(default=None),
 ) -> SearchResponse:
-    has_file = file is not None
     has_url = bool((tiktok_url or "").strip())
     normalized_streamer = (streamer or "").strip().lower()
-    if has_file == has_url:
+    if not has_url:
         raise HTTPException(
             status_code=400,
             detail={
                 "code": "INVALID_SEARCH_INPUT",
-                "message": "Provide exactly one of file or tiktok_url",
+                "message": "tiktok_url is required",
             },
         )
     if not normalized_streamer:
@@ -51,12 +49,8 @@ def search_clip(
         )
 
     try:
-        if has_file:
-            assert file is not None
-            result = search_manager.search_upload(file, normalized_streamer)
-        else:
-            assert tiktok_url is not None
-            result = search_manager.search_tiktok_url(tiktok_url, normalized_streamer)
+        assert tiktok_url is not None
+        result = search_manager.search_tiktok_url(tiktok_url, normalized_streamer)
         return SearchResponse.from_result(result)
     except InputDurationExceededError as exc:
         raise HTTPException(

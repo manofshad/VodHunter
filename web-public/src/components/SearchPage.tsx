@@ -95,7 +95,7 @@ export default function SearchPage() {
       setThumbnailLoadFailed(false);
       setLastSubmittedUrl(submittedUrl);
 
-      const next = await searchClip({ type: "tiktok_url", tiktokUrl: submittedUrl, streamer });
+      const next = await searchClip({ tiktokUrl: submittedUrl, streamer });
       setResult(next);
     } catch (err) {
       setRequestError(err instanceof Error ? err.message : "Search failed");

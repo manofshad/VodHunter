@@ -9,7 +9,6 @@ VECTOR_DIM = int(os.getenv("VECTOR_DIM", "768"))
 HNSW_EF_SEARCH = int(os.getenv("HNSW_EF_SEARCH", "40"))
 TEMP_LIVE_DIR = str(DATA_DIR / "temp_live_chunks")
 TEMP_BACKFILL_DIR = str(DATA_DIR / "temp_backfill_chunks")
-TEMP_SEARCH_UPLOAD_DIR = str(DATA_DIR / "temp_search_uploads")
 TEMP_SEARCH_DOWNLOAD_DIR = str(DATA_DIR / "temp_search_downloads")
 TEMP_SEARCH_PREPROCESS_DIR = str(DATA_DIR / "temp_search")
 TIKTOK_DOWNLOAD_TIMEOUT_SECONDS = 90

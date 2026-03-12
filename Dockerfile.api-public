@@ -20,7 +20,7 @@ COPY storage ./storage
 COPY sources ./sources
 COPY services ./services
 
-RUN mkdir -p data/temp_search_uploads data/temp_search_downloads data/temp_search
+RUN mkdir -p data/temp_search_downloads data/temp_search
 
 EXPOSE 8000
 
