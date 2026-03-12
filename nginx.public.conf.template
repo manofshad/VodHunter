@@ -11,7 +11,7 @@ server {
     error_page 429 = @search_rate_limited;
 
     location = /api/search/clip {
-        limit_req zone=public_search burst=2;
+        limit_req zone=public_search burst=2 nodelay;
         proxy_pass ${PUBLIC_API_UPSTREAM};
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
