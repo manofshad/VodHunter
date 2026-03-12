@@ -1,3 +1,4 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
 fastapi>=0.110.0
 uvicorn>=0.28.0
 python-multipart>=0.0.9
@@ -7,3 +8,7 @@ sqlalchemy>=2.0.0
 psycopg[binary]>=3.2.0
 pgvector>=0.3.0
 modal>=0.73.0
+numpy>=1.26.0
+soundfile>=0.12.1
+transformers>=4.40.0
+torch>=2.2.0

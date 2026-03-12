@@ -11,9 +11,7 @@ RUN apt-get update \
 
 COPY backend/requirements.txt ./backend/requirements.txt
 
-RUN pip install --no-cache-dir -r backend/requirements.txt \
-    && pip install --no-cache-dir numpy soundfile transformers \
-    && pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch
+RUN pip install --no-cache-dir -r backend/requirements.txt
 
 COPY backend ./backend
 COPY search ./search
