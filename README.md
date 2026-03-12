@@ -115,7 +115,24 @@ These stored fingerprints allow the system to later match user clips to the corr
 
 ---
 
+# Testing
+
+Install dev dependencies with:
+
+```bash
+pip install -r backend/requirements-dev.txt
+```
+
+Run the Python test suite with:
+
+```bash
+python3 -m pytest
+```
+
+Keep test-only dependencies in [`backend/requirements-dev.txt`](/Volumes/workstation/twitchVodHunter/VodHunter/backend/requirements-dev.txt), not [`backend/requirements.txt`](/Volumes/workstation/twitchVodHunter/VodHunter/backend/requirements.txt), because the production API image installs from the runtime requirements file.
+
+---
+
 # License
 
 This project is licensed under the **MIT License**.
-

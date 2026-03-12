@@ -1,51 +1,35 @@
-import unittest
-from pathlib import Path
-import sys
-
 import numpy as np
-
-ROOT_DIR = Path(__file__).resolve().parents[1]
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
-
 from search.models import AlignmentResult
 from search.search_service import SearchService
 
-
 class FakePreprocessor:
+
     def prepare(self, clip_path: str) -> str:
         return clip_path
 
     def cleanup(self, path: str) -> None:
         return None
 
-
 class FakeQueryEmbedder:
-    def embed(self, wav_path: str):
-        return np.array([[0.1, 0.2]], dtype=np.float32), np.array([0.0], dtype=np.float32)
 
+    def embed(self, wav_path: str):
+        return (np.array([[0.1, 0.2]], dtype=np.float32), np.array([0.0], dtype=np.float32))
 
 class FakeMatcher:
     top_k = 10
 
     def match(self, query_embeddings, db_vectors, db_ids):
-        raise AssertionError("legacy matcher should not be called when store KNN API exists")
-
+        raise AssertionError('legacy matcher should not be called when store KNN API exists')
 
 class FakeAlignment:
+
     def align(self, neighbor_ids, query_timestamps):
         if neighbor_ids.size == 0:
-            return AlignmentResult(found=False, reason="no neighbors")
-        return AlignmentResult(
-            found=True,
-            video_id=777,
-            timestamp_seconds=120,
-            score=0.9,
-            reason="ok",
-        )
-
+            return AlignmentResult(found=False, reason='no neighbors')
+        return AlignmentResult(found=True, video_id=777, timestamp_seconds=120, score=0.9, reason='ok')
 
 class FakeStoreWithKnn:
+
     def __init__(self):
         self.called = 0
         self.streamer: str | None = None
@@ -58,39 +42,18 @@ class FakeStoreWithKnn:
     def query_similar_fingerprint_ids(self, query_embeddings: np.ndarray, top_k: int, creator_id: int):
         self.called += 1
         self.creator_id = creator_id
-        return (
-            np.array([[0.99]], dtype=np.float32),
-            np.array([[10]], dtype=np.int64),
-        )
+        return (np.array([[0.99]], dtype=np.float32), np.array([[10]], dtype=np.int64))
 
     def get_video_with_creator(self, video_id: int):
-        return (
-            777,
-            "https://www.twitch.tv/videos/2699020769",
-            "Sample title",
-            "xqc",
-            None,
-        )
+        return (777, 'https://www.twitch.tv/videos/2699020769', 'Sample title', 'xqc', None)
 
+class TestSearchServiceStoreKnn:
 
-class TestSearchServiceStoreKnn(unittest.TestCase):
     def test_uses_store_knn_path_when_available(self) -> None:
         store = FakeStoreWithKnn()
-        service = SearchService(
-            store=store,  # type: ignore[arg-type]
-            preprocessor=FakePreprocessor(),  # type: ignore[arg-type]
-            query_embedder=FakeQueryEmbedder(),  # type: ignore[arg-type]
-            matcher=FakeMatcher(),  # type: ignore[arg-type]
-            alignment=FakeAlignment(),  # type: ignore[arg-type]
-        )
-
-        result = service.search_file("clip.mp4", "xQc")
-
-        self.assertTrue(result.found)
-        self.assertEqual(store.called, 1)
-        self.assertEqual(store.streamer, "xqc")
-        self.assertEqual(store.creator_id, 42)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        service = SearchService(store=store, preprocessor=FakePreprocessor(), query_embedder=FakeQueryEmbedder(), matcher=FakeMatcher(), alignment=FakeAlignment())
+        result = service.search_file('clip.mp4', 'xQc')
+        assert result.found
+        assert store.called == 1
+        assert store.streamer == 'xqc'
+        assert store.creator_id == 42

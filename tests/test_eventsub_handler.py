@@ -1,14 +1,9 @@
 import hashlib
 import hmac
 import json
-import unittest
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
-import sys
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
+import pytest
 
 from backend.services.eventsub_handler import EventSubAuthError, EventSubHandler
 
@@ -48,92 +43,113 @@ def make_headers(secret: str, body: bytes, message_type: str, message_id: str, t
     }
 
 
-class TestEventSubHandler(unittest.TestCase):
-    def setUp(self) -> None:
-        self.monitor = FakeMonitorManager()
-        self.secret = "test-secret"
-        self.handler = EventSubHandler(
-            monitor_manager=self.monitor,  # type: ignore[arg-type]
-            secret=self.secret,
-            message_ttl_seconds=600,
-            max_clock_skew_seconds=600,
-        )
+@pytest.fixture
+def handler_state():
+    monitor = FakeMonitorManager()
+    secret = "test-secret"
+    handler = EventSubHandler(
+        monitor_manager=monitor,  # type: ignore[arg-type]
+        secret=secret,
+        message_ttl_seconds=600,
+        max_clock_skew_seconds=600,
+    )
+    return handler, monitor, secret
 
-    def test_verification_challenge_returns_plain_text(self) -> None:
-        body = json.dumps({"challenge": "abc123"}).encode("utf-8")
-        ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        headers = make_headers(self.secret, body, "webhook_callback_verification", "mid-1", ts)
-        result = self.handler.process(headers=headers, raw_body=body)
-        self.assertEqual(result.status_code, 200)
-        self.assertEqual(result.body, "abc123")
-        self.assertEqual(result.media_type, "text/plain")
 
-    def test_notification_calls_online_offline_handlers(self) -> None:
-        ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        body_online = json.dumps(
-            {
-                "subscription": {"type": "stream.online"},
-                "event": {"broadcaster_user_login": "alice"},
-            }
-        ).encode("utf-8")
-        headers_online = make_headers(self.secret, body_online, "notification", "mid-online", ts)
-        result_online = self.handler.process(headers=headers_online, raw_body=body_online)
-        self.assertEqual(result_online.status_code, 204)
-        self.assertEqual(self.monitor.online_calls, ["alice"])
+def test_verification_challenge_returns_plain_text(handler_state) -> None:
+    handler, _monitor, secret = handler_state
+    body = json.dumps({"challenge": "abc123"}).encode("utf-8")
+    ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    headers = make_headers(secret, body, "webhook_callback_verification", "mid-1", ts)
 
-        body_offline = json.dumps(
-            {
-                "subscription": {"type": "stream.offline"},
-                "event": {"broadcaster_user_login": "alice"},
-            }
-        ).encode("utf-8")
-        headers_offline = make_headers(self.secret, body_offline, "notification", "mid-offline", ts)
-        result_offline = self.handler.process(headers=headers_offline, raw_body=body_offline)
-        self.assertEqual(result_offline.status_code, 204)
-        self.assertEqual(self.monitor.offline_calls, ["alice"])
+    result = handler.process(headers=headers, raw_body=body)
 
-    def test_invalid_signature_rejected(self) -> None:
-        body = b"{}"
-        ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        headers = {
-            "twitch-eventsub-message-id": "mid-2",
-            "twitch-eventsub-message-timestamp": ts,
-            "twitch-eventsub-message-signature": "sha256=bad",
-            "twitch-eventsub-message-type": "notification",
+    assert result.status_code == 200
+    assert result.body == "abc123"
+    assert result.media_type == "text/plain"
+
+
+def test_notification_calls_online_offline_handlers(handler_state) -> None:
+    handler, monitor, secret = handler_state
+    ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    body_online = json.dumps(
+        {
+            "subscription": {"type": "stream.online"},
+            "event": {"broadcaster_user_login": "alice"},
         }
-        with self.assertRaises(EventSubAuthError):
-            self.handler.process(headers=headers, raw_body=body)
+    ).encode("utf-8")
+    headers_online = make_headers(secret, body_online, "notification", "mid-online", ts)
 
-    def test_old_timestamp_rejected(self) -> None:
-        body = b"{}"
-        old_ts = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat().replace("+00:00", "Z")
-        headers = make_headers(self.secret, body, "notification", "mid-3", old_ts)
-        with self.assertRaises(EventSubAuthError):
-            self.handler.process(headers=headers, raw_body=body)
+    result_online = handler.process(headers=headers_online, raw_body=body_online)
 
-    def test_duplicate_message_returns_204_without_reprocessing(self) -> None:
-        ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        body = json.dumps(
-            {
-                "subscription": {"type": "stream.online"},
-                "event": {"broadcaster_user_login": "alice"},
-            }
-        ).encode("utf-8")
-        headers = make_headers(self.secret, body, "notification", "mid-dupe", ts)
-        first = self.handler.process(headers=headers, raw_body=body)
-        second = self.handler.process(headers=headers, raw_body=body)
-        self.assertEqual(first.status_code, 204)
-        self.assertEqual(second.status_code, 204)
-        self.assertEqual(self.monitor.online_calls, ["alice"])
+    assert result_online.status_code == 204
+    assert monitor.online_calls == ["alice"]
 
-    def test_revocation_marks_degraded(self) -> None:
-        ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        body = json.dumps({"subscription": {"status": "authorization_revoked"}}).encode("utf-8")
-        headers = make_headers(self.secret, body, "revocation", "mid-revoke", ts)
-        result = self.handler.process(headers=headers, raw_body=body)
-        self.assertEqual(result.status_code, 204)
-        self.assertTrue(self.monitor.degraded_calls)
+    body_offline = json.dumps(
+        {
+            "subscription": {"type": "stream.offline"},
+            "event": {"broadcaster_user_login": "alice"},
+        }
+    ).encode("utf-8")
+    headers_offline = make_headers(secret, body_offline, "notification", "mid-offline", ts)
+
+    result_offline = handler.process(headers=headers_offline, raw_body=body_offline)
+
+    assert result_offline.status_code == 204
+    assert monitor.offline_calls == ["alice"]
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_invalid_signature_rejected(handler_state) -> None:
+    handler, _monitor, _secret = handler_state
+    body = b"{}"
+    ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    headers = {
+        "twitch-eventsub-message-id": "mid-2",
+        "twitch-eventsub-message-timestamp": ts,
+        "twitch-eventsub-message-signature": "sha256=bad",
+        "twitch-eventsub-message-type": "notification",
+    }
+
+    with pytest.raises(EventSubAuthError):
+        handler.process(headers=headers, raw_body=body)
+
+
+def test_old_timestamp_rejected(handler_state) -> None:
+    handler, _monitor, secret = handler_state
+    body = b"{}"
+    old_ts = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat().replace("+00:00", "Z")
+    headers = make_headers(secret, body, "notification", "mid-3", old_ts)
+
+    with pytest.raises(EventSubAuthError):
+        handler.process(headers=headers, raw_body=body)
+
+
+def test_duplicate_message_returns_204_without_reprocessing(handler_state) -> None:
+    handler, monitor, secret = handler_state
+    ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    body = json.dumps(
+        {
+            "subscription": {"type": "stream.online"},
+            "event": {"broadcaster_user_login": "alice"},
+        }
+    ).encode("utf-8")
+    headers = make_headers(secret, body, "notification", "mid-dupe", ts)
+
+    first = handler.process(headers=headers, raw_body=body)
+    second = handler.process(headers=headers, raw_body=body)
+
+    assert first.status_code == 204
+    assert second.status_code == 204
+    assert monitor.online_calls == ["alice"]
+
+
+def test_revocation_marks_degraded(handler_state) -> None:
+    handler, monitor, secret = handler_state
+    ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    body = json.dumps({"subscription": {"status": "authorization_revoked"}}).encode("utf-8")
+    headers = make_headers(secret, body, "revocation", "mid-revoke", ts)
+
+    result = handler.process(headers=headers, raw_body=body)
+
+    assert result.status_code == 204
+    assert monitor.degraded_calls
