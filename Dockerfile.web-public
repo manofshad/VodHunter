@@ -15,9 +15,9 @@ RUN npm run build
 
 FROM nginx:1.27-alpine AS runtime
 
-ENV PUBLIC_API_UPSTREAM=http://api-public:8000
-
 COPY nginx.public.conf.template /etc/nginx/templates/default.conf.template
+COPY docker/web-public/40-validate-public-api-upstream.sh /docker-entrypoint.d/40-validate-public-api-upstream.sh
+RUN chmod +x /docker-entrypoint.d/40-validate-public-api-upstream.sh
 COPY --from=build /app/web-public/dist /usr/share/nginx/html
 
 EXPOSE 80
