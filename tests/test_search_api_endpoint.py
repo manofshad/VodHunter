@@ -1,7 +1,5 @@
-import io
-
 import pytest
-from fastapi import HTTPException, UploadFile
+from fastapi import HTTPException
 
 from backend.apps.admin import create_admin_app
 from backend.apps.public import create_public_app
@@ -13,24 +11,9 @@ from search.models import SearchResult
 
 class StubSearchManager:
     def __init__(self):
-        self.upload_calls = 0
         self.url_calls = 0
         self.last_streamer: str | None = None
-        self.raise_upload: Exception | None = None
         self.raise_url: Exception | None = None
-
-    def search_upload(self, file: UploadFile, streamer: str) -> SearchResult:
-        self.upload_calls += 1
-        self.last_streamer = streamer
-        if self.raise_upload is not None:
-            raise self.raise_upload
-        return SearchResult(
-            found=False,
-            streamer=streamer,
-            reason="upload test",
-            thumbnail_url=None,
-            video_url_at_timestamp=None,
-        )
 
     def search_tiktok_url(self, url: str, streamer: str) -> SearchResult:
         self.url_calls += 1
@@ -65,61 +48,41 @@ def assert_search_behavior_for_app(app) -> None:
     app.state.search_manager = search_manager
     request = FakeRequest(app)
 
-    file = UploadFile(filename="clip.mp4", file=io.BytesIO(b"data"))
-    response = search_clip(request, file=file, tiktok_url=None, streamer="xQc")
+    response = search_clip(request, tiktok_url="https://www.tiktok.com/@u/video/1", streamer="jason")
     assert not response.found
-    assert response.thumbnail_url is None
-    assert response.video_url_at_timestamp is None
-    assert search_manager.upload_calls == 1
-    assert search_manager.url_calls == 0
-    assert search_manager.last_streamer == "xqc"
-
-    search_manager = StubSearchManager()
-    app.state.search_manager = search_manager
-    response = search_clip(request, file=None, tiktok_url="https://www.tiktok.com/@u/video/1", streamer="jason")
-    assert not response.found
-    assert search_manager.upload_calls == 0
     assert search_manager.url_calls == 1
     assert search_manager.last_streamer == "jason"
 
-    search_manager = StubSearchManager()
-    app.state.search_manager = search_manager
-    file = UploadFile(filename="clip.mp4", file=io.BytesIO(b"data"))
     with pytest.raises(HTTPException) as exc_info:
-        search_clip(request, file=file, tiktok_url="https://www.tiktok.com/@u/video/1", streamer="xqc")
+        search_clip(request, tiktok_url=None, streamer="xqc")
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail["code"] == "INVALID_SEARCH_INPUT"
 
     with pytest.raises(HTTPException) as exc_info:
-        search_clip(request, file=None, tiktok_url=None, streamer="xqc")
-    assert exc_info.value.status_code == 400
-    assert exc_info.value.detail["code"] == "INVALID_SEARCH_INPUT"
-
-    with pytest.raises(HTTPException) as exc_info:
-        search_clip(request, file=None, tiktok_url="https://www.tiktok.com/@u/video/1", streamer=None)
+        search_clip(request, tiktok_url="https://www.tiktok.com/@u/video/1", streamer=None)
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail["code"] == "INVALID_STREAMER"
 
     with pytest.raises(HTTPException) as exc_info:
-        search_clip(request, file=None, tiktok_url="https://www.tiktok.com/@u/video/1", streamer="ronaldo")
+        search_clip(request, tiktok_url="https://www.tiktok.com/@u/video/1", streamer="ronaldo")
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail["code"] == "INVALID_STREAMER"
 
     search_manager.raise_url = InvalidTikTokUrlError("bad url")
     with pytest.raises(HTTPException) as exc_info:
-        search_clip(request, file=None, tiktok_url="https://example.com/v", streamer="xqc")
+        search_clip(request, tiktok_url="https://example.com/v", streamer="xqc")
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail["code"] == "INVALID_TIKTOK_URL"
 
     search_manager.raise_url = DownloadError("download failed")
     with pytest.raises(HTTPException) as exc_info:
-        search_clip(request, file=None, tiktok_url="https://www.tiktok.com/@u/video/1", streamer="xqc")
+        search_clip(request, tiktok_url="https://www.tiktok.com/@u/video/1", streamer="xqc")
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail["code"] == "DOWNLOAD_ERROR"
 
     search_manager.raise_url = InputDurationExceededError(duration_seconds=214.2, max_duration_seconds=180)
     with pytest.raises(HTTPException) as exc_info:
-        search_clip(request, file=None, tiktok_url="https://www.tiktok.com/@u/video/1", streamer="xqc")
+        search_clip(request, tiktok_url="https://www.tiktok.com/@u/video/1", streamer="xqc")
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail["code"] == "INPUT_DURATION_EXCEEDED"
 

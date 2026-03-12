@@ -17,7 +17,6 @@ from storage.vector_store import VectorStore
 def prepare_runtime_dirs() -> None:
     os.makedirs(config.DATA_DIR, exist_ok=True)
     os.makedirs(config.TEMP_BACKFILL_DIR, exist_ok=True)
-    os.makedirs(config.TEMP_SEARCH_UPLOAD_DIR, exist_ok=True)
     os.makedirs(config.TEMP_SEARCH_DOWNLOAD_DIR, exist_ok=True)
 
 
@@ -74,7 +73,6 @@ def build_search_stack(
 
     search_manager = SearchManager(
         search_service=search_service,
-        upload_temp_dir=config.TEMP_SEARCH_UPLOAD_DIR,
         remote_downloader=RemoteClipDownloader(
             temp_dir=config.TEMP_SEARCH_DOWNLOAD_DIR,
             timeout_seconds=config.TIKTOK_DOWNLOAD_TIMEOUT_SECONDS,
