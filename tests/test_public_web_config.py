@@ -26,5 +26,12 @@ def test_nginx_public_template_proxies_api_and_rate_limits_search() -> None:
 def test_public_web_dockerfile_uses_templated_nginx_config() -> None:
     dockerfile = (ROOT_DIR / "Dockerfile.web-public").read_text()
 
-    assert "ENV PUBLIC_API_UPSTREAM=http://api-public:8000" in dockerfile
     assert "COPY nginx.public.conf.template /etc/nginx/templates/default.conf.template" in dockerfile
+    assert "COPY docker/web-public/40-validate-public-api-upstream.sh /docker-entrypoint.d/40-validate-public-api-upstream.sh" in dockerfile
+
+
+def test_public_web_startup_requires_public_api_upstream() -> None:
+    startup_script = (ROOT_DIR / "docker/web-public/40-validate-public-api-upstream.sh").read_text()
+
+    assert 'if [ -z "${PUBLIC_API_UPSTREAM:-}" ]; then' in startup_script
+    assert "PUBLIC_API_UPSTREAM is required." in startup_script
