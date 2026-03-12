@@ -1,23 +1,15 @@
+import pytest
 import io
 import os
 import tempfile
-import unittest
-from pathlib import Path
-import sys
-
 from fastapi import UploadFile
-
-ROOT_DIR = Path(__file__).resolve().parents[1]
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
-
 from backend.services.media_duration import MediaDurationError
 from backend.services.remote_clip_downloader import DownloadResult
 from backend.services.search_manager import InputDurationExceededError, SearchInputError, SearchManager
 from search.models import SearchResult
 
-
 class FakeSearchService:
+
     def __init__(self):
         self.searched_paths: list[tuple[str, str]] = []
         self.raise_on_search = False
@@ -25,11 +17,11 @@ class FakeSearchService:
     def search_file(self, path: str, streamer: str) -> SearchResult:
         self.searched_paths.append((path, streamer))
         if self.raise_on_search:
-            raise RuntimeError("search failed")
-        return SearchResult(found=False, reason="no match")
-
+            raise RuntimeError('search failed')
+        return SearchResult(found=False, reason='no match')
 
 class FakeDownloader:
+
     def __init__(self, downloaded_path: str):
         self.downloaded_path = downloaded_path
         self.download_calls: list[str] = []
@@ -42,160 +34,98 @@ class FakeDownloader:
     def cleanup(self, path: str) -> None:
         self.cleaned_paths.append(path)
 
+class TestSearchManager:
 
-class TestSearchManager(unittest.TestCase):
     def test_search_tiktok_url_downloads_then_searches(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            clip_path = os.path.join(tmp, "clip.mp4")
-            with open(clip_path, "wb") as f:
-                f.write(b"clip")
-
+            clip_path = os.path.join(tmp, 'clip.mp4')
+            with open(clip_path, 'wb') as f:
+                f.write(b'clip')
             service = FakeSearchService()
             downloader = FakeDownloader(downloaded_path=clip_path)
-            manager = SearchManager(
-                search_service=service,  # type: ignore[arg-type]
-                upload_temp_dir=tmp,
-                remote_downloader=downloader,  # type: ignore[arg-type]
-            )
-
-            manager.search_tiktok_url("https://www.tiktok.com/@user/video/1", "xqc")
-
-            self.assertEqual(downloader.download_calls, ["https://www.tiktok.com/@user/video/1"])
-            self.assertEqual(service.searched_paths, [(clip_path, "xqc")])
-            self.assertEqual(downloader.cleaned_paths, [clip_path])
+            manager = SearchManager(search_service=service, upload_temp_dir=tmp, remote_downloader=downloader)
+            manager.search_tiktok_url('https://www.tiktok.com/@user/video/1', 'xqc')
+            assert downloader.download_calls == ['https://www.tiktok.com/@user/video/1']
+            assert service.searched_paths == [(clip_path, 'xqc')]
+            assert downloader.cleaned_paths == [clip_path]
 
     def test_search_tiktok_url_cleans_up_on_search_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            clip_path = os.path.join(tmp, "clip.mp4")
-            with open(clip_path, "wb") as f:
-                f.write(b"clip")
-
+            clip_path = os.path.join(tmp, 'clip.mp4')
+            with open(clip_path, 'wb') as f:
+                f.write(b'clip')
             service = FakeSearchService()
             service.raise_on_search = True
             downloader = FakeDownloader(downloaded_path=clip_path)
-            manager = SearchManager(
-                search_service=service,  # type: ignore[arg-type]
-                upload_temp_dir=tmp,
-                remote_downloader=downloader,  # type: ignore[arg-type]
-            )
-
-            with self.assertRaises(RuntimeError):
-                manager.search_tiktok_url("https://www.tiktok.com/@user/video/1", "xqc")
-
-            self.assertEqual(downloader.cleaned_paths, [clip_path])
+            manager = SearchManager(search_service=service, upload_temp_dir=tmp, remote_downloader=downloader)
+            with pytest.raises(RuntimeError):
+                manager.search_tiktok_url('https://www.tiktok.com/@user/video/1', 'xqc')
+            assert downloader.cleaned_paths == [clip_path]
 
     def test_search_tiktok_url_not_blocked_when_monitor_would_be_busy(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            clip_path = os.path.join(tmp, "clip.mp4")
-            with open(clip_path, "wb") as f:
-                f.write(b"clip")
-
+            clip_path = os.path.join(tmp, 'clip.mp4')
+            with open(clip_path, 'wb') as f:
+                f.write(b'clip')
             service = FakeSearchService()
             downloader = FakeDownloader(downloaded_path=clip_path)
-            manager = SearchManager(
-                search_service=service,  # type: ignore[arg-type]
-                upload_temp_dir=tmp,
-                remote_downloader=downloader,  # type: ignore[arg-type]
-            )
-
-            manager.search_tiktok_url("https://www.tiktok.com/@user/video/1", "xqc")
-
-            self.assertEqual(downloader.download_calls, ["https://www.tiktok.com/@user/video/1"])
-            self.assertEqual(service.searched_paths, [(clip_path, "xqc")])
+            manager = SearchManager(search_service=service, upload_temp_dir=tmp, remote_downloader=downloader)
+            manager.search_tiktok_url('https://www.tiktok.com/@user/video/1', 'xqc')
+            assert downloader.download_calls == ['https://www.tiktok.com/@user/video/1']
+            assert service.searched_paths == [(clip_path, 'xqc')]
 
     def test_upload_temp_file_is_removed_after_search(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             service = FakeSearchService()
-            downloader = FakeDownloader(downloaded_path=os.path.join(tmp, "clip.mp4"))
-            manager = SearchManager(
-                search_service=service,  # type: ignore[arg-type]
-                upload_temp_dir=tmp,
-                remote_downloader=downloader,  # type: ignore[arg-type]
-            )
-
-            upload = UploadFile(filename="query.mp4", file=io.BytesIO(b"video"))
-            manager.search_upload(upload, "xqc")
-
-            temp_files = [name for name in os.listdir(tmp) if name.startswith("upload_")]
-            self.assertEqual(temp_files, [])
-            self.assertEqual(service.searched_paths[0][1], "xqc")
+            downloader = FakeDownloader(downloaded_path=os.path.join(tmp, 'clip.mp4'))
+            manager = SearchManager(search_service=service, upload_temp_dir=tmp, remote_downloader=downloader)
+            upload = UploadFile(filename='query.mp4', file=io.BytesIO(b'video'))
+            manager.search_upload(upload, 'xqc')
+            temp_files = [name for name in os.listdir(tmp) if name.startswith('upload_')]
+            assert temp_files == []
+            assert service.searched_paths[0][1] == 'xqc'
 
     def test_upload_rejects_when_duration_exceeds_limit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             service = FakeSearchService()
-            downloader = FakeDownloader(downloaded_path=os.path.join(tmp, "clip.mp4"))
-            manager = SearchManager(
-                search_service=service,  # type: ignore[arg-type]
-                upload_temp_dir=tmp,
-                remote_downloader=downloader,  # type: ignore[arg-type]
-                max_duration_seconds=180,
-                duration_probe=lambda _: 181.0,
-            )
-
-            upload = UploadFile(filename="query.mp4", file=io.BytesIO(b"video"))
-            with self.assertRaises(InputDurationExceededError):
-                manager.search_upload(upload, "xqc")
-
-            self.assertEqual(service.searched_paths, [])
+            downloader = FakeDownloader(downloaded_path=os.path.join(tmp, 'clip.mp4'))
+            manager = SearchManager(search_service=service, upload_temp_dir=tmp, remote_downloader=downloader, max_duration_seconds=180, duration_probe=lambda _: 181.0)
+            upload = UploadFile(filename='query.mp4', file=io.BytesIO(b'video'))
+            with pytest.raises(InputDurationExceededError):
+                manager.search_upload(upload, 'xqc')
+            assert service.searched_paths == []
 
     def test_tiktok_rejects_when_duration_exceeds_limit_and_cleans(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            clip_path = os.path.join(tmp, "clip.mp4")
-            with open(clip_path, "wb") as f:
-                f.write(b"clip")
-
+            clip_path = os.path.join(tmp, 'clip.mp4')
+            with open(clip_path, 'wb') as f:
+                f.write(b'clip')
             service = FakeSearchService()
             downloader = FakeDownloader(downloaded_path=clip_path)
-            manager = SearchManager(
-                search_service=service,  # type: ignore[arg-type]
-                upload_temp_dir=tmp,
-                remote_downloader=downloader,  # type: ignore[arg-type]
-                max_duration_seconds=180,
-                duration_probe=lambda _: 214.2,
-            )
-
-            with self.assertRaises(InputDurationExceededError):
-                manager.search_tiktok_url("https://www.tiktok.com/@user/video/1", "xqc")
-
-            self.assertEqual(service.searched_paths, [])
-            self.assertEqual(downloader.cleaned_paths, [clip_path])
+            manager = SearchManager(search_service=service, upload_temp_dir=tmp, remote_downloader=downloader, max_duration_seconds=180, duration_probe=lambda _: 214.2)
+            with pytest.raises(InputDurationExceededError):
+                manager.search_tiktok_url('https://www.tiktok.com/@user/video/1', 'xqc')
+            assert service.searched_paths == []
+            assert downloader.cleaned_paths == [clip_path]
 
     def test_upload_rejects_when_duration_probe_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             service = FakeSearchService()
-            downloader = FakeDownloader(downloaded_path=os.path.join(tmp, "clip.mp4"))
+            downloader = FakeDownloader(downloaded_path=os.path.join(tmp, 'clip.mp4'))
 
             def bad_probe(_: str) -> float:
-                raise MediaDurationError("Could not determine input video duration")
-
-            manager = SearchManager(
-                search_service=service,  # type: ignore[arg-type]
-                upload_temp_dir=tmp,
-                remote_downloader=downloader,  # type: ignore[arg-type]
-                max_duration_seconds=180,
-                duration_probe=bad_probe,
-            )
-
-            upload = UploadFile(filename="query.mp4", file=io.BytesIO(b"video"))
-            with self.assertRaises(SearchInputError):
-                manager.search_upload(upload, "xqc")
-
-            self.assertEqual(service.searched_paths, [])
+                raise MediaDurationError('Could not determine input video duration')
+            manager = SearchManager(search_service=service, upload_temp_dir=tmp, remote_downloader=downloader, max_duration_seconds=180, duration_probe=bad_probe)
+            upload = UploadFile(filename='query.mp4', file=io.BytesIO(b'video'))
+            with pytest.raises(SearchInputError):
+                manager.search_upload(upload, 'xqc')
+            assert service.searched_paths == []
 
     def test_search_requires_streamer(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             service = FakeSearchService()
-            downloader = FakeDownloader(downloaded_path=os.path.join(tmp, "clip.mp4"))
-            manager = SearchManager(
-                search_service=service,  # type: ignore[arg-type]
-                upload_temp_dir=tmp,
-                remote_downloader=downloader,  # type: ignore[arg-type]
-            )
-
-            upload = UploadFile(filename="query.mp4", file=io.BytesIO(b"video"))
-            with self.assertRaises(SearchInputError):
-                manager.search_upload(upload, "   ")
-
-
-if __name__ == "__main__":
-    unittest.main()
+            downloader = FakeDownloader(downloaded_path=os.path.join(tmp, 'clip.mp4'))
+            manager = SearchManager(search_service=service, upload_temp_dir=tmp, remote_downloader=downloader)
+            upload = UploadFile(filename='query.mp4', file=io.BytesIO(b'video'))
+            with pytest.raises(SearchInputError):
+                manager.search_upload(upload, '   ')
