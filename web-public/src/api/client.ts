@@ -2,12 +2,10 @@ import { SearchResponse, StreamerListItem } from "./types";
 
 const ENV_API_BASE = import.meta.env.VITE_API_BASE?.trim();
 const DEV_API_BASE = `http://${window.location.hostname}:8000/api`;
-const API_BASE = ENV_API_BASE || (import.meta.env.DEV ? DEV_API_BASE : "");
+const PROD_API_BASE = "/api";
+const API_BASE = ENV_API_BASE || (import.meta.env.DEV ? DEV_API_BASE : PROD_API_BASE);
 
 function getApiBase(): string {
-  if (!API_BASE) {
-    throw new Error("VITE_API_BASE is required in production");
-  }
   return API_BASE;
 }
 
