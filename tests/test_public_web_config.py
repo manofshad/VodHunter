@@ -17,7 +17,7 @@ def test_nginx_public_template_proxies_api_and_rate_limits_search() -> None:
 
     assert "limit_req_zone $binary_remote_addr zone=public_search:10m rate=6r/m;" in nginx_template
     assert "location = /api/search/clip {" in nginx_template
-    assert "limit_req zone=public_search burst=2;" in nginx_template
+    assert "limit_req zone=public_search burst=2 nodelay;" in nginx_template
     assert "location /api/ {" in nginx_template
     assert "proxy_pass ${PUBLIC_API_UPSTREAM};" in nginx_template
     assert 'return 429 \'{"detail":{"code":"RATE_LIMITED","message":"Too many search requests. Please wait a moment and try again."}}\';' in nginx_template
