@@ -3,9 +3,7 @@ import os
 from backend import config
 from backend.services.remote_clip_downloader import RemoteClipDownloader
 from backend.services.search_manager import SearchManager
-from pipeline.embedder import Embedder
 from search.alignment_service import AlignmentConfig, AlignmentService
-from search.local_query_embedder import LocalQueryEmbedder
 from search.modal_embedding_client import ModalEmbeddingClient
 from search.modal_query_embedder import ModalQueryEmbedder
 from search.query_preprocessor import QueryPreprocessor
@@ -20,7 +18,7 @@ def prepare_runtime_dirs() -> None:
     os.makedirs(config.TEMP_SEARCH_DOWNLOAD_DIR, exist_ok=True)
 
 
-def build_common_state() -> dict[str, object]:
+def build_store_state() -> dict[str, object]:
     config.validate_storage_config()
 
     store = VectorStore(
@@ -30,19 +28,11 @@ def build_common_state() -> dict[str, object]:
     )
     store.ensure_schema_ready()
 
-    embedder = Embedder()
-    return {
-        "store": store,
-        "embedder": embedder,
-    }
+    return {"store": store}
 
 
-def _build_query_embedder(embedder: Embedder):
-    config.validate_search_embedder_config()
-
-    if config.SEARCH_QUERY_EMBEDDER_BACKEND == "local":
-        return LocalQueryEmbedder(embedder=embedder)
-
+def build_modal_query_embedder() -> ModalQueryEmbedder:
+    config.validate_modal_search_config()
     client = ModalEmbeddingClient(
         app_name=config.MODAL_SEARCH_APP_NAME,
         function_name=config.MODAL_SEARCH_FUNCTION_NAME,
@@ -57,13 +47,12 @@ def _build_query_embedder(embedder: Embedder):
 
 def build_search_stack(
     store: VectorStore,
-    embedder: Embedder,
     max_duration_seconds: int | None,
 ) -> dict[str, object]:
     search_service = SearchService(
         store=store,
         preprocessor=QueryPreprocessor(temp_dir=config.TEMP_SEARCH_PREPROCESS_DIR),
-        query_embedder=_build_query_embedder(embedder=embedder),
+        query_embedder=build_modal_query_embedder(),
         matcher=VectorMatcher(top_k=10),
         alignment=AlignmentService(
             store=store,

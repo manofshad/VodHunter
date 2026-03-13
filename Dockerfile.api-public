@@ -6,12 +6,12 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg yt-dlp libsndfile1 \
+    && apt-get install -y --no-install-recommends ffmpeg yt-dlp \
     && rm -rf /var/lib/apt/lists/*
 
-COPY backend/requirements.txt ./backend/requirements.txt
+COPY backend/requirements-api-public.txt ./backend/requirements-api-public.txt
 
-RUN pip install --no-cache-dir -r backend/requirements.txt
+RUN pip install --no-cache-dir -r backend/requirements-api-public.txt
 
 COPY backend ./backend
 COPY search ./search

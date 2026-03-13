@@ -45,7 +45,7 @@ class FakeSession:
 class TestRunBackfillIngest:
 
     def _build_state(self, store: FakeStore):
-        return {'store': store, 'embedder': object()}
+        return {'store': store}
 
     def test_skips_processed_resumes_partial_and_continues_on_failure(self) -> None:
         store = FakeStore()
@@ -58,7 +58,7 @@ class TestRunBackfillIngest:
         def source_factory(**kwargs):
             seen_vods.append(kwargs['vod_metadata']['id'])
             return FakeSource(**kwargs)
-        result = run_backfill_ingest('Alice', 7, monitor=monitor, build_state=lambda: self._build_state(store), source_factory=source_factory, session_factory=FakeSession, out=logs.append)
+        result = run_backfill_ingest('Alice', 7, monitor=monitor, build_store=lambda: self._build_state(store), build_ingest=lambda: {'embedder': object()}, source_factory=source_factory, session_factory=FakeSession, out=logs.append)
         assert seen_vods == ['resume', 'fail']
         assert result.ingested == 1
         assert result.resumed == 1

@@ -49,13 +49,13 @@ class TestApiAppSplit:
 
     def test_public_lifespan_initializes_search_only(self) -> None:
         app = public_app_module.create_public_app(enable_lifespan=True)
-        with patch('backend.bootstrap_shared.prepare_runtime_dirs') as prepare_dirs, patch('backend.bootstrap_shared.build_common_state', return_value={'store': object(), 'embedder': object()}), patch('backend.bootstrap_shared.build_search_stack', return_value={'search_service': object(), 'search_manager': object()}):
+        with patch('backend.bootstrap_shared.prepare_runtime_dirs') as prepare_dirs, patch('backend.bootstrap_shared.build_store_state', return_value={'store': object()}), patch('backend.bootstrap_shared.build_search_stack', return_value={'search_service': object(), 'search_manager': object()}):
 
             async def run_lifespan() -> None:
                 async with app.router.lifespan_context(app):
                     assert hasattr(app.state, 'store')
-                    assert hasattr(app.state, 'embedder')
                     assert hasattr(app.state, 'search_manager')
+                    assert not hasattr(app.state, 'embedder')
                     assert not hasattr(app.state, 'monitor_manager')
             asyncio.run(run_lifespan())
             prepare_dirs.assert_called_once()
@@ -73,10 +73,11 @@ class TestApiAppSplit:
     def test_admin_lifespan_stops_monitor_manager(self) -> None:
         app = admin_app_module.create_admin_app(enable_lifespan=True)
         monitor = StubMonitorManager()
-        with patch('backend.bootstrap_shared.prepare_runtime_dirs') as prepare_dirs, patch('backend.bootstrap_shared.build_common_state', return_value={'store': object(), 'embedder': object()}), patch('backend.bootstrap_shared.build_search_stack', return_value={'search_service': object(), 'search_manager': object()}), patch('backend.bootstrap_admin.build_monitor_stack', return_value={'monitor_manager': monitor, 'eventsub_handler': object(), 'session_query': object()}):
+        with patch('backend.bootstrap_shared.prepare_runtime_dirs') as prepare_dirs, patch('backend.bootstrap_shared.build_store_state', return_value={'store': object()}), patch('backend.bootstrap_ingest.build_ingest_state', return_value={'embedder': object()}), patch('backend.bootstrap_shared.build_search_stack', return_value={'search_service': object(), 'search_manager': object()}), patch('backend.bootstrap_admin.build_monitor_stack', return_value={'monitor_manager': monitor, 'eventsub_handler': object(), 'session_query': object()}):
 
             async def run_lifespan() -> None:
                 async with app.router.lifespan_context(app):
+                    assert hasattr(app.state, 'embedder')
                     assert hasattr(app.state, 'monitor_manager')
                     assert hasattr(app.state, 'eventsub_handler')
                     assert hasattr(app.state, 'session_query')
