@@ -36,10 +36,9 @@ def create_public_app(enable_lifespan: bool = True) -> FastAPI:
         async def lifespan(app: FastAPI):
             bootstrap_shared.prepare_runtime_dirs()
 
-            common_state = bootstrap_shared.build_common_state()
+            common_state = bootstrap_shared.build_store_state()
             search_state = bootstrap_shared.build_search_stack(
                 store=common_state["store"],
-                embedder=common_state["embedder"],
                 max_duration_seconds=config.SEARCH_MAX_DURATION_SECONDS_PUBLIC,
             )
 

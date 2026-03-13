@@ -14,7 +14,7 @@ if ROOT_DIR not in sys.path:
 load_dotenv(Path(ROOT_DIR) / ".env")
 
 from backend import config
-from backend import bootstrap_admin, bootstrap_shared
+from backend import bootstrap_admin, bootstrap_ingest, bootstrap_shared
 from backend.routers.eventsub import router as eventsub_router
 from backend.routers.health import router as health_router
 from backend.routers.live_monitor import router as live_monitor_router
@@ -38,18 +38,18 @@ def create_admin_app(enable_lifespan: bool = True) -> FastAPI:
         async def lifespan(app: FastAPI):
             bootstrap_shared.prepare_runtime_dirs()
 
-            common_state = bootstrap_shared.build_common_state()
+            common_state = bootstrap_shared.build_store_state()
+            ingest_state = bootstrap_ingest.build_ingest_state()
             search_state = bootstrap_shared.build_search_stack(
                 store=common_state["store"],
-                embedder=common_state["embedder"],
                 max_duration_seconds=config.SEARCH_MAX_DURATION_SECONDS_ADMIN,
             )
             monitor_state = bootstrap_admin.build_monitor_stack(
                 store=common_state["store"],
-                embedder=common_state["embedder"],
+                embedder=ingest_state["embedder"],
             )
 
-            for key, value in {**common_state, **search_state, **monitor_state}.items():
+            for key, value in {**common_state, **ingest_state, **search_state, **monitor_state}.items():
                 setattr(app.state, key, value)
 
             try:

@@ -16,7 +16,8 @@ if str(ROOT_DIR) not in sys.path:
 load_dotenv(ROOT_DIR / ".env")
 
 from backend import config
-from backend.bootstrap_shared import build_common_state, prepare_runtime_dirs
+from backend.bootstrap_ingest import build_ingest_state
+from backend.bootstrap_shared import build_store_state, prepare_runtime_dirs
 from pipeline.ingest_session import IngestSession
 from services.twitch_monitor import TwitchMonitor
 from sources.historical_archive_vod_source import HistoricalArchiveVODSource
@@ -42,7 +43,8 @@ def run_backfill_ingest(
     days: int,
     *,
     monitor: TwitchMonitor | None = None,
-    build_state: Callable[[], dict[str, object]] = build_common_state,
+    build_store: Callable[[], dict[str, object]] = build_store_state,
+    build_ingest: Callable[[], dict[str, object]] = build_ingest_state,
     source_factory: Callable[..., HistoricalArchiveVODSource] = HistoricalArchiveVODSource,
     session_factory: Callable[..., IngestSession] = IngestSession,
     out: Callable[[str], None] = print,
@@ -54,9 +56,10 @@ def run_backfill_ingest(
         raise ValueError("days must be >= 1")
 
     prepare_runtime_dirs()
-    state = build_state()
-    store = state["store"]
-    embedder = state["embedder"]
+    store_state = build_store()
+    ingest_state = build_ingest()
+    store = store_state["store"]
+    embedder = ingest_state["embedder"]
 
     twitch_monitor = monitor or TwitchMonitor.from_env()
     user_id = twitch_monitor.get_user_id(normalized_streamer)

@@ -25,13 +25,13 @@ The frontend sends search requests to the FastAPI backend and displays matched T
 
 ### Public API
 
-The backend is a FastAPI service responsible for orchestrating the search pipeline. It performs input validation, audio preprocessing, embedding generation, vector search, and timestamp alignment.
+The backend is a FastAPI service responsible for orchestrating the search pipeline. It performs input validation, audio preprocessing, remote embedding requests, vector search, and timestamp alignment.
 
 Primary responsibilities include:
 
 - handling search requests
 - preprocessing audio with ffmpeg
-- generating query embeddings
+- requesting query embeddings from Modal
 - performing vector similarity search
 - returning the best matching Twitch timestamp
 
@@ -42,8 +42,7 @@ This allows the system to perform efficient similarity search directly inside th
 
 ### GPU Embedding Worker
 
-Query embeddings can optionally be generated using GPU workers through **Modal**.  
-This accelerates embedding generation during search requests.
+Query embeddings are generated through **Modal** GPU workers during search requests.
 
 ### Ingest Pipeline
 
@@ -80,7 +79,7 @@ sequenceDiagram
 Search process:
 
 1. The clip is normalized into a consistent audio format using **ffmpeg**.
-2. An **AST audio model** generates embeddings for the clip.
+2. **Modal** runs the AST audio model and returns embeddings for the clip.
 3. The embeddings are compared against stored fingerprints using **pgvector similarity search**.
 4. The system determines the best matching timestamp within the Twitch VOD.
 
@@ -129,7 +128,7 @@ Run the Python test suite with:
 python3 -m pytest
 ```
 
-Keep test-only dependencies in [`backend/requirements-dev.txt`](/Volumes/workstation/twitchVodHunter/VodHunter/backend/requirements-dev.txt), not [`backend/requirements.txt`](/Volumes/workstation/twitchVodHunter/VodHunter/backend/requirements.txt), because the production API image installs from the runtime requirements file.
+Keep test-only dependencies in [`backend/requirements-dev.txt`](/Volumes/workstation/twitchVodHunter/VodHunter/backend/requirements-dev.txt), not [`backend/requirements.txt`](/Volumes/workstation/twitchVodHunter/VodHunter/backend/requirements.txt), because local dev/tests still need the full runtime dependency set while the production public API image installs the slimmer [`backend/requirements-api-public.txt`](/Volumes/workstation/twitchVodHunter/VodHunter/backend/requirements-api-public.txt).
 
 ---
 
