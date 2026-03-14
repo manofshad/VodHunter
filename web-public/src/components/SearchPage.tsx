@@ -1,7 +1,9 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useId, useMemo, useRef, useState } from "react";
+import { AlertCircle, Check, ChevronDown, Clipboard, ExternalLink, LoaderCircle, Search, TriangleAlert } from "lucide-react";
 
 import { listSearchableStreamers, searchClip } from "../api/client";
 import { SearchResponse, StreamerListItem } from "../api/types";
+import defaultAvatar from "../assets/default-avatar.svg";
 
 function formatDuration(value: number | null): string | null {
   if (value === null || !Number.isFinite(value)) {
@@ -24,6 +26,150 @@ function getResultHref(result: SearchResponse | null): string | null {
   return result.video_url_at_timestamp ?? null;
 }
 
+function Header() {
+  return (
+    <header className="border-b border-gray-700 bg-gray-900 px-6 py-4">
+      <div className="mx-auto flex max-w-7xl items-center justify-between">
+        <div className="flex items-center gap-2" aria-label="VodHunter">
+          <span className="text-xl font-bold text-white">
+            <span className="font-bold">Vod</span>
+            <span className="font-bold text-[#fb2844]">Hunter</span>
+          </span>
+        </div>
+        <nav className="hidden items-center gap-8 md:flex" />
+      </div>
+    </header>
+  );
+}
+
+function FeatureGrid() {
+  const features = [
+    {
+      title: "Find The Exact VOD Moment",
+      description: "Upload a short clip and match it to the exact timestamp inside a Twitch VOD.",
+    },
+    {
+      title: "Audio-Based Matching",
+      description:
+        "VodHunter uses audio embeddings and similarity search, so it can recognize moments even when titles, overlays, or edits differ.",
+    },
+    {
+      title: "Search Hours In Seconds",
+      description: "Skip manual scrubbing through long streams and go straight to the source moment.",
+    },
+  ];
+
+  return (
+    <div className="bg-gray-800 px-6 py-20">
+      <div className="mx-auto max-w-6xl">
+        <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
+          {features.map((feature) => (
+            <div key={feature.title} className="text-center">
+              <h3 className="mb-4 text-2xl font-bold text-white">{feature.title}</h3>
+              <p className="text-gray-300 leading-relaxed">{feature.description}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface SearchResultCardProps {
+  result: SearchResponse;
+  lastSubmittedUrl: string;
+}
+
+function SearchResultCard({ result, lastSubmittedUrl }: SearchResultCardProps) {
+  const resultHref = getResultHref(result);
+  const formattedTimestamp = formatDuration(result.timestamp_seconds);
+  const [thumbnailLoadFailed, setThumbnailLoadFailed] = useState(false);
+
+  return (
+    <section className="mx-auto max-w-4xl rounded-xl border border-gray-700 bg-gray-900/80 p-5 text-left shadow-lg backdrop-blur">
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <span
+          className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] ${
+            result.found ? "bg-emerald-500/15 text-emerald-200" : "bg-gray-700 text-gray-200"
+          }`}
+        >
+          {result.found ? "Match found" : "No match found"}
+        </span>
+        {result.found && result.score !== null ? (
+          <span className="text-xs font-medium uppercase tracking-[0.12em] text-gray-400">Score {result.score}</span>
+        ) : null}
+      </div>
+
+      <div className="grid gap-5 md:grid-cols-[minmax(0,260px)_minmax(0,1fr)]">
+        <div className="overflow-hidden rounded-xl border border-gray-700 bg-gray-800">
+          {resultHref && result.thumbnail_url && !thumbnailLoadFailed ? (
+            <a
+              href={resultHref}
+              target="_blank"
+              rel="noreferrer"
+              className="block aspect-video"
+              aria-label={`Open ${result.title ?? "matched VOD"} at timestamp`}
+            >
+              <img
+                src={result.thumbnail_url}
+                alt={result.title ?? "Matched Twitch VOD thumbnail"}
+                loading="lazy"
+                className="h-full w-full object-cover"
+                onError={() => setThumbnailLoadFailed(true)}
+              />
+            </a>
+          ) : (
+            <div className="flex aspect-video items-center justify-center bg-gray-800">
+              <span className="rounded-full border border-gray-700 bg-gray-900 px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-gray-300">
+                Twitch VOD
+              </span>
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-col justify-between gap-4">
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#fb2844]">
+              {result.streamer ?? "Streamer unavailable"}
+            </p>
+            {resultHref ? (
+              <a href={resultHref} target="_blank" rel="noreferrer" className="group inline-flex items-start gap-3">
+                <h3 className="text-2xl font-bold text-white transition group-hover:text-gray-100">
+                  {result.title ?? "Matched Twitch VOD"}
+                </h3>
+                <ExternalLink className="mt-1 size-4 shrink-0 text-gray-400 transition group-hover:text-[#fb2844]" />
+              </a>
+            ) : (
+              <h3 className="text-2xl font-bold text-white">No matching Twitch VOD found</h3>
+            )}
+          </div>
+
+          <dl className="grid gap-2.5 text-sm text-gray-300">
+            {formattedTimestamp ? (
+              <div className="grid gap-1 rounded-lg border border-gray-700 bg-gray-800/80 px-4 py-3">
+                <dt className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Timestamp</dt>
+                <dd className="text-base font-semibold text-white">{formattedTimestamp}</dd>
+              </div>
+            ) : null}
+            {result.reason ? (
+              <div className="grid gap-1 rounded-lg border border-gray-700 bg-gray-800/80 px-4 py-3">
+                <dt className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Match reason</dt>
+                <dd>{result.reason}</dd>
+              </div>
+            ) : null}
+            {lastSubmittedUrl ? (
+              <div className="grid gap-1 rounded-lg border border-gray-700 bg-gray-800/80 px-4 py-3">
+                <dt className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">TikTok URL</dt>
+                <dd className="break-all">{lastSubmittedUrl}</dd>
+              </div>
+            ) : null}
+          </dl>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default function SearchPage() {
   const [tiktokUrl, setTiktokUrl] = useState("");
   const [streamer, setStreamer] = useState("");
@@ -33,14 +179,15 @@ export default function SearchPage() {
   const [result, setResult] = useState<SearchResponse | null>(null);
   const [requestError, setRequestError] = useState<string | null>(null);
   const [streamerError, setStreamerError] = useState<string | null>(null);
+  const [isStreamerMenuOpen, setIsStreamerMenuOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [lastSubmittedUrl, setLastSubmittedUrl] = useState("");
-  const [thumbnailLoadFailed, setThumbnailLoadFailed] = useState(false);
-  const streamerSelectRef = useRef<HTMLSelectElement | null>(null);
+  const streamerTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const streamerMenuRef = useRef<HTMLDivElement | null>(null);
+  const streamerMenuId = useId();
 
   const hasUrl = tiktokUrl.trim().length > 0;
-  const resultHref = useMemo(() => getResultHref(result), [result]);
-  const formattedTimestamp = useMemo(() => formatDuration(result?.timestamp_seconds ?? null), [result]);
+  const searchButtonLabel = useMemo(() => (submitting ? "Searching..." : "Search"), [submitting]);
 
   useEffect(() => {
     let cancelled = false;
@@ -50,7 +197,9 @@ export default function SearchPage() {
         setLoadingStreamers(true);
         setStreamerLoadError(null);
         const next = await listSearchableStreamers();
-        if (cancelled) return;
+        if (cancelled) {
+          return;
+        }
         setStreamers(next);
         setStreamer((current) => {
           if (current && next.some((item) => item.name === current)) {
@@ -59,7 +208,9 @@ export default function SearchPage() {
           return "";
         });
       } catch (err) {
-        if (cancelled) return;
+        if (cancelled) {
+          return;
+        }
         setStreamerLoadError(err instanceof Error ? err.message : "Could not load streamers");
       } finally {
         if (!cancelled) {
@@ -75,13 +226,44 @@ export default function SearchPage() {
     };
   }, []);
 
-  const onSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!hasUrl) return;
+  useEffect(() => {
+    if (!isStreamerMenuOpen) {
+      return;
+    }
+
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (streamerTriggerRef.current?.contains(target) || streamerMenuRef.current?.contains(target)) {
+        return;
+      }
+      setIsStreamerMenuOpen(false);
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsStreamerMenuOpen(false);
+        streamerTriggerRef.current?.focus();
+      }
+    };
+
+    window.addEventListener("mousedown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      window.removeEventListener("mousedown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [isStreamerMenuOpen]);
+
+  const onSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!hasUrl) {
+      return;
+    }
 
     if (!streamer.trim()) {
       setStreamerError("Select a streamer to run the search.");
-      streamerSelectRef.current?.focus();
+      streamerTriggerRef.current?.focus();
       return;
     }
 
@@ -92,7 +274,6 @@ export default function SearchPage() {
       setStreamerError(null);
       setRequestError(null);
       setResult(null);
-      setThumbnailLoadFailed(false);
       setLastSubmittedUrl(submittedUrl);
 
       const next = await searchClip({ tiktokUrl: submittedUrl, streamer });
@@ -104,161 +285,192 @@ export default function SearchPage() {
     }
   };
 
+  const onSelectStreamer = (value: string) => {
+    setStreamer(value);
+    setStreamerError(null);
+    setIsStreamerMenuOpen(false);
+    streamerTriggerRef.current?.focus();
+  };
+
+  const onPaste = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      setTiktokUrl(text);
+      setStreamerError(null);
+    } catch {
+      setRequestError("Clipboard access was blocked. Paste the TikTok URL manually.");
+    }
+  };
+
   return (
-    <main className="page-shell">
-      <section className="search-panel">
-        <div className="panel-heading">
-          <div>
-            <p className="eyebrow">Public Search</p>
-            <h1>Search Twitch VODs</h1>
+    <div className="min-h-screen bg-gray-900">
+      <Header />
+
+      <main>
+        <div className="relative px-6 py-32" style={{ background: "linear-gradient(160deg, #fb2844 0%, #f55b70 100%)" }}>
+          <div className="mx-auto max-w-4xl text-center">
+            <h1 className="mb-12 text-3xl font-bold text-white">Find That Exact Moment</h1>
+
+            <form onSubmit={onSubmit} noValidate className="flex flex-col items-stretch gap-3">
+                <div className="flex flex-col items-stretch gap-3 md:flex-row">
+                <div className="flex-1 rounded-xl bg-gray-800 p-1">
+                    <div className="flex flex-col items-stretch gap-2 md:flex-row md:items-center">
+                      <div className="relative md:w-[180px] md:shrink-0">
+                        <button
+                          ref={streamerTriggerRef}
+                          type="button"
+                          disabled={submitting || loadingStreamers || streamers.length === 0}
+                          aria-invalid={streamerError ? "true" : "false"}
+                          aria-describedby={streamerError ? "streamer-error" : undefined}
+                          aria-expanded={isStreamerMenuOpen ? "true" : "false"}
+                          aria-controls={streamerMenuId}
+                          onClick={() => setIsStreamerMenuOpen((open) => !open)}
+                          className="flex h-10 w-full items-center gap-2 border-0 bg-gray-800 px-4 text-sm font-medium text-gray-100 outline-none disabled:cursor-not-allowed disabled:text-gray-500"
+                        >
+                          {streamer ? (
+                            <img
+                              src={defaultAvatar}
+                              alt=""
+                              className="size-6 rounded-full"
+                              aria-hidden="true"
+                            />
+                          ) : null}
+                          <span className={streamer ? "text-gray-100" : "text-gray-400"}>
+                            {loadingStreamers
+                              ? "Loading streamers..."
+                              : streamers.length === 0
+                                ? "No searchable streamers"
+                                : streamer || "Streamer"}
+                          </span>
+                          <ChevronDown className="ml-auto size-4 text-gray-500" />
+                        </button>
+
+                        {isStreamerMenuOpen && !loadingStreamers && streamers.length > 0 ? (
+                          <div
+                            ref={streamerMenuRef}
+                            id={streamerMenuId}
+                            role="listbox"
+                            className="absolute top-[calc(100%+8px)] left-0 z-20 w-full overflow-hidden rounded-xl border border-gray-700 bg-gray-800 shadow-xl"
+                          >
+                            {streamers.map((item) => {
+                              const selected = item.name === streamer;
+                              return (
+                                <button
+                                  key={item.name}
+                                  type="button"
+                                  role="option"
+                                  aria-selected={selected}
+                                  onClick={() => onSelectStreamer(item.name)}
+                                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-gray-100 transition hover:bg-gray-700"
+                                >
+                                  <img src={defaultAvatar} alt="" className="size-6 rounded-full" aria-hidden="true" />
+                                  <span className="flex-1">{item.name}</span>
+                                  {selected ? <Check className="size-4 text-[#fb2844]" /> : null}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ) : null}
+                      </div>
+
+                      <div className="hidden h-10 w-px bg-gray-700 md:block" aria-hidden="true" />
+
+                      <div className="relative min-w-0 flex-1">
+                        <input
+                          type="url"
+                          placeholder="Paste TikTok URL here"
+                          value={tiktokUrl}
+                          disabled={submitting}
+                          onChange={(event) => {
+                            setTiktokUrl(event.target.value);
+                            setStreamerError(null);
+                            setRequestError(null);
+                          }}
+                          className="h-10 w-full border-0 bg-gray-800 px-4 pr-12 text-sm text-gray-100 outline-none placeholder:text-gray-400 disabled:cursor-not-allowed disabled:text-gray-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={onPaste}
+                          disabled={submitting}
+                          className="absolute top-1/2 right-1 flex size-8 -translate-y-1/2 items-center justify-center rounded-md text-pink-400 transition hover:bg-gray-700 hover:text-pink-300 disabled:cursor-not-allowed disabled:text-gray-500"
+                          aria-label="Paste TikTok URL from clipboard"
+                        >
+                          <Clipboard className="size-4" style={{ color: "#fb2844" }} />
+                        </button>
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={submitting || !hasUrl}
+                        className="inline-flex h-10 items-center justify-center rounded-xl border-2 border-[#fb2844] bg-[#fb2844] px-8 text-base font-semibold text-white transition hover:border-[#f55b70] hover:bg-[#f55b70] disabled:border-gray-600 disabled:bg-gray-700 disabled:text-gray-400"
+                      >
+                        {submitting ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
+                        {searchButtonLabel}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+              <div className="min-h-6 text-left">
+                {streamerError ? (
+                  <p id="streamer-error" className="flex items-center gap-2 text-sm font-medium text-white">
+                    <TriangleAlert className="size-4" />
+                    {streamerError}
+                  </p>
+                ) : null}
+                {streamerLoadError ? (
+                  <p className="flex items-center gap-2 text-sm font-medium text-white">
+                    <AlertCircle className="size-4" />
+                    {streamerLoadError}
+                  </p>
+                ) : null}
+              </div>
+            </form>
           </div>
         </div>
 
-        <form onSubmit={onSubmit} className="search-form" noValidate>
-          <div className="search-grid">
-            <div className={`field ${streamerError ? "field-error" : ""}`}>
-              <label htmlFor="streamer-select">Streamer</label>
-              <select
-                ref={streamerSelectRef}
-                id="streamer-select"
-                value={streamer}
-                disabled={submitting || loadingStreamers || streamers.length === 0}
-                aria-invalid={streamerError ? "true" : "false"}
-                aria-describedby={streamerError ? "streamer-error" : undefined}
-                onChange={(e) => {
-                  setStreamer(e.target.value);
-                  setStreamerError(null);
-                }}
-              >
-                <option value="">
-                  {loadingStreamers
-                    ? "Loading streamers..."
-                    : streamers.length === 0
-                      ? "No searchable streamers"
-                      : "Select a streamer"}
-                </option>
-                {streamers.map((item) => (
-                  <option key={item.name} value={item.name}>
-                    {item.name}
-                  </option>
-                ))}
-              </select>
-              {streamerError ? (
-                <p className="field-message error-text" id="streamer-error">
-                  {streamerError}
-                </p>
-              ) : null}
-            </div>
-
-            <div className="field field-primary">
-              <label htmlFor="tiktok-url">TikTok URL</label>
-              <input
-                id="tiktok-url"
-                type="url"
-                placeholder="https://www.tiktok.com/@user/video/..."
-                value={tiktokUrl}
-                disabled={submitting}
-                onChange={(e) => {
-                  setTiktokUrl(e.target.value);
-                  setStreamerError(null);
-                }}
-              />
-            </div>
-          </div>
-
-          <div className="search-actions">
-            <button type="submit" disabled={submitting || !hasUrl}>
-              {submitting ? "Searching..." : "Search"}
-            </button>
-          </div>
-        </form>
-      </section>
-
-      <section className="result-panel" aria-live="polite">
-        {requestError && (
-          <div className="alert-error" role="alert">
-            <strong>Search error</strong>
-            <span>{requestError}</span>
-          </div>
-        )}
-
-        {!submitting && result && (
-          <div className={`result-card ${result.found ? "result-card-found" : "result-card-empty"} fade-in`}>
-            <div className="result-status-row">
-              <span className={`status-pill ${result.found ? "success" : "muted"}`}>
-                {result.found ? "Match found" : "No match found"}
-              </span>
-              {result.score !== null && result.found ? <span className="score-text">Score {result.score}</span> : null}
-            </div>
-
-            <div className="result-card-top">
-              {resultHref && result.thumbnail_url && !thumbnailLoadFailed ? (
-                <a
-                  className="thumbnail-link thumbnail-frame"
-                  href={resultHref}
-                  target="_blank"
-                  rel="noreferrer"
-                  aria-label={`Open ${result.title ?? "matched VOD"} at timestamp`}
-                >
-                  <img
-                    className="thumbnail-image"
-                    src={result.thumbnail_url}
-                    alt={result.title ?? "Matched Twitch VOD thumbnail"}
-                    loading="lazy"
-                    onError={() => setThumbnailLoadFailed(true)}
-                  />
-                </a>
-              ) : resultHref ? (
-                <a
-                  className="thumbnail-placeholder thumbnail-link"
-                  href={resultHref}
-                  target="_blank"
-                  rel="noreferrer"
-                  aria-label={`Open ${result.title ?? "matched VOD"} at timestamp`}
-                >
-                  <span>VOD</span>
-                </a>
-              ) : (
-                <div className="thumbnail-placeholder" aria-hidden="true">
-                  <span>VOD</span>
+        <div className="bg-gray-800 px-6 pb-12 pt-10">
+          <div className="mx-auto max-w-6xl">
+            {requestError ? (
+              <div className="mx-auto max-w-4xl rounded-xl border border-red-400/20 bg-red-500/10 p-5 text-left">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="mt-0.5 size-5 shrink-0 text-red-200" />
+                  <div>
+                    <p className="text-sm font-semibold uppercase tracking-[0.18em] text-red-200">Search error</p>
+                    <p className="mt-2 text-sm leading-6 text-white/85">{requestError}</p>
+                  </div>
                 </div>
-              )}
+              </div>
+            ) : null}
 
-              <div className="result-copy">
-                <p className="result-streamer">{result.streamer ?? "Streamer unavailable"}</p>
-                {resultHref ? (
-                  <a className="result-title-link" href={resultHref} target="_blank" rel="noreferrer">
-                    <h3>{result.title ?? "Matched Twitch VOD"}</h3>
-                  </a>
-                ) : (
-                  <h3>{result.title ?? "No matching Twitch VOD found"}</h3>
-                )}
+            {submitting ? (
+              <div className="mx-auto max-w-4xl rounded-xl border border-gray-700 bg-gray-900/80 p-6 text-center">
+                <LoaderCircle className="mx-auto size-7 animate-spin text-[#fb2844]" />
+                <p className="mt-3 text-base font-semibold text-white">Searching Twitch VODs...</p>
+                <p className="mt-2 text-sm text-gray-400">We are matching your TikTok clip against indexed streamer audio.</p>
+              </div>
+            ) : null}
+
+            {!submitting && result ? <SearchResultCard result={result} lastSubmittedUrl={lastSubmittedUrl} /> : null}
+          </div>
+        </div>
+
+        <FeatureGrid />
+
+        {!submitting && result && !result.found ? (
+          <div className="bg-gray-900 px-6 pb-16">
+            <div className="mx-auto max-w-6xl">
+              <div className="mx-auto max-w-4xl rounded-xl border border-gray-700 bg-gray-800/70 p-6 text-center">
+                <Search className="mx-auto size-7 text-gray-400" />
+                <h2 className="mt-4 text-2xl font-bold text-white">No exact match yet</h2>
+                <p className="mx-auto mt-3 max-w-2xl text-base leading-7 text-gray-300">
+                  Try another TikTok URL or confirm that you selected the right streamer before searching again.
+                </p>
               </div>
             </div>
-
-            <div className="result-meta">
-              {formattedTimestamp ? (
-                <div className="result-meta-row">
-                  <span className="meta-label">Timestamp</span>
-                  <span className="meta-value">{formattedTimestamp}</span>
-                </div>
-              ) : null}
-              {result.reason ? (
-                <div className="result-meta-row">
-                  <span className="meta-label">Match reason</span>
-                  <span className="meta-value">{result.reason}</span>
-                </div>
-              ) : null}
-              {lastSubmittedUrl ? (
-                <div className="result-meta-row">
-                  <span className="meta-label">TikTok URL</span>
-                  <span className="meta-value">{lastSubmittedUrl}</span>
-                </div>
-              ) : null}
-            </div>
           </div>
-        )}
-      </section>
-    </main>
+        ) : null}
+      </main>
+    </div>
   );
 }
