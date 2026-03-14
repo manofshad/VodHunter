@@ -60,7 +60,7 @@ function FeatureGrid() {
   ];
 
   return (
-    <div className="bg-gray-800 px-6 py-20">
+    <div className="bg-gray-900 px-6 py-20">
       <div className="mx-auto max-w-6xl">
         <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
           {features.map((feature) => (
@@ -84,9 +84,14 @@ function SearchResultCard({ result, lastSubmittedUrl }: SearchResultCardProps) {
   const resultHref = getResultHref(result);
   const formattedTimestamp = formatDuration(result.timestamp_seconds);
   const [thumbnailLoadFailed, setThumbnailLoadFailed] = useState(false);
+  const detailRows = [
+    formattedTimestamp ? { label: "Timestamp", value: formattedTimestamp, emphasize: true } : null,
+    result.reason ? { label: "Match reason", value: result.reason } : null,
+    lastSubmittedUrl ? { label: "TikTok URL", value: lastSubmittedUrl, wrap: true } : null,
+  ].filter(Boolean) as Array<{ label: string; value: string; emphasize?: boolean; wrap?: boolean }>;
 
   return (
-    <section className="mx-auto max-w-4xl rounded-xl border border-gray-700 bg-gray-900/80 p-5 text-left shadow-lg backdrop-blur">
+    <section className="mx-auto max-w-4xl rounded-xl border border-gray-700 bg-gray-900 p-5 text-left shadow-lg">
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <span
           className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] ${
@@ -100,8 +105,8 @@ function SearchResultCard({ result, lastSubmittedUrl }: SearchResultCardProps) {
         ) : null}
       </div>
 
-      <div className="grid gap-5 md:grid-cols-[minmax(0,260px)_minmax(0,1fr)]">
-        <div className="overflow-hidden rounded-xl border border-gray-700 bg-gray-800">
+      <div className="grid items-start gap-5 md:grid-cols-[minmax(0,240px)_minmax(0,1fr)]">
+        <div className="self-start overflow-hidden rounded-xl border border-gray-700 bg-gray-800">
           {resultHref && result.thumbnail_url && !thumbnailLoadFailed ? (
             <a
               href={resultHref}
@@ -134,37 +139,38 @@ function SearchResultCard({ result, lastSubmittedUrl }: SearchResultCardProps) {
             </p>
             {resultHref ? (
               <a href={resultHref} target="_blank" rel="noreferrer" className="group inline-flex items-start gap-3">
-                <h3 className="text-2xl font-bold text-white transition group-hover:text-gray-100">
+                <h3 className="text-lg font-bold leading-tight text-white transition group-hover:text-gray-100 md:text-[1.5rem]">
                   {result.title ?? "Matched Twitch VOD"}
                 </h3>
                 <ExternalLink className="mt-1 size-4 shrink-0 text-gray-400 transition group-hover:text-[#fb2844]" />
               </a>
             ) : (
-              <h3 className="text-2xl font-bold text-white">No matching Twitch VOD found</h3>
+              <h3 className="text-lg font-bold leading-tight text-white md:text-[1.5rem]">No matching Twitch VOD found</h3>
             )}
           </div>
 
-          <dl className="grid gap-2.5 text-sm text-gray-300">
-            {formattedTimestamp ? (
-              <div className="grid gap-1 rounded-lg border border-gray-700 bg-gray-800/80 px-4 py-3">
-                <dt className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Timestamp</dt>
-                <dd className="text-base font-semibold text-white">{formattedTimestamp}</dd>
-              </div>
-            ) : null}
-            {result.reason ? (
-              <div className="grid gap-1 rounded-lg border border-gray-700 bg-gray-800/80 px-4 py-3">
-                <dt className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Match reason</dt>
-                <dd>{result.reason}</dd>
-              </div>
-            ) : null}
-            {lastSubmittedUrl ? (
-              <div className="grid gap-1 rounded-lg border border-gray-700 bg-gray-800/80 px-4 py-3">
-                <dt className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">TikTok URL</dt>
-                <dd className="break-all">{lastSubmittedUrl}</dd>
-              </div>
-            ) : null}
-          </dl>
         </div>
+
+        <dl className="grid gap-0 text-left text-sm text-gray-300 md:col-span-2">
+          {detailRows.map((item, index) => (
+            <div
+              key={item.label}
+              className={`grid gap-1 py-3 ${index > 0 ? "border-t border-gray-700" : ""}`}
+            >
+              <dt className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">{item.label}</dt>
+              <dd
+                className={[
+                  item.emphasize ? "text-base font-semibold text-white" : "text-gray-300",
+                  item.wrap ? "break-all" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+              >
+                {item.value}
+              </dd>
+            </div>
+          ))}
+        </dl>
       </div>
     </section>
   );
@@ -307,13 +313,17 @@ export default function SearchPage() {
       <Header />
 
       <main>
-        <div className="relative px-6 py-32" style={{ background: "linear-gradient(160deg, #fb2844 0%, #f55b70 100%)" }}>
-          <div className="mx-auto max-w-4xl text-center">
-            <h1 className="mb-12 text-3xl font-bold text-white">Find That Exact Moment</h1>
+        <div
+          className="relative px-6 py-24 md:py-28"
+          style={{ background: "linear-gradient(160deg, #fb2844 0%, #f55b70 100%)" }}
+        >
+          <div className="mx-auto max-w-6xl text-center">
+            <div className="mx-auto max-w-4xl">
+              <h1 className="mb-12 text-3xl font-bold text-white">Find That Exact Moment</h1>
 
-            <form onSubmit={onSubmit} noValidate className="flex flex-col items-stretch gap-3">
+              <form onSubmit={onSubmit} noValidate className="flex flex-col items-stretch gap-3">
                 <div className="flex flex-col items-stretch gap-3 md:flex-row">
-                <div className="flex-1 rounded-xl bg-gray-800 p-1">
+                  <div className="flex-1 rounded-xl bg-gray-800 p-1">
                     <div className="flex flex-col items-stretch gap-2 md:flex-row md:items-center">
                       <div className="relative md:w-[180px] md:shrink-0">
                         <button
@@ -411,65 +421,64 @@ export default function SearchPage() {
                   </div>
                 </div>
 
-              <div className="min-h-6 text-left">
-                {streamerError ? (
-                  <p id="streamer-error" className="flex items-center gap-2 text-sm font-medium text-white">
-                    <TriangleAlert className="size-4" />
-                    {streamerError}
-                  </p>
-                ) : null}
-                {streamerLoadError ? (
-                  <p className="flex items-center gap-2 text-sm font-medium text-white">
-                    <AlertCircle className="size-4" />
-                    {streamerLoadError}
-                  </p>
-                ) : null}
-              </div>
-            </form>
-          </div>
-        </div>
-
-        <div className="bg-gray-800 px-6 pb-12 pt-10">
-          <div className="mx-auto max-w-6xl">
-            {requestError ? (
-              <div className="mx-auto max-w-4xl rounded-xl border border-red-400/20 bg-red-500/10 p-5 text-left">
-                <div className="flex items-start gap-3">
-                  <AlertCircle className="mt-0.5 size-5 shrink-0 text-red-200" />
-                  <div>
-                    <p className="text-sm font-semibold uppercase tracking-[0.18em] text-red-200">Search error</p>
-                    <p className="mt-2 text-sm leading-6 text-white/85">{requestError}</p>
-                  </div>
+                <div className="min-h-6 text-left">
+                  {streamerError ? (
+                    <p id="streamer-error" className="flex items-center gap-2 text-sm font-medium text-white">
+                      <TriangleAlert className="size-4" />
+                      {streamerError}
+                    </p>
+                  ) : null}
+                  {streamerLoadError ? (
+                    <p className="flex items-center gap-2 text-sm font-medium text-white">
+                      <AlertCircle className="size-4" />
+                      {streamerLoadError}
+                    </p>
+                  ) : null}
                 </div>
-              </div>
-            ) : null}
 
-            {submitting ? (
-              <div className="mx-auto max-w-4xl rounded-xl border border-gray-700 bg-gray-900/80 p-6 text-center">
-                <LoaderCircle className="mx-auto size-7 animate-spin text-[#fb2844]" />
-                <p className="mt-3 text-base font-semibold text-white">Searching Twitch VODs...</p>
-                <p className="mt-2 text-sm text-gray-400">We are matching your TikTok clip against indexed streamer audio.</p>
-              </div>
-            ) : null}
+                {requestError || submitting || result ? (
+                  <div className="mt-8 space-y-6">
+                    {requestError ? (
+                      <div className="mx-auto max-w-4xl rounded-xl border border-red-400/20 bg-gray-900 p-5 text-left shadow-lg">
+                        <div className="flex items-start gap-3">
+                          <AlertCircle className="mt-0.5 size-5 shrink-0 text-red-100" />
+                          <div>
+                            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-red-100">Search error</p>
+                            <p className="mt-2 text-sm leading-6 text-white/90">{requestError}</p>
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
 
-            {!submitting && result ? <SearchResultCard result={result} lastSubmittedUrl={lastSubmittedUrl} /> : null}
+                    {submitting ? (
+                      <div className="mx-auto max-w-4xl rounded-xl border border-gray-700 bg-gray-900 p-6 text-center shadow-lg">
+                        <LoaderCircle className="mx-auto size-7 animate-spin text-[#fb2844]" />
+                        <p className="mt-3 text-base font-semibold text-white">Searching Twitch VODs...</p>
+                        <p className="mt-2 text-sm text-gray-400">
+                          We are matching your TikTok clip against indexed streamer audio.
+                        </p>
+                      </div>
+                    ) : null}
+
+                    {!submitting && result ? <SearchResultCard result={result} lastSubmittedUrl={lastSubmittedUrl} /> : null}
+
+                    {!submitting && result && !result.found ? (
+                      <div className="mx-auto max-w-4xl rounded-xl border border-gray-700 bg-gray-900 p-6 text-center shadow-lg">
+                        <Search className="mx-auto size-7 text-gray-400" />
+                        <h2 className="mt-4 text-2xl font-bold text-white">No exact match yet</h2>
+                        <p className="mx-auto mt-3 max-w-2xl text-base leading-7 text-gray-300">
+                          Try another TikTok URL or confirm that you selected the right streamer before searching again.
+                        </p>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </form>
+            </div>
           </div>
         </div>
 
         <FeatureGrid />
-
-        {!submitting && result && !result.found ? (
-          <div className="bg-gray-900 px-6 pb-16">
-            <div className="mx-auto max-w-6xl">
-              <div className="mx-auto max-w-4xl rounded-xl border border-gray-700 bg-gray-800/70 p-6 text-center">
-                <Search className="mx-auto size-7 text-gray-400" />
-                <h2 className="mt-4 text-2xl font-bold text-white">No exact match yet</h2>
-                <p className="mx-auto mt-3 max-w-2xl text-base leading-7 text-gray-300">
-                  Try another TikTok URL or confirm that you selected the right streamer before searching again.
-                </p>
-              </div>
-            </div>
-          </div>
-        ) : null}
       </main>
     </div>
   );
