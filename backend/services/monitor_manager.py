@@ -286,10 +286,10 @@ class MonitorManager:
             if event == "online":
                 self._start_ingest_if_needed(streamer)
             elif event == "offline":
-                self._stop_active_session()
                 with self._lock:
                     if self._status.streamer == streamer and self._status.state != "idle":
-                        self._status.state = "polling"
+                        has_active_session = self._session_thread is not None and self._session_thread.is_alive()
+                        self._status.state = "ingesting" if has_active_session else "polling"
                         self._status.is_live = False
                         self._status.last_check_at = self._utc_now_iso()
                         self._status.last_error = None
@@ -338,16 +338,15 @@ class MonitorManager:
             return
 
         with self._lock:
+            has_active_session = self._session_thread is not None and self._session_thread.is_alive()
             if self._status.streamer == streamer and self._status.state != "idle":
-                self._status.state = "polling"
+                self._status.state = "ingesting" if has_active_session else "polling"
                 self._status.is_live = is_live
                 self._status.last_error = None
                 self._status.last_check_at = self._utc_now_iso()
 
         if is_live:
             self._start_ingest_if_needed(streamer)
-        else:
-            self._stop_active_session()
 
     def _start_ingest_if_needed(self, streamer: str) -> None:
         with self._lock:

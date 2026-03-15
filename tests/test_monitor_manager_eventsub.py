@@ -36,6 +36,22 @@ class FakeEventSubClient:
 class DummyStore:
     pass
 
+
+class DummySession:
+    def __init__(self):
+        self.stop_calls = 0
+
+    def stop(self) -> None:
+        self.stop_calls += 1
+
+
+class DummyThread:
+    def __init__(self, alive: bool):
+        self._alive = alive
+
+    def is_alive(self) -> bool:
+        return self._alive
+
 class TestMonitorManagerEventSub:
 
     def _build_manager(self, tmp: str, monitor: FakeTwitchMonitor, eventsub_client: FakeEventSubClient, secret: str='secret', callback_url: str='https://cb.example/api/twitch/eventsub', fallback_poll_seconds: float=120.0) -> MonitorManager:
@@ -68,3 +84,24 @@ class TestMonitorManagerEventSub:
             manager.stop()
             assert status.eventsub_health == 'degraded'
             assert monitor.is_live_calls >= 1
+
+    def test_offline_event_keeps_active_ingest_running_for_finalize(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            monitor = FakeTwitchMonitor(is_live_value=False)
+            eventsub = FakeEventSubClient(fail_ensure=False)
+            manager = self._build_manager(tmp, monitor, eventsub)
+            session = DummySession()
+
+            with manager._lock:
+                manager._status.streamer = 'alice'
+                manager._status.state = 'ingesting'
+                manager._active_session = session
+                manager._session_thread = DummyThread(alive=True)
+
+            manager.on_stream_offline('alice')
+            manager._drain_events('alice')
+            status = manager.get_status()
+
+            assert session.stop_calls == 0
+            assert status.state == 'ingesting'
+            assert status.is_live is False
