@@ -127,6 +127,11 @@ class LiveArchiveVODSource(AudioSource):
         vod_platform_id = str(latest_vod["id"])
         if self._vod_platform_id != vod_platform_id:
             self._switch_to_vod(latest_vod)
+        else:
+            self._sync_video_metadata_if_changed(
+                title=str(latest_vod.get("title") or f"Live stream by {self.streamer}"),
+                thumbnail_url=str(latest_vod["thumbnail_url"]) if latest_vod.get("thumbnail_url") else None,
+            )
 
         duration_seconds = int(latest_vod.get("duration_seconds") or 0)
         if duration_seconds > self._last_seen_duration_seconds:
@@ -140,8 +145,8 @@ class LiveArchiveVODSource(AudioSource):
     def _switch_to_vod(self, vod: dict) -> None:
         self._vod_platform_id = str(vod["id"])
         self.current_vod_url = str(vod["url"])
-        self._vod_title = str(vod.get("title") or f"Live stream by {self.streamer}")
-        self._vod_thumbnail_url = str(vod["thumbnail_url"]) if vod.get("thumbnail_url") else None
+        incoming_title = str(vod.get("title") or f"Live stream by {self.streamer}")
+        incoming_thumbnail_url = str(vod["thumbnail_url"]) if vod.get("thumbnail_url") else None
 
         creator_url = f"https://twitch.tv/{self.streamer}"
         creator_id = self.store.create_or_get_creator(self.streamer, creator_url)
@@ -149,6 +154,8 @@ class LiveArchiveVODSource(AudioSource):
 
         existing_video = self.store.get_video_by_url(self.current_vod_url)
         if existing_video is None:
+            self._vod_title = incoming_title
+            self._vod_thumbnail_url = incoming_thumbnail_url
             self.video_id = self.store.create_video(
                 creator_id=creator_id,
                 url=self.current_vod_url,
@@ -158,11 +165,12 @@ class LiveArchiveVODSource(AudioSource):
             )
         else:
             self.video_id = int(existing_video[0])
-            self.store.update_video_metadata(
-                self.video_id,
-                title=self._vod_title,
-                thumbnail_url=self._vod_thumbnail_url,
-                processed=False,
+            self._vod_title = str(existing_video[3])
+            self._vod_thumbnail_url = str(existing_video[4]) if existing_video[4] is not None else None
+            self.store.update_video_metadata(self.video_id, processed=False)
+            self._sync_video_metadata_if_changed(
+                title=incoming_title,
+                thumbnail_url=incoming_thumbnail_url,
             )
 
         state = self.store.get_vod_ingest_state(self._vod_platform_id)
@@ -177,6 +185,32 @@ class LiveArchiveVODSource(AudioSource):
         self._media_url = None
         self._media_url_resolved_at = 0.0
         self._no_growth_checks = 0
+
+    def _sync_video_metadata_if_changed(
+        self,
+        *,
+        title: str,
+        thumbnail_url: str | None,
+    ) -> None:
+        if self.video_id is None:
+            return
+
+        should_update_thumbnail = (
+            (self._vod_thumbnail_url is None and thumbnail_url is not None)
+            or (thumbnail_url is not None and thumbnail_url != self._vod_thumbnail_url)
+        )
+        should_update_title = title != self._vod_title
+        if not should_update_title and not should_update_thumbnail:
+            return
+
+        self._vod_title = title
+        if should_update_thumbnail:
+            self._vod_thumbnail_url = thumbnail_url
+        self.store.update_video_metadata(
+            self.video_id,
+            title=title,
+            thumbnail_url=thumbnail_url if should_update_thumbnail else None,
+        )
 
     def _extract_chunk(self, start_seconds: int, duration_seconds: int) -> str:
         if duration_seconds <= 0:

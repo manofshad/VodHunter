@@ -4,9 +4,15 @@ from sources.live_archive_vod_source import LiveArchiveVODSource
 
 class FakeMonitor:
 
-    def __init__(self, live_sequence: list[bool], vod_duration_seconds: int=240):
+    def __init__(
+        self,
+        live_sequence: list[bool],
+        vod_duration_seconds: int = 240,
+        vod_sequence: list[dict[str, object]] | None = None,
+    ):
         self.live_sequence = list(live_sequence)
         self.vod_duration_seconds = vod_duration_seconds
+        self.vod_sequence = list(vod_sequence or [])
 
     def is_live(self, streamer: str) -> bool:
         if len(self.live_sequence) > 1:
@@ -17,6 +23,10 @@ class FakeMonitor:
         return 'user-1'
 
     def get_latest_archive_vod(self, user_id: str):
+        if self.vod_sequence:
+            if len(self.vod_sequence) > 1:
+                return dict(self.vod_sequence.pop(0))
+            return dict(self.vod_sequence[0])
         return {'id': 'vod-1', 'url': 'https://www.twitch.tv/videos/vod-1', 'title': 'Live stream', 'thumbnail_url': 'https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg', 'duration_seconds': self.vod_duration_seconds}
 
 class FakeStore:
@@ -27,6 +37,7 @@ class FakeStore:
         self.creators: dict[str, tuple[int, str, str]] = {}
         self.videos_by_url: dict[str, tuple[int, int, str, str, str | None, bool]] = {}
         self.vod_state: dict[str, dict] = {}
+        self.metadata_updates: list[dict[str, object]] = []
 
     def create_or_get_creator(self, name: str, url: str) -> int:
         existing = self.creators.get(url)
@@ -52,6 +63,14 @@ class FakeStore:
                 return
 
     def update_video_metadata(self, video_id: int, *, title: str | None=None, thumbnail_url: str | None=None, processed: bool | None=None) -> None:
+        self.metadata_updates.append(
+            {
+                'video_id': int(video_id),
+                'title': title,
+                'thumbnail_url': thumbnail_url,
+                'processed': processed,
+            }
+        )
         for url, row in list(self.videos_by_url.items()):
             if int(row[0]) != int(video_id):
                 continue
@@ -69,9 +88,15 @@ class FakeStore:
 
 class TestLiveArchiveVODSource:
 
-    def _make_source(self, tmp: str, live_sequence: list[bool]) -> LiveArchiveVODSource:
+    def _make_source(
+        self,
+        tmp: str,
+        live_sequence: list[bool],
+        *,
+        vod_sequence: list[dict[str, object]] | None = None,
+    ) -> LiveArchiveVODSource:
         store = FakeStore()
-        monitor = FakeMonitor(live_sequence=live_sequence)
+        monitor = FakeMonitor(live_sequence=live_sequence, vod_sequence=vod_sequence)
         source = LiveArchiveVODSource(streamer='alice', store=store, twitch_monitor=monitor, chunk_seconds=60, lag_seconds=120, poll_seconds=0.0, finalize_checks=2, temp_dir=f'{tmp}/chunks')
 
         def fake_extract_chunk(start_seconds: int, duration_seconds: int) -> str:
@@ -123,3 +148,138 @@ class TestLiveArchiveVODSource:
             assert row[3] == 'Live stream'
             assert row[4] == 'https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg'
             assert not row[5]
+            assert source.store.metadata_updates == [
+                {
+                    'video_id': source.video_id,
+                    'title': None,
+                    'thumbnail_url': None,
+                    'processed': False,
+                },
+                {
+                    'video_id': source.video_id,
+                    'title': 'Live stream',
+                    'thumbnail_url': 'https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg',
+                    'processed': None,
+                },
+            ]
+
+    def test_refresh_updates_thumbnail_when_vod_metadata_fills_in_later(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = self._make_source(
+                tmp,
+                live_sequence=[True, True],
+                vod_sequence=[
+                    {
+                        'id': 'vod-1',
+                        'url': 'https://www.twitch.tv/videos/vod-1',
+                        'title': 'Live stream',
+                        'thumbnail_url': None,
+                        'duration_seconds': 240,
+                    },
+                    {
+                        'id': 'vod-1',
+                        'url': 'https://www.twitch.tv/videos/vod-1',
+                        'title': 'Live stream',
+                        'thumbnail_url': 'https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg',
+                        'duration_seconds': 300,
+                    },
+                ],
+            )
+            source.start()
+            row = source.store.get_video_by_url('https://www.twitch.tv/videos/vod-1')
+            assert row is not None
+            assert row[4] is None
+
+            source.next_chunk()
+
+            row = source.store.get_video_by_url('https://www.twitch.tv/videos/vod-1')
+            assert row is not None
+            assert row[4] == 'https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg'
+            assert source.store.metadata_updates == [
+                {
+                    'video_id': source.video_id,
+                    'title': 'Live stream',
+                    'thumbnail_url': 'https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg',
+                    'processed': None,
+                },
+            ]
+
+    def test_refresh_skips_redundant_metadata_writes_when_values_are_unchanged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = self._make_source(
+                tmp,
+                live_sequence=[True, True, True],
+                vod_sequence=[
+                    {
+                        'id': 'vod-1',
+                        'url': 'https://www.twitch.tv/videos/vod-1',
+                        'title': 'Live stream',
+                        'thumbnail_url': 'https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg',
+                        'duration_seconds': 240,
+                    },
+                    {
+                        'id': 'vod-1',
+                        'url': 'https://www.twitch.tv/videos/vod-1',
+                        'title': 'Live stream',
+                        'thumbnail_url': 'https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg',
+                        'duration_seconds': 300,
+                    },
+                    {
+                        'id': 'vod-1',
+                        'url': 'https://www.twitch.tv/videos/vod-1',
+                        'title': 'Live stream',
+                        'thumbnail_url': 'https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg',
+                        'duration_seconds': 360,
+                    },
+                ],
+            )
+            source.start()
+            source.next_chunk()
+            source.next_chunk()
+
+            assert source.store.metadata_updates == []
+
+    def test_refresh_updates_title_once_when_same_vod_title_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = self._make_source(
+                tmp,
+                live_sequence=[True, True, True],
+                vod_sequence=[
+                    {
+                        'id': 'vod-1',
+                        'url': 'https://www.twitch.tv/videos/vod-1',
+                        'title': 'Original title',
+                        'thumbnail_url': 'https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg',
+                        'duration_seconds': 240,
+                    },
+                    {
+                        'id': 'vod-1',
+                        'url': 'https://www.twitch.tv/videos/vod-1',
+                        'title': 'Updated live title',
+                        'thumbnail_url': 'https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg',
+                        'duration_seconds': 300,
+                    },
+                    {
+                        'id': 'vod-1',
+                        'url': 'https://www.twitch.tv/videos/vod-1',
+                        'title': 'Updated live title',
+                        'thumbnail_url': 'https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg',
+                        'duration_seconds': 360,
+                    },
+                ],
+            )
+            source.start()
+            source.next_chunk()
+            source.next_chunk()
+
+            row = source.store.get_video_by_url('https://www.twitch.tv/videos/vod-1')
+            assert row is not None
+            assert row[3] == 'Updated live title'
+            assert source.store.metadata_updates == [
+                {
+                    'video_id': source.video_id,
+                    'title': 'Updated live title',
+                    'thumbnail_url': None,
+                    'processed': None,
+                },
+            ]
