@@ -22,6 +22,18 @@ class TestTwitchMonitor:
         assert vod['duration_seconds'] == 7384
         assert vod['thumbnail_url'] == 'https://static-cdn.jtvnw.net/cf_vods/d2/new-thumb-320x180.jpg'
 
+    def test_get_user_profile_normalizes_profile_image_url(self) -> None:
+        monitor = TwitchMonitor(client_id='x', client_secret='y')
+        payload = {'data': [{'id': 'user-1', 'login': 'xqc', 'display_name': 'xQc', 'profile_image_url': 'https://static-cdn.jtvnw.net/jtv_user_pictures/xqc-profile_image.png'}]}
+        with patch.object(monitor, '_helix_get', return_value=payload):
+            profile = monitor.get_user_profile('xQc')
+        assert profile == {
+            'id': 'user-1',
+            'login': 'xqc',
+            'display_name': 'xQc',
+            'profile_image_url': 'https://static-cdn.jtvnw.net/jtv_user_pictures/xqc-profile_image.png',
+        }
+
     def test_list_archive_vods_since_paginates_filters_and_sorts(self) -> None:
         monitor = TwitchMonitor(client_id='x', client_secret='y')
         first_page = {'data': [{'id': '300', 'title': 'Newest', 'duration': '2h0m0s', 'created_at': '2026-03-09T13:00:00Z', 'thumbnail_url': 'https://cdn/%{width}x%{height}.jpg'}, {'id': '200', 'title': 'Middle', 'duration': '1h0m0s', 'created_at': '2026-03-08T13:00:00Z', 'thumbnail_url': 'https://cdn/%{width}x%{height}.jpg'}], 'pagination': {'cursor': 'next-page'}}

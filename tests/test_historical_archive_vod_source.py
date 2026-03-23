@@ -7,16 +7,17 @@ class FakeStore:
     def __init__(self):
         self._creator_id = 0
         self._video_id = 0
-        self.creators: dict[str, tuple[int, str, str]] = {}
+        self.creators: dict[str, tuple[int, str, str, str | None]] = {}
         self.videos_by_url: dict[str, tuple[int, int, str, str, str | None, bool]] = {}
         self.vod_state: dict[str, dict] = {}
 
-    def create_or_get_creator(self, name: str, url: str) -> int:
+    def create_or_get_creator(self, name: str, url: str, profile_image_url: str | None = None) -> int:
         existing = self.creators.get(url)
         if existing is not None:
+            self.creators[url] = (existing[0], name, url, profile_image_url if profile_image_url is not None else existing[3])
             return existing[0]
         self._creator_id += 1
-        self.creators[url] = (self._creator_id, name, url)
+        self.creators[url] = (self._creator_id, name, url, profile_image_url)
         return self._creator_id
 
     def get_video_by_url(self, url: str):
@@ -61,7 +62,7 @@ class TestHistoricalArchiveVODSource:
             creator_id = store.create_or_get_creator('alice', 'https://twitch.tv/alice')
             video_id = store.create_video(creator_id=creator_id, url='https://www.twitch.tv/videos/vod-1', title='Old', thumbnail_url=None, processed=False)
             store.upsert_vod_ingest_state('vod-1', video_id, 'alice', 120, 180)
-            source = HistoricalArchiveVODSource(streamer='alice', vod_metadata=self._make_vod(), store=store, chunk_seconds=60, temp_dir=f'{tmp}/chunks')
+            source = HistoricalArchiveVODSource(streamer='alice', vod_metadata=self._make_vod(), store=store, creator_metadata={'profile_image_url': 'https://cdn/alice.png'}, chunk_seconds=60, temp_dir=f'{tmp}/chunks')
 
             def fake_extract_chunk(start_seconds: int, duration_seconds: int) -> str:
                 out = os.path.join(source.temp_dir, f'chunk_{start_seconds}_{duration_seconds}.wav')
@@ -71,6 +72,7 @@ class TestHistoricalArchiveVODSource:
                 return out
             source._extract_chunk = fake_extract_chunk
             source.start()
+            assert store.creators['https://twitch.tv/alice'][3] == 'https://cdn/alice.png'
             assert source.ingest_cursor_seconds == 120
             chunk = source.next_chunk()
             assert chunk is not None
@@ -84,7 +86,7 @@ class TestHistoricalArchiveVODSource:
     def test_finalize_marks_video_processed_and_clears_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = FakeStore()
-            source = HistoricalArchiveVODSource(streamer='alice', vod_metadata=self._make_vod(), store=store, chunk_seconds=180, temp_dir=f'{tmp}/chunks')
+            source = HistoricalArchiveVODSource(streamer='alice', vod_metadata=self._make_vod(), store=store, creator_metadata={'profile_image_url': 'https://cdn/alice.png'}, chunk_seconds=180, temp_dir=f'{tmp}/chunks')
 
             def fake_extract_chunk(start_seconds: int, duration_seconds: int) -> str:
                 out = os.path.join(source.temp_dir, f'chunk_{start_seconds}_{duration_seconds}.wav')

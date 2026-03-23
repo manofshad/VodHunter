@@ -5,6 +5,7 @@ from dataclasses import dataclass
 class SearchResult:
     found: bool
     streamer: str | None = None
+    profile_image_url: str | None = None
     video_id: int | None = None
     video_url: str | None = None
     video_url_at_timestamp: str | None = None

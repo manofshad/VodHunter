@@ -23,6 +23,7 @@ class StubSearchManager:
         return SearchResult(
             found=False,
             streamer=streamer,
+            profile_image_url='https://cdn/profile.png',
             reason="url test",
             thumbnail_url=None,
             video_url_at_timestamp=None,
@@ -30,10 +31,13 @@ class StubSearchManager:
 
 
 class StubStore:
-    def __init__(self, streamers: list[str] | None = None):
-        self.streamers = streamers or ["xqc", "jason"]
+    def __init__(self, streamers: list[dict[str, str | None]] | None = None):
+        self.streamers = streamers or [
+            {"name": "xqc", "profile_image_url": "https://cdn/xqc.png"},
+            {"name": "jason", "profile_image_url": None},
+        ]
 
-    def list_searchable_streamers(self) -> list[str]:
+    def list_searchable_streamers(self) -> list[dict[str, str | None]]:
         return list(self.streamers)
 
 
@@ -50,6 +54,7 @@ def assert_search_behavior_for_app(app) -> None:
 
     response = search_clip(request, tiktok_url="https://www.tiktok.com/@u/video/1", streamer="jason")
     assert not response.found
+    assert response.profile_image_url == "https://cdn/profile.png"
     assert search_manager.url_calls == 1
     assert search_manager.last_streamer == "jason"
 
@@ -89,12 +94,16 @@ def assert_search_behavior_for_app(app) -> None:
 
 def test_list_searchable_streamers_endpoint() -> None:
     app = create_public_app(enable_lifespan=False)
-    app.state.store = StubStore(streamers=["jason", "xqc"])
+    app.state.store = StubStore(streamers=[
+        {"name": "jason", "profile_image_url": None},
+        {"name": "xqc", "profile_image_url": "https://cdn/xqc.png"},
+    ])
     request = FakeRequest(app)
 
     response = list_searchable_streamers(request)
 
     assert [item.name for item in response] == ["jason", "xqc"]
+    assert [item.profile_image_url for item in response] == [None, "https://cdn/xqc.png"]
 
 
 @pytest.mark.parametrize(

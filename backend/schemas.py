@@ -51,6 +51,7 @@ class LiveSessionItem(BaseModel):
 class SearchResponse(BaseModel):
     found: bool
     streamer: str | None = None
+    profile_image_url: str | None = None
     video_id: int | None = None
     video_url: str | None = None
     video_url_at_timestamp: str | None = None
@@ -65,6 +66,7 @@ class SearchResponse(BaseModel):
         return cls(
             found=result.found,
             streamer=result.streamer,
+            profile_image_url=result.profile_image_url,
             video_id=result.video_id,
             video_url=result.video_url,
             video_url_at_timestamp=result.video_url_at_timestamp,
@@ -78,3 +80,4 @@ class SearchResponse(BaseModel):
 
 class StreamerListItem(BaseModel):
     name: str = Field(min_length=1, max_length=100)
+    profile_image_url: str | None = None

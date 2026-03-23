@@ -93,6 +93,7 @@ class VectorStore:
                     )
 
                 required_columns = (
+                    ("creators", "profile_image_url"),
                     ("videos", "thumbnail_url"),
                     ("fingerprint_embeddings", "creator_id"),
                 )
@@ -190,23 +191,58 @@ class VectorStore:
             return None
         return int(row[0]), int(row[1]), str(row[2]), str(row[3]), str(row[4]) if row[4] else None, bool(row[5])
 
-    def create_or_get_creator(self, name: str, url: str) -> int:
+    def create_or_get_creator(
+        self,
+        name: str,
+        url: str,
+        profile_image_url: str | None = None,
+    ) -> int:
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO creators (name, url)
-                    VALUES (%s, %s)
+                    INSERT INTO creators (name, url, profile_image_url)
+                    VALUES (%s, %s, %s)
                     ON CONFLICT (url)
-                    DO UPDATE SET name = excluded.name
+                    DO UPDATE SET
+                        name = excluded.name,
+                        profile_image_url = COALESCE(excluded.profile_image_url, creators.profile_image_url)
                     RETURNING id
                     """,
-                    (name, url),
+                    (name, url, profile_image_url),
                 )
                 row = cur.fetchone()
         if row is None:
             raise RuntimeError("Failed to resolve creator id")
         return int(row[0])
+
+    def update_creator_metadata(
+        self,
+        creator_id: int,
+        *,
+        name: str | None = None,
+        profile_image_url: str | None = None,
+    ) -> None:
+        assignments: list[str] = []
+        values: list[Any] = []
+
+        if name is not None:
+            assignments.append("name = %s")
+            values.append(name)
+        if profile_image_url is not None:
+            assignments.append("profile_image_url = %s")
+            values.append(profile_image_url)
+
+        if not assignments:
+            return
+
+        values.append(int(creator_id))
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"UPDATE creators SET {', '.join(assignments)} WHERE id = %s",
+                    values,
+                )
 
     def get_creator_id_by_name(self, name: str) -> int | None:
         normalized_name = (name or "").strip().lower()
@@ -458,12 +494,12 @@ class VectorStore:
                 rows = cur.fetchall()
         return [(int(r[0]), int(r[1]), float(r[2])) for r in rows]
 
-    def get_video_with_creator(self, video_id: int) -> tuple[int, str, str, str, str | None] | None:
+    def get_video_with_creator(self, video_id: int) -> tuple[int, str, str, str, str | None, str | None] | None:
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT videos.id, videos.url, videos.title, creators.name, videos.thumbnail_url
+                    SELECT videos.id, videos.url, videos.title, creators.name, videos.thumbnail_url, creators.profile_image_url
                     FROM videos
                     JOIN creators ON creators.id = videos.creator_id
                     WHERE videos.id = %s
@@ -473,7 +509,14 @@ class VectorStore:
                 row = cur.fetchone()
         if row is None:
             return None
-        return int(row[0]), str(row[1]), str(row[2]), str(row[3]), str(row[4]) if row[4] else None
+        return (
+            int(row[0]),
+            str(row[1]),
+            str(row[2]),
+            str(row[3]),
+            str(row[4]) if row[4] else None,
+            str(row[5]) if row[5] else None,
+        )
 
 
     def list_live_sessions(self, limit: int, offset: int) -> list[dict[str, Any]]:
@@ -502,20 +545,26 @@ class VectorStore:
             for r in rows
         ]
 
-    def list_searchable_streamers(self) -> list[str]:
+    def list_searchable_streamers(self) -> list[dict[str, str | None]]:
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT c.name
+                    SELECT c.name, c.profile_image_url
                     FROM creators c
                     JOIN videos v ON v.creator_id = c.id
                     JOIN fingerprints f ON f.video_id = v.id
                     JOIN fingerprint_embeddings fe ON fe.fingerprint_id = f.id
                     WHERE c.name IS NOT NULL AND BTRIM(c.name) <> ''
-                    GROUP BY c.name
+                    GROUP BY c.name, c.profile_image_url
                     ORDER BY LOWER(c.name), c.name
                     """
                 )
                 rows = cur.fetchall()
-        return [str(r[0]) for r in rows]
+        return [
+            {
+                "name": str(r[0]),
+                "profile_image_url": str(r[1]) if r[1] else None,
+            }
+            for r in rows
+        ]

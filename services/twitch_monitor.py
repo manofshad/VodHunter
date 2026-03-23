@@ -23,6 +23,7 @@ class TwitchMonitor:
         self.client_secret = client_secret
         self.request_timeout = request_timeout
         self._access_token: Optional[str] = None
+        self._user_profile_cache: dict[str, dict[str, Any]] = {}
 
     @classmethod
     def from_env(cls) -> "TwitchMonitor":
@@ -133,19 +134,35 @@ class TwitchMonitor:
         return bool(data.get("data"))
 
     def get_user_id(self, streamer: str) -> str:
+        profile = self.get_user_profile(streamer)
+        return str(profile["id"])
+
+    def get_user_profile(self, streamer: str, force_refresh: bool = False) -> dict[str, Any]:
         streamer = streamer.strip()
         if not streamer:
             raise ValueError("streamer is required")
+
+        cached = None if force_refresh else self._user_profile_cache.get(streamer.lower())
+        if cached is not None:
+            return dict(cached)
 
         data = self._helix_get("users", {"login": streamer})
         rows = data.get("data") or []
         if not rows:
             raise RuntimeError(f"Streamer not found: {streamer}")
 
-        user_id = str(rows[0].get("id", "")).strip()
+        raw_user = rows[0]
+        user_id = str(raw_user.get("id", "")).strip()
         if not user_id:
             raise RuntimeError(f"Missing user id for streamer: {streamer}")
-        return user_id
+        normalized = {
+            "id": user_id,
+            "login": str(raw_user.get("login", streamer)).strip().lower(),
+            "display_name": str(raw_user.get("display_name", "")).strip() or str(raw_user.get("login", streamer)).strip(),
+            "profile_image_url": self.normalize_image_url(raw_user.get("profile_image_url")),
+        }
+        self._user_profile_cache[normalized["login"]] = normalized
+        return dict(normalized)
 
     def get_latest_archive_vod(self, user_id: str) -> dict[str, Any] | None:
         user_id = user_id.strip()
@@ -241,6 +258,11 @@ class TwitchMonitor:
         if not raw:
             return None
         return raw.replace("%{width}", str(int(width))).replace("%{height}", str(int(height)))
+
+    @staticmethod
+    def normalize_image_url(image_url: Any) -> str | None:
+        raw = str(image_url or "").strip()
+        return raw or None
 
     @staticmethod
     def canonical_vod_url(vod_id: str) -> str:

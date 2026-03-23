@@ -15,12 +15,14 @@ class HistoricalArchiveVODSource(AudioSource):
         streamer: str,
         vod_metadata: dict[str, Any],
         store: VectorStore,
+        creator_metadata: dict[str, Any] | None = None,
         chunk_seconds: int = 60,
         temp_dir: str = "temp_backfill_chunks",
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
     ):
         self.streamer = streamer.strip().lower()
         self.vod_metadata = dict(vod_metadata)
+        self.creator_metadata = dict(creator_metadata or {})
         self.store = store
         self.chunk_seconds = int(chunk_seconds)
         self.temp_dir = temp_dir
@@ -30,6 +32,7 @@ class HistoricalArchiveVODSource(AudioSource):
         self.ingest_cursor_seconds: int = 0
 
         self._creator_id: int | None = None
+        self._creator_profile_image_url: str | None = str(self.creator_metadata.get("profile_image_url") or "") or None
         self._started = False
         self._finished = False
         self._pending_commit_end_seconds: int | None = None
@@ -57,7 +60,11 @@ class HistoricalArchiveVODSource(AudioSource):
         self._started = True
 
         creator_url = f"https://twitch.tv/{self.streamer}"
-        self._creator_id = self.store.create_or_get_creator(self.streamer, creator_url)
+        self._creator_id = self.store.create_or_get_creator(
+            self.streamer,
+            creator_url,
+            profile_image_url=self._creator_profile_image_url,
+        )
 
         existing_video = self.store.get_video_by_url(self.current_vod_url)
         if existing_video is None:
