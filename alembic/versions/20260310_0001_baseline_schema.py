@@ -23,7 +23,8 @@ def upgrade() -> None:
         CREATE TABLE IF NOT EXISTS creators (
             id BIGSERIAL PRIMARY KEY,
             name TEXT,
-            url TEXT UNIQUE
+            url TEXT UNIQUE,
+            profile_image_url TEXT
         )
         """
     )

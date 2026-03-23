@@ -8,6 +8,14 @@ class FakeMonitor:
     def get_user_id(self, streamer: str) -> str:
         return 'user-1'
 
+    def get_user_profile(self, streamer: str) -> dict[str, str]:
+        return {
+            'id': 'user-1',
+            'login': streamer,
+            'display_name': streamer,
+            'profile_image_url': 'https://cdn/profile.png',
+        }
+
     def list_archive_vods_since(self, user_id: str, created_after):
         return list(self.vods)
 
@@ -25,13 +33,14 @@ class FakeStore:
 
 class FakeSource:
 
-    def __init__(self, streamer, vod_metadata, store, chunk_seconds, temp_dir, progress_callback=None):
+    def __init__(self, streamer, vod_metadata, store, chunk_seconds, temp_dir, progress_callback=None, creator_metadata=None):
         self.streamer = streamer
         self.vod_metadata = vod_metadata
         self.store = store
         self.chunk_seconds = chunk_seconds
         self.temp_dir = temp_dir
         self.progress_callback = progress_callback
+        self.creator_metadata = creator_metadata
 
 class FakeSession:
 
@@ -54,12 +63,28 @@ class TestRunBackfillIngest:
         monitor = FakeMonitor([{'id': 'resume', 'url': 'https://www.twitch.tv/videos/resume'}, {'id': 'processed', 'url': 'https://www.twitch.tv/videos/processed'}, {'id': 'fail', 'url': 'https://www.twitch.tv/videos/fail', 'should_fail': True}])
         logs: list[str] = []
         seen_vods: list[str] = []
+        seen_creator_metadata: list[dict[str, str] | None] = []
 
         def source_factory(**kwargs):
             seen_vods.append(kwargs['vod_metadata']['id'])
+            seen_creator_metadata.append(kwargs.get('creator_metadata'))
             return FakeSource(**kwargs)
         result = run_backfill_ingest('Alice', 7, monitor=monitor, build_store=lambda: self._build_state(store), build_ingest=lambda: {'embedder': object()}, source_factory=source_factory, session_factory=FakeSession, out=logs.append)
         assert seen_vods == ['resume', 'fail']
+        assert seen_creator_metadata == [
+            {
+                'id': 'user-1',
+                'login': 'alice',
+                'display_name': 'alice',
+                'profile_image_url': 'https://cdn/profile.png',
+            },
+            {
+                'id': 'user-1',
+                'login': 'alice',
+                'display_name': 'alice',
+                'profile_image_url': 'https://cdn/profile.png',
+            },
+        ]
         assert result.ingested == 1
         assert result.resumed == 1
         assert result.skipped == 1

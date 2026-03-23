@@ -66,6 +66,7 @@ class SearchService:
                 return SearchResult(
                     found=False,
                     streamer=normalized_streamer,
+                    profile_image_url=None,
                     reason=f"No indexed clips found for streamer: {normalized_streamer}",
                 )
             logger.info(
@@ -92,7 +93,7 @@ class SearchService:
                     vector_query_seconds,
                     normalized_streamer,
                 )
-                return SearchResult(found=False, streamer=normalized_streamer, reason=f"No indexed clips found for streamer: {normalized_streamer}")
+                return SearchResult(found=False, streamer=normalized_streamer, profile_image_url=None, reason=f"No indexed clips found for streamer: {normalized_streamer}")
 
             started_at = time.perf_counter()
             alignment = self.alignment.align(neighbor_ids, query_timestamps)
@@ -111,6 +112,7 @@ class SearchService:
                 return SearchResult(
                     found=False,
                     streamer=normalized_streamer,
+                    profile_image_url=None,
                     reason=alignment.reason or "No aligned match found",
                 )
 
@@ -128,10 +130,11 @@ class SearchService:
                 return SearchResult(
                     found=False,
                     streamer=normalized_streamer,
+                    profile_image_url=None,
                     reason="Aligned video metadata not found",
                 )
 
-            video_id, video_url, title, streamer, thumbnail_url = video_row
+            video_id, video_url, title, streamer, thumbnail_url, profile_image_url = video_row
             video_url_at_timestamp = build_twitch_timestamp_url(video_url, alignment.timestamp_seconds)
             logger.info(
                 "timing event=search_pipeline seconds=%.2f preprocess_seconds=%.2f embed_seconds=%.2f vector_query_seconds=%.2f alignment_seconds=%.2f result=found streamer=%s",
@@ -145,6 +148,7 @@ class SearchService:
             return SearchResult(
                 found=True,
                 streamer=streamer,
+                profile_image_url=profile_image_url,
                 video_id=video_id,
                 video_url=video_url,
                 video_url_at_timestamp=video_url_at_timestamp,

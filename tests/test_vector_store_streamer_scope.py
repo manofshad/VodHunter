@@ -79,13 +79,26 @@ class TestVectorStoreStreamerScope:
 
     def test_list_searchable_streamers_returns_names(self) -> None:
         cursor = FakeCursor()
-        cursor._fetchall_results = [[('Jason',), ('ronaldo',)]]
+        cursor._fetchall_results = [[('Jason', 'https://cdn/jason.png'), ('ronaldo', None)]]
         store = VectorStore.__new__(VectorStore)
         store._connect = lambda: FakeConnection(cursor)
         names = store.list_searchable_streamers()
-        assert names == ['Jason', 'ronaldo']
-        assert 'SELECT c.name' in cursor.executed[0][0]
-        assert 'GROUP BY c.name' in cursor.executed[0][0]
+        assert names == [
+            {'name': 'Jason', 'profile_image_url': 'https://cdn/jason.png'},
+            {'name': 'ronaldo', 'profile_image_url': None},
+        ]
+        assert 'SELECT c.name, c.profile_image_url' in cursor.executed[0][0]
+        assert 'GROUP BY c.name, c.profile_image_url' in cursor.executed[0][0]
+
+    def test_create_or_get_creator_upserts_profile_image_url(self) -> None:
+        cursor = FakeCursor()
+        cursor._fetchone_results = [(7,)]
+        store = VectorStore.__new__(VectorStore)
+        store._connect = lambda: FakeConnection(cursor)
+        creator_id = store.create_or_get_creator('xqc', 'https://twitch.tv/xqc', profile_image_url='https://cdn/xqc.png')
+        assert creator_id == 7
+        assert 'profile_image_url' in cursor.executed[0][0]
+        assert cursor.executed[0][1] == ('xqc', 'https://twitch.tv/xqc', 'https://cdn/xqc.png')
 
     def test_update_video_metadata_updates_thumbnail_and_processed(self) -> None:
         cursor = FakeCursor()

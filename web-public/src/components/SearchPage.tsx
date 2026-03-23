@@ -5,6 +5,32 @@ import { listSearchableStreamers, searchClip } from "../api/client";
 import { SearchResponse, StreamerListItem } from "../api/types";
 import defaultAvatar from "../assets/default-avatar.svg";
 
+interface AvatarImageProps {
+  src: string | null | undefined;
+  alt: string;
+  className?: string;
+  decorative?: boolean;
+}
+
+function AvatarImage({ src, alt, className, decorative = false }: AvatarImageProps) {
+  const [failed, setFailed] = useState(false);
+  const resolvedSrc = !failed && src ? src : defaultAvatar;
+
+  useEffect(() => {
+    setFailed(false);
+  }, [src]);
+
+  return (
+    <img
+      src={resolvedSrc}
+      alt={decorative ? "" : alt}
+      className={className}
+      aria-hidden={decorative ? "true" : undefined}
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 function formatDuration(value: number | null): string | null {
   if (value === null || !Number.isFinite(value)) {
     return null;
@@ -134,9 +160,16 @@ function SearchResultCard({ result, lastSubmittedUrl }: SearchResultCardProps) {
 
         <div className="flex flex-col justify-between gap-4">
           <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#fb2844]">
-              {result.streamer ?? "Streamer unavailable"}
-            </p>
+            <div className="mb-3 flex items-center gap-3">
+              <AvatarImage
+                src={result.profile_image_url}
+                alt={result.streamer ?? "Streamer"}
+                className="size-11 rounded-full border border-gray-700 object-cover"
+              />
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#fb2844]">
+                {result.streamer ?? "Streamer unavailable"}
+              </p>
+            </div>
             {resultHref ? (
               <a href={resultHref} target="_blank" rel="noreferrer" className="group inline-flex items-start gap-3">
                 <h3 className="text-lg font-bold leading-tight text-white transition group-hover:text-gray-100 md:text-[1.5rem]">
@@ -338,11 +371,11 @@ export default function SearchPage() {
                           className="flex h-10 w-full items-center gap-2 border-0 bg-gray-800 px-4 text-sm font-medium text-gray-100 outline-none disabled:cursor-not-allowed disabled:text-gray-500"
                         >
                           {streamer ? (
-                            <img
-                              src={defaultAvatar}
+                            <AvatarImage
+                              src={streamers.find((item) => item.name === streamer)?.profile_image_url}
                               alt=""
-                              className="size-6 rounded-full"
-                              aria-hidden="true"
+                              className="size-6 rounded-full object-cover"
+                              decorative
                             />
                           ) : null}
                           <span className={streamer ? "text-gray-100" : "text-gray-400"}>
@@ -373,7 +406,12 @@ export default function SearchPage() {
                                   onClick={() => onSelectStreamer(item.name)}
                                   className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-gray-100 transition hover:bg-gray-700"
                                 >
-                                  <img src={defaultAvatar} alt="" className="size-6 rounded-full" aria-hidden="true" />
+                                  <AvatarImage
+                                    src={item.profile_image_url}
+                                    alt=""
+                                    className="size-6 rounded-full object-cover"
+                                    decorative
+                                  />
                                   <span className="flex-1">{item.name}</span>
                                   {selected ? <Check className="size-4 text-[#fb2844]" /> : null}
                                 </button>

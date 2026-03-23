@@ -40,9 +40,11 @@ class LiveArchiveVODSource(AudioSource):
         self._started = False
 
         self._user_id: str | None = None
+        self._user_profile: dict | None = None
         self._vod_platform_id: str | None = None
         self._vod_title: str | None = None
         self._vod_thumbnail_url: str | None = None
+        self._creator_profile_image_url: str | None = None
         self._last_seen_duration_seconds = 0
         self._last_is_live: bool | None = None
         self._no_growth_checks = 0
@@ -117,8 +119,9 @@ class LiveArchiveVODSource(AudioSource):
         self._last_refresh_at = now
         self._last_is_live = self.twitch_monitor.is_live(self.streamer)
 
-        if self._user_id is None:
-            self._user_id = self.twitch_monitor.get_user_id(self.streamer)
+        self._user_profile = self.twitch_monitor.get_user_profile(self.streamer, force_refresh=self._user_profile is not None)
+        self._user_id = str(self._user_profile["id"])
+        self._sync_creator_metadata_if_changed(self._user_profile)
 
         latest_vod = self.twitch_monitor.get_latest_archive_vod(self._user_id)
         if latest_vod is None:
@@ -148,9 +151,17 @@ class LiveArchiveVODSource(AudioSource):
         incoming_title = str(vod.get("title") or f"Live stream by {self.streamer}")
         incoming_thumbnail_url = str(vod["thumbnail_url"]) if vod.get("thumbnail_url") else None
 
+        creator_profile_image_url = None
+        if self._user_profile is not None:
+            creator_profile_image_url = str(self._user_profile.get("profile_image_url") or "") or None
         creator_url = f"https://twitch.tv/{self.streamer}"
-        creator_id = self.store.create_or_get_creator(self.streamer, creator_url)
+        creator_id = self.store.create_or_get_creator(
+            self.streamer,
+            creator_url,
+            profile_image_url=creator_profile_image_url,
+        )
         self._creator_id = creator_id
+        self._creator_profile_image_url = creator_profile_image_url
 
         existing_video = self.store.get_video_by_url(self.current_vod_url)
         if existing_video is None:
@@ -185,6 +196,18 @@ class LiveArchiveVODSource(AudioSource):
         self._media_url = None
         self._media_url_resolved_at = 0.0
         self._no_growth_checks = 0
+
+    def _sync_creator_metadata_if_changed(self, profile: dict | None) -> None:
+        if self._creator_id is None or profile is None:
+            return
+
+        profile_image_url = str(profile.get("profile_image_url") or "") or None
+        if profile_image_url == self._creator_profile_image_url:
+            return
+
+        self._creator_profile_image_url = profile_image_url
+        if profile_image_url is not None:
+            self.store.update_creator_metadata(self._creator_id, profile_image_url=profile_image_url)
 
     def _sync_video_metadata_if_changed(
         self,

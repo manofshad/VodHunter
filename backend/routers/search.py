@@ -38,7 +38,7 @@ def search_clip(
 
     search_manager = request.app.state.search_manager
     searchable_streamers = request.app.state.store.list_searchable_streamers()
-    searchable_streamer_names = {name.strip().lower() for name in searchable_streamers}
+    searchable_streamer_names = {str(item["name"]).strip().lower() for item in searchable_streamers}
     if normalized_streamer not in searchable_streamer_names:
         raise HTTPException(
             status_code=400,
@@ -81,5 +81,11 @@ def search_clip(
 
 @router.get("/search/streamers", response_model=list[StreamerListItem])
 def list_searchable_streamers(request: Request) -> list[StreamerListItem]:
-    names = request.app.state.store.list_searchable_streamers()
-    return [StreamerListItem(name=name) for name in names]
+    streamers = request.app.state.store.list_searchable_streamers()
+    return [
+        StreamerListItem(
+            name=str(item["name"]),
+            profile_image_url=str(item["profile_image_url"]) if item.get("profile_image_url") else None,
+        )
+        for item in streamers
+    ]

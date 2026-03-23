@@ -62,7 +62,8 @@ def run_backfill_ingest(
     embedder = ingest_state["embedder"]
 
     twitch_monitor = monitor or TwitchMonitor.from_env()
-    user_id = twitch_monitor.get_user_id(normalized_streamer)
+    creator_metadata = twitch_monitor.get_user_profile(normalized_streamer)
+    user_id = str(creator_metadata["id"])
     cutoff = datetime.now(timezone.utc) - timedelta(days=int(days))
     vods = twitch_monitor.list_archive_vods_since(user_id=user_id, created_after=cutoff)
 
@@ -104,6 +105,7 @@ def run_backfill_ingest(
         source = source_factory(
             streamer=normalized_streamer,
             vod_metadata=vod,
+            creator_metadata=creator_metadata,
             store=store,
             chunk_seconds=config.INGEST_CHUNK_SECONDS,
             temp_dir=config.TEMP_BACKFILL_DIR,

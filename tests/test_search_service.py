@@ -47,7 +47,7 @@ class FakeStore:
         return (np.array([[1.0]], dtype=np.float32), np.array([[10]], dtype=np.int64))
 
     def get_video_with_creator(self, video_id: int):
-        return (777, 'https://www.twitch.tv/videos/2699020769', 'Sample title', 'xqc', 'https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg')
+        return (777, 'https://www.twitch.tv/videos/2699020769', 'Sample title', 'xqc', 'https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg', 'https://cdn/xqc.png')
 
 class TestSearchService:
 
@@ -60,6 +60,7 @@ class TestSearchService:
         assert store.last_creator_id == 12
         assert result.video_url_at_timestamp == 'https://www.twitch.tv/videos/2699020769?t=22m48s'
         assert result.thumbnail_url == 'https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg'
+        assert result.profile_image_url == 'https://cdn/xqc.png'
 
     def test_not_found_result_has_no_timestamp_url(self) -> None:
         service = SearchService(store=FakeStore(), preprocessor=FakePreprocessor(), query_embedder=FakeQueryEmbedder(embeddings=np.array([[0.1, 0.2]], dtype=np.float32), timestamps=np.array([0.0], dtype=np.float32)), matcher=FakeMatcher(), alignment=FakeAlignment(AlignmentResult(found=False, reason='No aligned match found')))

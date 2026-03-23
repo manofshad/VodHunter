@@ -37,6 +37,7 @@ export interface LiveSessionItem {
 export interface SearchResponse {
   found: boolean;
   streamer: string | null;
+  profile_image_url: string | null;
   video_id: number | null;
   video_url: string | null;
   video_url_at_timestamp: string | null;
@@ -49,6 +50,7 @@ export interface SearchResponse {
 
 export interface StreamerListItem {
   name: string;
+  profile_image_url: string | null;
 }
 
 export interface ApiError {

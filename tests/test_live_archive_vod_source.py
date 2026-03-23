@@ -13,6 +13,14 @@ class FakeMonitor:
         self.live_sequence = list(live_sequence)
         self.vod_duration_seconds = vod_duration_seconds
         self.vod_sequence = list(vod_sequence or [])
+        self.user_profile_sequence: list[dict[str, object]] = [
+            {
+                'id': 'user-1',
+                'login': 'alice',
+                'display_name': 'alice',
+                'profile_image_url': 'https://static-cdn.jtvnw.net/jtv_user_pictures/alice.png',
+            }
+        ]
 
     def is_live(self, streamer: str) -> bool:
         if len(self.live_sequence) > 1:
@@ -21,6 +29,14 @@ class FakeMonitor:
 
     def get_user_id(self, streamer: str) -> str:
         return 'user-1'
+
+    def get_user_profile(self, streamer: str, force_refresh: bool = False):
+        if self.user_profile_sequence:
+            if force_refresh and len(self.user_profile_sequence) > 1:
+                self.user_profile_sequence.pop(0)
+                return dict(self.user_profile_sequence[0])
+            return dict(self.user_profile_sequence[0])
+        return {'id': 'user-1', 'login': streamer, 'display_name': streamer, 'profile_image_url': None}
 
     def get_latest_archive_vod(self, user_id: str):
         if self.vod_sequence:
@@ -34,18 +50,39 @@ class FakeStore:
     def __init__(self):
         self._creator_id = 0
         self._video_id = 0
-        self.creators: dict[str, tuple[int, str, str]] = {}
+        self.creators: dict[str, tuple[int, str, str, str | None]] = {}
         self.videos_by_url: dict[str, tuple[int, int, str, str, str | None, bool]] = {}
         self.vod_state: dict[str, dict] = {}
         self.metadata_updates: list[dict[str, object]] = []
+        self.creator_metadata_updates: list[dict[str, object]] = []
 
-    def create_or_get_creator(self, name: str, url: str) -> int:
+    def create_or_get_creator(self, name: str, url: str, profile_image_url: str | None = None) -> int:
         existing = self.creators.get(url)
         if existing is not None:
+            self.creators[url] = (existing[0], name, url, profile_image_url if profile_image_url is not None else existing[3])
             return existing[0]
         self._creator_id += 1
-        self.creators[url] = (self._creator_id, name, url)
+        self.creators[url] = (self._creator_id, name, url, profile_image_url)
         return self._creator_id
+
+    def update_creator_metadata(self, creator_id: int, *, name: str | None = None, profile_image_url: str | None = None) -> None:
+        self.creator_metadata_updates.append(
+            {
+                'creator_id': int(creator_id),
+                'name': name,
+                'profile_image_url': profile_image_url,
+            }
+        )
+        for url, row in list(self.creators.items()):
+            if int(row[0]) != int(creator_id):
+                continue
+            self.creators[url] = (
+                row[0],
+                name if name is not None else row[1],
+                row[2],
+                profile_image_url if profile_image_url is not None else row[3],
+            )
+            return
 
     def get_video_by_url(self, url: str):
         return self.videos_by_url.get(url)
@@ -112,6 +149,7 @@ class TestLiveArchiveVODSource:
         with tempfile.TemporaryDirectory() as tmp:
             source = self._make_source(tmp, live_sequence=[True, True, True])
             source.start()
+            assert source.store.creators['https://twitch.tv/alice'][3] == 'https://static-cdn.jtvnw.net/jtv_user_pictures/alice.png'
             chunk1 = source.next_chunk()
             assert chunk1 is not None
             assert source.ingest_cursor_seconds == 0
@@ -161,6 +199,53 @@ class TestLiveArchiveVODSource:
                     'thumbnail_url': 'https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg',
                     'processed': None,
                 },
+            ]
+
+    def test_refresh_updates_creator_profile_image_when_it_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = self._make_source(
+                tmp,
+                live_sequence=[True, True],
+                vod_sequence=[
+                    {
+                        'id': 'vod-1',
+                        'url': 'https://www.twitch.tv/videos/vod-1',
+                        'title': 'Live stream',
+                        'thumbnail_url': 'https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg',
+                        'duration_seconds': 240,
+                    },
+                    {
+                        'id': 'vod-1',
+                        'url': 'https://www.twitch.tv/videos/vod-1',
+                        'title': 'Live stream',
+                        'thumbnail_url': 'https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg',
+                        'duration_seconds': 300,
+                    },
+                ],
+            )
+            source.twitch_monitor.user_profile_sequence = [
+                {
+                    'id': 'user-1',
+                    'login': 'alice',
+                    'display_name': 'alice',
+                    'profile_image_url': 'https://static-cdn.jtvnw.net/jtv_user_pictures/alice-old.png',
+                },
+                {
+                    'id': 'user-1',
+                    'login': 'alice',
+                    'display_name': 'alice',
+                    'profile_image_url': 'https://static-cdn.jtvnw.net/jtv_user_pictures/alice-new.png',
+                },
+            ]
+            source.start()
+            source.next_chunk()
+            assert source.store.creators['https://twitch.tv/alice'][3] == 'https://static-cdn.jtvnw.net/jtv_user_pictures/alice-new.png'
+            assert source.store.creator_metadata_updates == [
+                {
+                    'creator_id': 1,
+                    'name': None,
+                    'profile_image_url': 'https://static-cdn.jtvnw.net/jtv_user_pictures/alice-new.png',
+                }
             ]
 
     def test_refresh_updates_thumbnail_when_vod_metadata_fills_in_later(self) -> None:

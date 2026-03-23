@@ -45,7 +45,7 @@ class FakeStoreWithKnn:
         return (np.array([[0.99]], dtype=np.float32), np.array([[10]], dtype=np.int64))
 
     def get_video_with_creator(self, video_id: int):
-        return (777, 'https://www.twitch.tv/videos/2699020769', 'Sample title', 'xqc', None)
+        return (777, 'https://www.twitch.tv/videos/2699020769', 'Sample title', 'xqc', None, 'https://cdn/xqc.png')
 
 class TestSearchServiceStoreKnn:
 
@@ -57,3 +57,4 @@ class TestSearchServiceStoreKnn:
         assert store.called == 1
         assert store.streamer == 'xqc'
         assert store.creator_id == 42
+        assert result.profile_image_url == 'https://cdn/xqc.png'
