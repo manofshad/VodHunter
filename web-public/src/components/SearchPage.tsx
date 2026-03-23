@@ -452,7 +452,6 @@ export default function SearchPage() {
                         disabled={submitting || !hasUrl}
                         className="inline-flex h-10 items-center justify-center rounded-xl border-2 border-[#fb2844] bg-[#fb2844] px-8 text-base font-semibold text-white transition hover:border-[#f55b70] hover:bg-[#f55b70] disabled:border-gray-600 disabled:bg-gray-700 disabled:text-gray-400"
                       >
-                        {submitting ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
                         {searchButtonLabel}
                       </button>
                     </div>
