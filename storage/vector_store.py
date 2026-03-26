@@ -139,39 +139,64 @@ class VectorStore:
             for idx, fp_id in enumerate(ids)
         ]
 
+        placeholders = ", ".join(["(%s, %s, %s, %s)"] * len(rows))
+        params: list[Any] = []
+        for row in rows:
+            params.extend(row)
+
         with self._connect() as conn:
             with conn.cursor() as cur:
-                cur.executemany(
-                    """
+                cur.execute(
+                    f"""
                     INSERT INTO fingerprint_embeddings (fingerprint_id, embedding, creator_id, model_name)
-                    VALUES (%s, %s, %s, %s)
+                    VALUES {placeholders}
                     ON CONFLICT (fingerprint_id) DO UPDATE
                     SET embedding = excluded.embedding,
                         creator_id = excluded.creator_id,
                         model_name = excluded.model_name
                     """,
-                    rows,
+                    params,
                 )
 
     def store_fingerprints(self, video_id: int, timestamps: np.ndarray) -> List[int]:
-        ids: List[int] = []
+        if timestamps.size == 0:
+            return []
+
+        timestamp_values = [float(ts) for ts in timestamps]
+
         with self._connect() as conn:
             with conn.cursor() as cur:
-                for ts in timestamps:
-                    cur.execute(
-                        """
+                cur.execute(
+                    """
+                    WITH input_rows AS (
+                        SELECT
+                            %s::bigint AS video_id,
+                            ts::double precision AS timestamp_seconds,
+                            ord::integer AS ord
+                        FROM unnest(%s::double precision[]) WITH ORDINALITY AS t(ts, ord)
+                    ),
+                    upserted AS (
                         INSERT INTO fingerprints (video_id, timestamp_seconds)
-                        VALUES (%s, %s)
+                        SELECT video_id, timestamp_seconds
+                        FROM input_rows
                         ON CONFLICT (video_id, timestamp_seconds)
                         DO UPDATE SET timestamp_seconds = excluded.timestamp_seconds
-                        RETURNING id
-                        """,
-                        (int(video_id), float(ts)),
+                        RETURNING id, video_id, timestamp_seconds
                     )
-                    row = cur.fetchone()
-                    if row is None:
-                        raise RuntimeError("Failed to resolve fingerprint id")
-                    ids.append(int(row[0]))
+                    SELECT upserted.id
+                    FROM input_rows
+                    JOIN upserted
+                      ON upserted.video_id = input_rows.video_id
+                     AND upserted.timestamp_seconds = input_rows.timestamp_seconds
+                    ORDER BY input_rows.ord
+                    """,
+                    (int(video_id), timestamp_values),
+                )
+                rows = cur.fetchall()
+
+        ids = [int(row[0]) for row in rows]
+        if len(ids) != len(timestamp_values):
+            raise RuntimeError("Failed to resolve fingerprint ids")
         return ids
 
     def get_video_by_url(self, url: str) -> tuple[int, int, str, str, str | None, bool] | None:
