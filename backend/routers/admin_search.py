@@ -1,11 +1,35 @@
-from fastapi import APIRouter, Form, HTTPException, Request
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
 from backend.schemas import ErrorResponse, SearchResponse, StreamerListItem
-from backend.routers.admin_search import _normalize_and_validate_streamer
 from backend.services.remote_clip_downloader import DownloadError, InvalidTikTokUrlError
 from backend.services.search_manager import InputDurationExceededError, SearchInputError
 
 router = APIRouter(prefix="/api", tags=["search"])
+
+
+def _normalize_and_validate_streamer(request: Request, streamer: str | None) -> str:
+    normalized_streamer = (streamer or "").strip().lower()
+    if not normalized_streamer:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "INVALID_STREAMER",
+                "message": "streamer is required",
+            },
+        )
+
+    searchable_streamers = request.app.state.store.list_searchable_streamers()
+    searchable_streamer_names = {str(item["name"]).strip().lower() for item in searchable_streamers}
+    if normalized_streamer not in searchable_streamer_names:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "INVALID_STREAMER",
+                "message": f"Streamer is not searchable: {normalized_streamer}",
+            },
+        )
+
+    return normalized_streamer
 
 
 @router.post(
@@ -15,25 +39,31 @@ router = APIRouter(prefix="/api", tags=["search"])
 )
 def search_clip(
     request: Request,
+    file: UploadFile | None = File(default=None),
     tiktok_url: str | None = Form(default=None),
     streamer: str | None = Form(default=None),
 ) -> SearchResponse:
+    has_file = file is not None
     has_url = bool((tiktok_url or "").strip())
-    if not has_url:
+    if has_file == has_url:
         raise HTTPException(
             status_code=400,
             detail={
                 "code": "INVALID_SEARCH_INPUT",
-                "message": "tiktok_url is required",
+                "message": "Provide exactly one of file or tiktok_url",
             },
         )
 
-    search_manager = request.app.state.search_manager
     normalized_streamer = _normalize_and_validate_streamer(request, streamer)
+    search_manager = request.app.state.search_manager
 
     try:
-        assert tiktok_url is not None
-        result = search_manager.search_tiktok_url(tiktok_url, normalized_streamer)
+        if has_file:
+            assert file is not None
+            result = search_manager.search_upload(file, normalized_streamer)
+        else:
+            assert tiktok_url is not None
+            result = search_manager.search_tiktok_url(tiktok_url, normalized_streamer)
         return SearchResponse.from_result(result)
     except InputDurationExceededError as exc:
         raise HTTPException(

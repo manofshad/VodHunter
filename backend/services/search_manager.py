@@ -1,8 +1,11 @@
 import logging
 import os
 import math
+import shutil
 import time
 from typing import Callable
+
+from fastapi import UploadFile
 
 from backend.services.media_duration import MediaDurationError, probe_media_duration_seconds
 from backend.services.remote_clip_downloader import RemoteClipDownloader
@@ -28,13 +31,46 @@ class SearchManager:
         self,
         search_service: SearchService,
         remote_downloader: RemoteClipDownloader,
+        upload_temp_dir: str | None = None,
         max_duration_seconds: int | None = None,
         duration_probe: Callable[[str], float] = probe_media_duration_seconds,
     ):
         self.search_service = search_service
+        self.upload_temp_dir = upload_temp_dir
         self.remote_downloader = remote_downloader
         self.max_duration_seconds = max_duration_seconds
         self.duration_probe = duration_probe
+        if self.upload_temp_dir is not None:
+            os.makedirs(self.upload_temp_dir, exist_ok=True)
+
+    def search_upload(self, file: UploadFile, streamer: str):
+        if self.upload_temp_dir is None:
+            raise SearchInputError("File uploads are not enabled")
+        if not file.filename:
+            raise SearchInputError("Uploaded file must have a filename")
+
+        suffix = os.path.splitext(file.filename)[1] or ".bin"
+        temp_path = os.path.join(self.upload_temp_dir, f"upload_{time.time_ns()}{suffix}")
+        request_started_at = time.perf_counter()
+
+        try:
+            with open(temp_path, "wb") as out:
+                shutil.copyfileobj(file.file, out)
+
+            if os.path.getsize(temp_path) == 0:
+                raise SearchInputError("Uploaded file is empty")
+
+            self._validate_duration(temp_path)
+            search_result = self._search_local_file(temp_path, streamer)
+            logger.info(
+                "timing event=search_upload seconds=%.2f streamer=%s",
+                time.perf_counter() - request_started_at,
+                streamer.strip().lower(),
+            )
+            return search_result
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
 
     def search_tiktok_url(self, url: str, streamer: str):
         downloaded_path = ""

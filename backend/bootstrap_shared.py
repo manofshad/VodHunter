@@ -18,6 +18,11 @@ def prepare_runtime_dirs() -> None:
     os.makedirs(config.TEMP_SEARCH_DOWNLOAD_DIR, exist_ok=True)
 
 
+def prepare_admin_runtime_dirs() -> None:
+    prepare_runtime_dirs()
+    os.makedirs(config.TEMP_SEARCH_UPLOAD_DIR, exist_ok=True)
+
+
 def build_store_state() -> dict[str, object]:
     config.validate_storage_config()
 
@@ -48,6 +53,7 @@ def build_modal_query_embedder() -> ModalQueryEmbedder:
 def build_search_stack(
     store: VectorStore,
     max_duration_seconds: int | None,
+    upload_temp_dir: str | None = None,
 ) -> dict[str, object]:
     search_service = SearchService(
         store=store,
@@ -62,6 +68,7 @@ def build_search_stack(
 
     search_manager = SearchManager(
         search_service=search_service,
+        upload_temp_dir=upload_temp_dir,
         remote_downloader=RemoteClipDownloader(
             temp_dir=config.TEMP_SEARCH_DOWNLOAD_DIR,
             timeout_seconds=config.TIKTOK_DOWNLOAD_TIMEOUT_SECONDS,
