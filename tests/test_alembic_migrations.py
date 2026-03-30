@@ -69,3 +69,11 @@ class TestAlembicMigrations:
         with patch.object(revision, 'op', fake_op):
             revision.upgrade()
         assert fake_op.executed == ['DROP INDEX CONCURRENTLY IF EXISTS idx_fingerprint_embeddings_ivfflat_cos']
+
+    def test_search_request_revision_creates_logging_table(self) -> None:
+        revision = self._load_module('alembic/versions/20260330_0005_add_search_requests.py', 'vodhunter_alembic_revision_0005')
+        fake_op = FakeOp()
+        with patch.object(revision, 'op', fake_op):
+            revision.upgrade()
+        assert any(('CREATE TABLE IF NOT EXISTS search_requests' in sql for sql in fake_op.executed))
+        assert any(('CREATE INDEX IF NOT EXISTS idx_search_requests_created_at' in sql for sql in fake_op.executed))

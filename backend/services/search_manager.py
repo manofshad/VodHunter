@@ -1,17 +1,23 @@
 import logging
-import os
 import math
+import os
 import shutil
 import time
 from typing import Callable
+from urllib.parse import urlparse
 
 from fastapi import UploadFile
 
 from backend.services.media_duration import MediaDurationError, probe_media_duration_seconds
 from backend.services.remote_clip_downloader import RemoteClipDownloader
+from search.models import SearchRequestOutcome
 from search.search_service import SearchService
 
 logger = logging.getLogger("uvicorn.error")
+
+
+def _duration_ms(seconds: float) -> int:
+    return max(int(round(seconds * 1000.0)), 0)
 
 
 class SearchInputError(Exception):
@@ -43,7 +49,7 @@ class SearchManager:
         if self.upload_temp_dir is not None:
             os.makedirs(self.upload_temp_dir, exist_ok=True)
 
-    def search_upload(self, file: UploadFile, streamer: str):
+    def search_upload(self, file: UploadFile, streamer: str) -> SearchRequestOutcome:
         if self.upload_temp_dir is None:
             raise SearchInputError("File uploads are not enabled")
         if not file.filename:
@@ -52,6 +58,7 @@ class SearchManager:
         suffix = os.path.splitext(file.filename)[1] or ".bin"
         temp_path = os.path.join(self.upload_temp_dir, f"upload_{time.time_ns()}{suffix}")
         request_started_at = time.perf_counter()
+        input_duration_seconds: float | None = None
 
         try:
             with open(temp_path, "wb") as out:
@@ -60,39 +67,56 @@ class SearchManager:
             if os.path.getsize(temp_path) == 0:
                 raise SearchInputError("Uploaded file is empty")
 
-            self._validate_duration(temp_path)
-            search_result = self._search_local_file(temp_path, streamer)
+            input_duration_seconds = self._validate_duration(temp_path)
+            execution_result = self._search_local_file(temp_path, streamer)
             logger.info(
                 "timing event=search_upload seconds=%.2f streamer=%s",
                 time.perf_counter() - request_started_at,
                 streamer.strip().lower(),
             )
-            return search_result
+            return SearchRequestOutcome(
+                result=execution_result.result,
+                execution_metadata=execution_result.metadata,
+                input_type="file",
+                clip_filename=file.filename,
+                input_duration_seconds=input_duration_seconds,
+                total_duration_ms=_duration_ms(time.perf_counter() - request_started_at),
+            )
         finally:
             if os.path.exists(temp_path):
                 os.remove(temp_path)
 
-    def search_tiktok_url(self, url: str, streamer: str):
+    def search_tiktok_url(self, url: str, streamer: str) -> SearchRequestOutcome:
         downloaded_path = ""
         request_started_at = time.perf_counter()
+        input_duration_seconds: float | None = None
+        parsed_url = urlparse((url or "").strip())
         try:
             result = self.remote_downloader.download_tiktok(url)
             downloaded_path = result.path
-            self._validate_duration(downloaded_path)
-            search_result = self._search_local_file(downloaded_path, streamer)
+            input_duration_seconds = self._validate_duration(downloaded_path)
+            execution_result = self._search_local_file(downloaded_path, streamer)
             logger.info(
                 "timing event=search_tiktok_url seconds=%.2f streamer=%s",
                 time.perf_counter() - request_started_at,
                 streamer.strip().lower(),
             )
-            return search_result
+            return SearchRequestOutcome(
+                result=execution_result.result,
+                execution_metadata=execution_result.metadata,
+                input_type="tiktok_url",
+                download_source="tiktok",
+                download_host=(parsed_url.hostname or "").lower() or None,
+                input_duration_seconds=input_duration_seconds,
+                total_duration_ms=_duration_ms(time.perf_counter() - request_started_at),
+            )
         finally:
             if downloaded_path:
                 self.remote_downloader.cleanup(downloaded_path)
 
-    def _validate_duration(self, path: str) -> None:
+    def _validate_duration(self, path: str) -> float | None:
         if self.max_duration_seconds is None:
-            return
+            return None
         started_at = time.perf_counter()
         try:
             duration_seconds = self.duration_probe(path)
@@ -110,6 +134,7 @@ class SearchManager:
                 duration_seconds=duration_seconds,
                 max_duration_seconds=self.max_duration_seconds,
             )
+        return duration_seconds
 
     def _search_local_file(self, path: str, streamer: str):
         normalized_streamer = streamer.strip().lower()
