@@ -8,6 +8,7 @@ interface Props {
 }
 
 export default function SearchCard({ liveStatus }: Props) {
+  const [file, setFile] = useState<File | null>(null);
   const [tiktokUrl, setTiktokUrl] = useState<string>("");
   const [streamer, setStreamer] = useState<string>("");
   const [streamers, setStreamers] = useState<StreamerListItem[]>([]);
@@ -17,6 +18,7 @@ export default function SearchCard({ liveStatus }: Props) {
   const [submitting, setSubmitting] = useState<boolean>(false);
 
   const blocked = liveStatus.state !== "idle";
+  const hasFile = file !== null;
   const hasUrl = tiktokUrl.trim().length > 0;
   const hasStreamer = streamer.trim().length > 0;
 
@@ -54,12 +56,14 @@ export default function SearchCard({ liveStatus }: Props) {
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!hasStreamer || !hasUrl) return;
+    if (!hasStreamer || hasFile === hasUrl) return;
 
     try {
       setSubmitting(true);
       setError(null);
-      const next = await searchClip({ tiktokUrl: tiktokUrl.trim(), streamer });
+      const next = file
+        ? await searchClip({ type: "file", file, streamer })
+        : await searchClip({ type: "tiktok_url", tiktokUrl: tiktokUrl.trim(), streamer });
       setResult(next);
     } catch (err) {
       setResult(null);
@@ -92,15 +96,31 @@ export default function SearchCard({ liveStatus }: Props) {
           ))}
         </select>
         <input
+          type="file"
+          accept="audio/*,video/*"
+          onChange={(e) => {
+            const next = e.target.files?.[0] ?? null;
+            setFile(next);
+            if (next) {
+              setTiktokUrl("");
+            }
+          }}
+          disabled={submitting || blocked || hasUrl || !hasStreamer}
+        />
+        <input
           type="url"
           placeholder="https://www.tiktok.com/@user/video/..."
           value={tiktokUrl}
           onChange={(e) => {
-            setTiktokUrl(e.target.value);
+            const next = e.target.value;
+            setTiktokUrl(next);
+            if (next.trim().length > 0 && file) {
+              setFile(null);
+            }
           }}
-          disabled={submitting || blocked || !hasStreamer}
+          disabled={submitting || blocked || hasFile || !hasStreamer}
         />
-        <button type="submit" disabled={submitting || blocked || !hasStreamer || !hasUrl}>
+        <button type="submit" disabled={submitting || blocked || !hasStreamer || hasFile === hasUrl}>
           Search
         </button>
       </form>

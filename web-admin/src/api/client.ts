@@ -51,10 +51,9 @@ export async function getLiveSessions(limit = 50, offset = 0): Promise<LiveSessi
   return parseJson<LiveSessionItem[]>(resp);
 }
 
-export interface SearchClipInput {
-  streamer: string;
-  tiktokUrl: string;
-}
+export type SearchClipInput =
+  | { type: "file"; file: File; streamer: string }
+  | { type: "tiktok_url"; tiktokUrl: string; streamer: string };
 
 export async function listSearchableStreamers(): Promise<StreamerListItem[]> {
   const resp = await fetch(`${getApiBase()}/search/streamers`);
@@ -64,7 +63,11 @@ export async function listSearchableStreamers(): Promise<StreamerListItem[]> {
 export async function searchClip(input: SearchClipInput): Promise<SearchResponse> {
   const form = new FormData();
   form.append("streamer", input.streamer);
-  form.append("tiktok_url", input.tiktokUrl);
+  if (input.type === "file") {
+    form.append("file", input.file);
+  } else {
+    form.append("tiktok_url", input.tiktokUrl);
+  }
 
   const resp = await fetch(`${getApiBase()}/search/clip`, {
     method: "POST",

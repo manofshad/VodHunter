@@ -15,10 +15,10 @@ load_dotenv(Path(ROOT_DIR) / ".env")
 
 from backend import config
 from backend import bootstrap_admin, bootstrap_ingest, bootstrap_shared
+from backend.routers.admin_search import router as admin_search_router
 from backend.routers.eventsub import router as eventsub_router
 from backend.routers.health import router as health_router
 from backend.routers.live_monitor import router as live_monitor_router
-from backend.routers.search import router as search_router
 
 
 def _configure_cors(app: FastAPI) -> None:
@@ -36,13 +36,14 @@ def create_admin_app(enable_lifespan: bool = True) -> FastAPI:
 
         @asynccontextmanager
         async def lifespan(app: FastAPI):
-            bootstrap_shared.prepare_runtime_dirs()
+            bootstrap_shared.prepare_admin_runtime_dirs()
 
             common_state = bootstrap_shared.build_store_state()
             ingest_state = bootstrap_ingest.build_ingest_state()
             search_state = bootstrap_shared.build_search_stack(
                 store=common_state["store"],
                 max_duration_seconds=config.SEARCH_MAX_DURATION_SECONDS_ADMIN,
+                upload_temp_dir=config.TEMP_SEARCH_UPLOAD_DIR,
             )
             monitor_state = bootstrap_admin.build_monitor_stack(
                 store=common_state["store"],
@@ -63,7 +64,7 @@ def create_admin_app(enable_lifespan: bool = True) -> FastAPI:
 
     _configure_cors(app)
     app.include_router(health_router)
-    app.include_router(search_router)
+    app.include_router(admin_search_router)
     app.include_router(live_monitor_router)
     app.include_router(eventsub_router)
     return app
