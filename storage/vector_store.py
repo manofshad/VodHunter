@@ -8,6 +8,7 @@ from typing import Any, List
 import numpy as np
 
 from backend.db_url import normalize_database_url
+from search.models import SearchRequestLog
 
 
 logger = logging.getLogger("uvicorn.error")
@@ -68,6 +69,7 @@ class VectorStore:
                     "fingerprints",
                     "fingerprint_embeddings",
                     "vod_ingest_state",
+                    "search_requests",
                 )
                 missing_tables: list[str] = []
                 for table_name in required_tables:
@@ -593,3 +595,62 @@ class VectorStore:
             }
             for r in rows
         ]
+
+    def log_search_request(self, log: SearchRequestLog) -> None:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO search_requests (
+                        source_app,
+                        route,
+                        input_type,
+                        streamer,
+                        success,
+                        http_status,
+                        error_code,
+                        error_message,
+                        result_reason,
+                        found_match,
+                        matched_video_id,
+                        matched_timestamp_seconds,
+                        score,
+                        clip_filename,
+                        download_source,
+                        download_host,
+                        input_duration_seconds,
+                        total_duration_ms,
+                        preprocess_duration_ms,
+                        embed_duration_ms,
+                        vector_query_duration_ms,
+                        alignment_duration_ms
+                    )
+                    VALUES (
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    )
+                    """,
+                    (
+                        log.source_app,
+                        log.route,
+                        log.input_type,
+                        log.streamer,
+                        bool(log.success),
+                        log.http_status,
+                        log.error_code,
+                        log.error_message,
+                        log.result_reason,
+                        log.found_match,
+                        log.matched_video_id,
+                        log.matched_timestamp_seconds,
+                        log.score,
+                        log.clip_filename,
+                        log.download_source,
+                        log.download_host,
+                        log.input_duration_seconds,
+                        log.total_duration_ms,
+                        log.preprocess_duration_ms,
+                        log.embed_duration_ms,
+                        log.vector_query_duration_ms,
+                        log.alignment_duration_ms,
+                    ),
+                )

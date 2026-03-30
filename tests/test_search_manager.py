@@ -8,7 +8,7 @@ from fastapi import UploadFile
 from backend.services.media_duration import MediaDurationError
 from backend.services.remote_clip_downloader import DownloadResult
 from backend.services.search_manager import InputDurationExceededError, SearchInputError, SearchManager
-from search.models import SearchResult
+from search.models import SearchExecutionMetadata, SearchExecutionResult, SearchResult
 
 
 class FakeSearchService:
@@ -16,11 +16,14 @@ class FakeSearchService:
         self.searched_paths: list[tuple[str, str]] = []
         self.raise_on_search = False
 
-    def search_file(self, path: str, streamer: str) -> SearchResult:
+    def search_file(self, path: str, streamer: str) -> SearchExecutionResult:
         self.searched_paths.append((path, streamer))
         if self.raise_on_search:
             raise RuntimeError("search failed")
-        return SearchResult(found=False, reason="no match")
+        return SearchExecutionResult(
+            result=SearchResult(found=False, reason="no match"),
+            metadata=SearchExecutionMetadata(result_reason="no match", found_match=False),
+        )
 
 
 class FakeDownloader:
@@ -49,11 +52,13 @@ class TestSearchManager:
             )
             upload = UploadFile(filename="query.mp4", file=io.BytesIO(b"video"))
 
-            manager.search_upload(upload, "xqc")
+            outcome = manager.search_upload(upload, "xqc")
 
             temp_files = [name for name in os.listdir(tmp) if name.startswith("upload_")]
             assert temp_files == []
             assert service.searched_paths[0][1] == "xqc"
+            assert outcome.input_type == "file"
+            assert outcome.clip_filename == "query.mp4"
 
     def test_search_upload_cleans_up_on_search_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -137,10 +142,12 @@ class TestSearchManager:
             service = FakeSearchService()
             downloader = FakeDownloader(downloaded_path=clip_path)
             manager = SearchManager(search_service=service, remote_downloader=downloader)
-            manager.search_tiktok_url("https://www.tiktok.com/@user/video/1", "xqc")
+            outcome = manager.search_tiktok_url("https://www.tiktok.com/@user/video/1", "xqc")
             assert downloader.download_calls == ["https://www.tiktok.com/@user/video/1"]
             assert service.searched_paths == [(clip_path, "xqc")]
             assert downloader.cleaned_paths == [clip_path]
+            assert outcome.download_source == "tiktok"
+            assert outcome.download_host == "www.tiktok.com"
 
     def test_search_tiktok_url_cleans_up_on_search_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -163,9 +170,10 @@ class TestSearchManager:
             service = FakeSearchService()
             downloader = FakeDownloader(downloaded_path=clip_path)
             manager = SearchManager(search_service=service, remote_downloader=downloader)
-            manager.search_tiktok_url("https://www.tiktok.com/@user/video/1", "xqc")
+            outcome = manager.search_tiktok_url("https://www.tiktok.com/@user/video/1", "xqc")
             assert downloader.download_calls == ["https://www.tiktok.com/@user/video/1"]
             assert service.searched_paths == [(clip_path, "xqc")]
+            assert outcome.total_duration_ms is not None
 
     def test_tiktok_rejects_when_duration_exceeds_limit_and_cleans(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

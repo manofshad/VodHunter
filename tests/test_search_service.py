@@ -54,19 +54,25 @@ class TestSearchService:
     def test_found_result_includes_timestamp_url(self) -> None:
         store = FakeStore()
         service = SearchService(store=store, preprocessor=FakePreprocessor(), query_embedder=FakeQueryEmbedder(embeddings=np.array([[0.1, 0.2]], dtype=np.float32), timestamps=np.array([0.0], dtype=np.float32)), matcher=FakeMatcher(), alignment=FakeAlignment(AlignmentResult(found=True, video_id=777, timestamp_seconds=1368, score=0.9, reason='ok')))
-        result = service.search_file('clip.mp4', 'xQc')
+        execution = service.search_file('clip.mp4', 'xQc')
+        result = execution.result
         assert result.found
         assert store.last_streamer == 'xqc'
         assert store.last_creator_id == 12
         assert result.video_url_at_timestamp == 'https://www.twitch.tv/videos/2699020769?t=22m48s'
         assert result.thumbnail_url == 'https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg'
         assert result.profile_image_url == 'https://cdn/xqc.png'
+        assert execution.metadata.found_match is True
+        assert execution.metadata.matched_video_id == 777
 
     def test_not_found_result_has_no_timestamp_url(self) -> None:
         service = SearchService(store=FakeStore(), preprocessor=FakePreprocessor(), query_embedder=FakeQueryEmbedder(embeddings=np.array([[0.1, 0.2]], dtype=np.float32), timestamps=np.array([0.0], dtype=np.float32)), matcher=FakeMatcher(), alignment=FakeAlignment(AlignmentResult(found=False, reason='No aligned match found')))
-        result = service.search_file('clip.mp4', 'xqc')
+        execution = service.search_file('clip.mp4', 'xqc')
+        result = execution.result
         assert not result.found
         assert result.video_url_at_timestamp is None
+        assert execution.metadata.found_match is False
+        assert execution.metadata.result_reason == 'No aligned match found'
 
     def test_missing_streamer_returns_not_found_before_knn(self) -> None:
 
@@ -77,6 +83,8 @@ class TestSearchService:
                 return None
         store = MissingStore()
         service = SearchService(store=store, preprocessor=FakePreprocessor(), query_embedder=FakeQueryEmbedder(embeddings=np.array([[0.1, 0.2]], dtype=np.float32), timestamps=np.array([0.0], dtype=np.float32)), matcher=FakeMatcher(), alignment=FakeAlignment(AlignmentResult(found=False, reason='No aligned match found')))
-        result = service.search_file('clip.mp4', 'xqc')
+        execution = service.search_file('clip.mp4', 'xqc')
+        result = execution.result
         assert not result.found
         assert result.reason == 'No indexed clips found for streamer: xqc'
+        assert execution.metadata.vector_query_duration_ms is None

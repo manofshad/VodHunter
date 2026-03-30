@@ -1,5 +1,6 @@
 import pytest
 import numpy as np
+from search.models import SearchRequestLog
 from storage.vector_store import VectorStore
 
 class FakeCursor:
@@ -110,3 +111,29 @@ class TestVectorStoreStreamerScope:
         assert 'thumbnail_url = %s' in query
         assert 'processed = %s' in query
         assert params == ['Updated title', 'https://cdn/thumb.jpg', False, 55]
+
+    def test_log_search_request_inserts_nullable_fields(self) -> None:
+        cursor = FakeCursor()
+        store = VectorStore.__new__(VectorStore)
+        store._connect = lambda: FakeConnection(cursor)
+        store.log_search_request(
+            SearchRequestLog(
+                source_app='public',
+                route='/api/search/clip',
+                input_type='tiktok_url',
+                streamer='xqc',
+                success=False,
+                http_status=400,
+                error_code='DOWNLOAD_ERROR',
+                error_message='yt-dlp failed',
+                download_source='tiktok',
+                download_host='www.tiktok.com',
+            )
+        )
+        query, params = cursor.executed[0]
+        assert 'INSERT INTO search_requests' in query
+        assert params[0] == 'public'
+        assert params[2] == 'tiktok_url'
+        assert params[6] == 'DOWNLOAD_ERROR'
+        assert params[10] is None
+        assert params[20] is None
