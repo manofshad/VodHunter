@@ -124,6 +124,7 @@ class HistoricalArchiveVODSource(AudioSource):
         )
 
     def stop(self) -> None:
+        self._commit_pending_progress()
         self._finished = True
         if os.path.exists(self.temp_dir):
             shutil.rmtree(self.temp_dir, ignore_errors=True)

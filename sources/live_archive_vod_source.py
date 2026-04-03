@@ -95,6 +95,7 @@ class LiveArchiveVODSource(AudioSource):
         return None
 
     def stop(self) -> None:
+        self._commit_pending_progress()
         self._finished = True
 
         if os.path.exists(self.temp_dir):
