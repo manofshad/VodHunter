@@ -2,6 +2,7 @@ import os
 import shutil
 import subprocess
 import time
+from datetime import datetime
 from typing import Any, Callable, Optional
 
 from sources.audio_chunk import AudioChunk
@@ -46,6 +47,14 @@ class HistoricalArchiveVODSource(AudioSource):
         self._vod_thumbnail_url = str(self.vod_metadata["thumbnail_url"]) if self.vod_metadata.get("thumbnail_url") else None
         self._duration_seconds = int(self.vod_metadata.get("duration_seconds") or 0)
 
+        raw_created_at = str(self.vod_metadata.get("created_at") or "").strip()
+        self._streamed_at: datetime | None = None
+        if raw_created_at:
+            try:
+                self._streamed_at = datetime.fromisoformat(raw_created_at.replace("Z", "+00:00"))
+            except ValueError:
+                pass
+
     def start(self) -> None:
         if not self.streamer:
             raise ValueError("streamer is required")
@@ -74,6 +83,7 @@ class HistoricalArchiveVODSource(AudioSource):
                 title=self._vod_title,
                 thumbnail_url=self._vod_thumbnail_url,
                 processed=False,
+                streamed_at=self._streamed_at,
             )
         else:
             self.video_id = int(existing_video[0])
@@ -82,6 +92,7 @@ class HistoricalArchiveVODSource(AudioSource):
                 title=self._vod_title,
                 thumbnail_url=self._vod_thumbnail_url,
                 processed=False,
+                streamed_at=self._streamed_at,
             )
 
         state = self.store.get_vod_ingest_state(self._vod_platform_id)

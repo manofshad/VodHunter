@@ -43,7 +43,7 @@ class FakeMonitor:
             if len(self.vod_sequence) > 1:
                 return dict(self.vod_sequence.pop(0))
             return dict(self.vod_sequence[0])
-        return {'id': 'vod-1', 'url': 'https://www.twitch.tv/videos/vod-1', 'title': 'Live stream', 'thumbnail_url': 'https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg', 'duration_seconds': self.vod_duration_seconds}
+        return {'id': 'vod-1', 'url': 'https://www.twitch.tv/videos/vod-1', 'title': 'Live stream', 'thumbnail_url': 'https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg', 'duration_seconds': self.vod_duration_seconds, 'created_at': '2026-04-06T00:00:00Z'}
 
 class FakeStore:
 
@@ -87,19 +87,19 @@ class FakeStore:
     def get_video_by_url(self, url: str):
         return self.videos_by_url.get(url)
 
-    def create_video(self, creator_id: int, url: str, title: str, processed: bool, thumbnail_url: str | None=None) -> int:
+    def create_video(self, creator_id: int, url: str, title: str, processed: bool, thumbnail_url: str | None=None, streamed_at=None) -> int:
         self._video_id += 1
-        row = (self._video_id, int(creator_id), url, title, thumbnail_url, bool(processed))
+        row = (self._video_id, int(creator_id), url, title, thumbnail_url, bool(processed), streamed_at)
         self.videos_by_url[url] = row
         return self._video_id
 
     def mark_video_processed(self, video_id: int, processed: bool=True) -> None:
         for url, row in list(self.videos_by_url.items()):
             if int(row[0]) == int(video_id):
-                self.videos_by_url[url] = (row[0], row[1], row[2], row[3], row[4], bool(processed))
+                self.videos_by_url[url] = (row[0], row[1], row[2], row[3], row[4], bool(processed), row[6])
                 return
 
-    def update_video_metadata(self, video_id: int, *, title: str | None=None, thumbnail_url: str | None=None, processed: bool | None=None) -> None:
+    def update_video_metadata(self, video_id: int, *, title: str | None=None, thumbnail_url: str | None=None, processed: bool | None=None, streamed_at=None) -> None:
         self.metadata_updates.append(
             {
                 'video_id': int(video_id),
@@ -111,7 +111,7 @@ class FakeStore:
         for url, row in list(self.videos_by_url.items()):
             if int(row[0]) != int(video_id):
                 continue
-            self.videos_by_url[url] = (row[0], row[1], row[2], title if title is not None else row[3], thumbnail_url if thumbnail_url is not None else row[4], bool(processed) if processed is not None else row[5])
+            self.videos_by_url[url] = (row[0], row[1], row[2], title if title is not None else row[3], thumbnail_url if thumbnail_url is not None else row[4], bool(processed) if processed is not None else row[5], row[6])
             return
 
     def get_vod_ingest_state(self, vod_platform_id: str):

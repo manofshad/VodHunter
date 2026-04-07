@@ -67,12 +67,12 @@ class TwitchMonitor:
         self,
         path: str,
         method: str = "GET",
-        params: dict[str, str] | None = None,
+        params: dict[str, Any] | None = None,
         body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         token = self._ensure_token()
         params = params or {}
-        query = urllib.parse.urlencode(params)
+        query = urllib.parse.urlencode(params, doseq=True)
         url = f"https://api.twitch.tv/helix/{path}"
         if query:
             url = f"{url}?{query}"
@@ -109,7 +109,7 @@ class TwitchMonitor:
             return {}
         return json.loads(body)
 
-    def _helix_get(self, path: str, params: dict[str, str]) -> dict[str, Any]:
+    def _helix_get(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
         return self._helix_request(path=path, method="GET", params=params)
 
     @staticmethod

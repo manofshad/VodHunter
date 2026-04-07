@@ -58,7 +58,7 @@ class TestRunBackfillIngest:
 
     def test_skips_processed_resumes_partial_and_continues_on_failure(self) -> None:
         store = FakeStore()
-        store.videos_by_url['https://www.twitch.tv/videos/processed'] = (1, 1, 'https://www.twitch.tv/videos/processed', 'Processed', None, True)
+        store.videos_by_url['https://www.twitch.tv/videos/processed'] = (1, 1, 'https://www.twitch.tv/videos/processed', 'Processed', None, True, None)
         store.vod_state['resume'] = {'vod_platform_id': 'resume', 'video_id': 2, 'streamer': 'alice', 'last_ingested_seconds': 60, 'last_seen_duration_seconds': 120, 'updated_at': 'now'}
         monitor = FakeMonitor([{'id': 'resume', 'url': 'https://www.twitch.tv/videos/resume'}, {'id': 'processed', 'url': 'https://www.twitch.tv/videos/processed'}, {'id': 'fail', 'url': 'https://www.twitch.tv/videos/fail', 'should_fail': True}])
         logs: list[str] = []

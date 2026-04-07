@@ -2,6 +2,7 @@ import os
 import shutil
 import subprocess
 import time
+from datetime import datetime
 from typing import Optional
 
 from sources.audio_chunk import AudioChunk
@@ -152,6 +153,14 @@ class LiveArchiveVODSource(AudioSource):
         incoming_title = str(vod.get("title") or f"Live stream by {self.streamer}")
         incoming_thumbnail_url = str(vod["thumbnail_url"]) if vod.get("thumbnail_url") else None
 
+        raw_created_at = str(vod.get("created_at") or "").strip()
+        streamed_at: datetime | None = None
+        if raw_created_at:
+            try:
+                streamed_at = datetime.fromisoformat(raw_created_at.replace("Z", "+00:00"))
+            except ValueError:
+                pass
+
         creator_profile_image_url = None
         if self._user_profile is not None:
             creator_profile_image_url = str(self._user_profile.get("profile_image_url") or "") or None
@@ -174,6 +183,7 @@ class LiveArchiveVODSource(AudioSource):
                 title=self._vod_title,
                 thumbnail_url=self._vod_thumbnail_url,
                 processed=False,
+                streamed_at=streamed_at,
             )
         else:
             self.video_id = int(existing_video[0])

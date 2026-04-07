@@ -3,6 +3,7 @@ import math
 import shutil
 import soundfile as sf
 import numpy as np
+from datetime import datetime
 from typing import Optional
 
 from sources.audio_source import AudioSource
@@ -20,6 +21,7 @@ class VODSource(AudioSource):
         chunk_seconds: int = 60,
         temp_dir: str = "temp_vod_chunks",
         store=None,
+        streamed_at: datetime | None = None,
     ):
         self.audio_path = audio_path
         self.creator_name = creator_name
@@ -29,6 +31,7 @@ class VODSource(AudioSource):
         self.chunk_seconds = chunk_seconds
         self.temp_dir = temp_dir
         self.store = store
+        self.streamed_at = streamed_at
 
         self.video_id: int | None = None
         self._creator_id: int | None = None
@@ -56,6 +59,7 @@ class VODSource(AudioSource):
             title=self.title,
             thumbnail_url=self.thumbnail_url,
             processed=True,
+            streamed_at=self.streamed_at,
         )
 
         os.makedirs(self.temp_dir, exist_ok=True)
