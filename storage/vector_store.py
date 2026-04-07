@@ -97,6 +97,7 @@ class VectorStore:
                 required_columns = (
                     ("creators", "profile_image_url"),
                     ("videos", "thumbnail_url"),
+                    ("videos", "streamed_at"),
                     ("fingerprint_embeddings", "creator_id"),
                 )
                 missing_columns: list[str] = []
@@ -201,12 +202,12 @@ class VectorStore:
             raise RuntimeError("Failed to resolve fingerprint ids")
         return ids
 
-    def get_video_by_url(self, url: str) -> tuple[int, int, str, str, str | None, bool] | None:
+    def get_video_by_url(self, url: str) -> tuple[int, int, str, str, str | None, bool, Any] | None:
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT id, creator_id, url, title, thumbnail_url, processed
+                    SELECT id, creator_id, url, title, thumbnail_url, processed, streamed_at
                     FROM videos
                     WHERE url = %s
                     LIMIT 1
@@ -216,7 +217,7 @@ class VectorStore:
                 row = cur.fetchone()
         if row is None:
             return None
-        return int(row[0]), int(row[1]), str(row[2]), str(row[3]), str(row[4]) if row[4] else None, bool(row[5])
+        return int(row[0]), int(row[1]), str(row[2]), str(row[3]), str(row[4]) if row[4] else None, bool(row[5]), row[6]
 
     def create_or_get_creator(
         self,
@@ -299,16 +300,17 @@ class VectorStore:
         title: str,
         processed: bool,
         thumbnail_url: str | None = None,
+        streamed_at: Any = None,
     ) -> int:
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO videos (creator_id, url, title, thumbnail_url, processed)
-                    VALUES (%s, %s, %s, %s, %s)
+                    INSERT INTO videos (creator_id, url, title, thumbnail_url, processed, streamed_at)
+                    VALUES (%s, %s, %s, %s, %s, %s)
                     RETURNING id
                     """,
-                    (int(creator_id), url, title, thumbnail_url, bool(processed)),
+                    (int(creator_id), url, title, thumbnail_url, bool(processed), streamed_at),
                 )
                 row = cur.fetchone()
         if row is None:
@@ -322,6 +324,7 @@ class VectorStore:
         title: str | None = None,
         thumbnail_url: str | None = None,
         processed: bool | None = None,
+        streamed_at: Any = None,
     ) -> None:
         assignments: list[str] = []
         values: list[Any] = []
@@ -335,6 +338,9 @@ class VectorStore:
         if processed is not None:
             assignments.append("processed = %s")
             values.append(bool(processed))
+        if streamed_at is not None:
+            assignments.append("streamed_at = %s")
+            values.append(streamed_at)
 
         if not assignments:
             return
