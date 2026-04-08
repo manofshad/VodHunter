@@ -65,10 +65,31 @@ class FakeBacklogSession:
         FakeBacklogSession.runs.append(self.vod_id)
         if FakeBacklogSession.run_started_event is not None:
             FakeBacklogSession.run_started_event.set()
+        progress_callback = self.source.kwargs.get("progress_callback")
+        if progress_callback is not None:
+            last_ingested_seconds = 0
+            if self.vod_id == "resume":
+                last_ingested_seconds = 90
+            progress_callback(
+                {
+                    "event": "chunk_start",
+                    "vod_id": self.vod_id,
+                    "start_seconds": last_ingested_seconds,
+                    "end_seconds": last_ingested_seconds + 30,
+                    "percent_complete": 100.0 if self.vod_id == "resume" else 25.0,
+                }
+            )
         time.sleep(0.02)
         if self.vod_id in FakeBacklogSession.raise_error_for:
             raise RuntimeError(f"boom-{self.vod_id}")
         if not self.stopped:
+            if progress_callback is not None:
+                progress_callback(
+                    {
+                        "event": "vod_complete",
+                        "vod_id": self.vod_id,
+                    }
+                )
             self.source.kwargs["store"].videos_by_url[str(self.source.vod_metadata["url"])] = (
                 1,
                 1,
@@ -162,12 +183,14 @@ class TestRunHybridIngest:
             ],
         )
         store = FakeStore()
+        logs: list[str] = []
         stop_flag = {"done": False}
 
         def should_stop() -> bool:
             return stop_flag["done"]
 
         def out(line: str) -> None:
+            logs.append(line)
             if line == "completed mode=backlog vod=newest url=https://www.twitch.tv/videos/newest":
                 stop_flag["done"] = True
 
@@ -189,6 +212,9 @@ class TestRunHybridIngest:
 
         assert result.backlog_ingested == 1
         assert FakeBacklogSession.runs == ["newest"]
+        assert any(line == "processing vod=newest chunk=0-30 progress=25.0% backlog=2" for line in logs)
+        assert any(line == "completed vod=newest progress=100.0% backlog=2" for line in logs)
+        assert any(line == "completed mode=backlog vod=newest url=https://www.twitch.tv/videos/newest" for line in logs)
 
     def test_skips_processed_vod_and_resumes_partial(self) -> None:
         monitor = FakeMonitor(
@@ -241,6 +267,8 @@ class TestRunHybridIngest:
         assert result.resumed == 1
         assert any(line == "skip processed vod=processed url=https://www.twitch.tv/videos/processed" for line in logs)
         assert any(line == "resume mode=backlog vod=resume cursor=90" for line in logs)
+        assert any(line == "processing vod=resume chunk=90-120 progress=100.0% backlog=1" for line in logs)
+        assert any(line == "completed vod=resume progress=100.0% backlog=1" for line in logs)
 
     def test_preempts_backlog_for_live_and_starts_live_session(self) -> None:
         monitor = FakeMonitor(
@@ -281,8 +309,10 @@ class TestRunHybridIngest:
         assert result.handoffs_to_live == 1
         assert result.handoffs_to_backlog == 1
         assert store.vod_state["vod-1"]["last_ingested_seconds"] == 60
+        assert any(line == "processing vod=vod-1 chunk=0-30 progress=25.0% backlog=1" for line in logs)
         assert any(line == "handoff_requested event=backlog_to_live vod=vod-1" for line in logs)
         assert any(line == "handoff event=backlog_to_live streamer=alice vod=vod-1" for line in logs)
+        assert not any(line == "completed vod=vod-1 progress=100.0% backlog=1" for line in logs)
 
     def test_live_failure_retries_without_terminating(self) -> None:
         class FailingLiveSession(FakeLiveSession):
