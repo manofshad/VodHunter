@@ -302,6 +302,19 @@ def _run_backlog_session(
     vod_id = str(vod["id"])
     out(f"starting mode=backlog vod={vod_id} url={vod['url']} cursor={starting_cursor} backlog={backlog_size}")
 
+    def emit_progress(event: dict[str, object]) -> None:
+        event_type = str(event.get("event") or "")
+        if event_type == "chunk_start":
+            out(
+                "processing "
+                f"vod={event['vod_id']} chunk={int(event['start_seconds'])}-{int(event['end_seconds'])} "
+                f"progress={float(event['percent_complete']):.1f}% "
+                f"backlog={backlog_size}"
+            )
+            return
+        if event_type == "vod_complete":
+            out(f"completed vod={event['vod_id']} progress=100.0% backlog={backlog_size}")
+
     source = historical_source_factory(
         streamer=streamer,
         vod_metadata=vod,
@@ -309,6 +322,7 @@ def _run_backlog_session(
         store=store,
         chunk_seconds=config.INGEST_CHUNK_SECONDS,
         temp_dir=config.TEMP_BACKFILL_DIR,
+        progress_callback=emit_progress,
     )
     session = session_factory(
         source=source,
