@@ -68,6 +68,11 @@ class StubStore:
     def list_searchable_streamers(self) -> list[dict[str, str | None]]:
         return list(self.streamers)
 
+    def get_creator_id_by_name(self, name: str) -> int | None:
+        normalized_name = (name or "").strip().lower()
+        mapping = {"xqc": 1, "jason": 2}
+        return mapping.get(normalized_name)
+
     def log_search_request(self, log) -> None:
         self.logged_requests.append(log)
 
@@ -95,6 +100,7 @@ def test_public_search_endpoint_accepts_tiktok_url_only() -> None:
     assert len(app.state.store.logged_requests) == 1
     assert app.state.store.logged_requests[0].source_app == "public"
     assert app.state.store.logged_requests[0].success is True
+    assert app.state.store.logged_requests[0].creator_id == 2
 
 
 def test_public_search_endpoint_rejects_file_upload() -> None:
@@ -126,6 +132,7 @@ def test_public_search_endpoint_validates_streamer() -> None:
     assert response.json()["detail"]["code"] == "INVALID_STREAMER"
     assert len(app.state.store.logged_requests) == 1
     assert app.state.store.logged_requests[0].error_code == "INVALID_STREAMER"
+    assert app.state.store.logged_requests[0].creator_id is None
 
 
 def test_admin_search_endpoint_accepts_tiktok_url() -> None:
@@ -142,6 +149,7 @@ def test_admin_search_endpoint_accepts_tiktok_url() -> None:
     assert app.state.search_manager.upload_calls == 0
     assert app.state.store.logged_requests[0].source_app == "admin"
     assert app.state.store.logged_requests[0].download_source == "tiktok"
+    assert app.state.store.logged_requests[0].creator_id == 2
 
 
 def test_admin_search_endpoint_accepts_file_upload() -> None:
@@ -161,6 +169,7 @@ def test_admin_search_endpoint_accepts_file_upload() -> None:
     assert app.state.search_manager.last_streamer == "xqc"
     assert app.state.store.logged_requests[0].clip_filename == "clip.mp4"
     assert app.state.store.logged_requests[0].input_type == "file"
+    assert app.state.store.logged_requests[0].creator_id == 1
 
 
 def test_admin_search_endpoint_rejects_both_file_and_url() -> None:

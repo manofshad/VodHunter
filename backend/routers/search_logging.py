@@ -36,6 +36,7 @@ def build_log_from_outcome(
     *,
     source_app: str,
     streamer: str | None,
+    creator_id: int | None,
     outcome: SearchRequestOutcome,
     http_status: int = 200,
 ) -> SearchRequestLog:
@@ -44,6 +45,7 @@ def build_log_from_outcome(
         route=SEARCH_ROUTE,
         input_type=outcome.input_type,
         streamer=streamer,
+        creator_id=creator_id,
         success=True,
         http_status=http_status,
         result_reason=outcome.execution_metadata.result_reason or outcome.result.reason,
