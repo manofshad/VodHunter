@@ -41,6 +41,13 @@ def _normalize_and_validate_streamer(request: Request, streamer: str | None) -> 
     return normalized_streamer
 
 
+def _resolve_creator_id(request: Request, streamer: str | None) -> int | None:
+    normalized_streamer = (streamer or "").strip().lower()
+    if not normalized_streamer:
+        return None
+    return request.app.state.store.get_creator_id_by_name(normalized_streamer)
+
+
 @router.post(
     "/search/clip",
     response_model=SearchResponse,
@@ -56,6 +63,7 @@ def search_clip(
     has_url = bool((tiktok_url or "").strip())
     input_type = infer_input_type(has_file=has_file, has_url=has_url)
     normalized_streamer = normalize_streamer_value(streamer)
+    creator_id: int | None = None
     if has_file == has_url:
         persist_search_log(
             request,
@@ -64,6 +72,7 @@ def search_clip(
                 route=SEARCH_ROUTE,
                 input_type=input_type,
                 streamer=normalized_streamer,
+                creator_id=creator_id,
                 success=False,
                 http_status=400,
                 error_code="INVALID_SEARCH_INPUT",
@@ -83,6 +92,7 @@ def search_clip(
 
     try:
         normalized_streamer = _normalize_and_validate_streamer(request, streamer)
+        creator_id = _resolve_creator_id(request, normalized_streamer)
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, dict) else {}
         persist_search_log(
@@ -92,6 +102,7 @@ def search_clip(
                 route=SEARCH_ROUTE,
                 input_type=input_type,
                 streamer=normalized_streamer,
+                creator_id=creator_id,
                 success=False,
                 http_status=exc.status_code,
                 error_code=str(detail.get("code") or "HTTP_ERROR"),
@@ -116,6 +127,7 @@ def search_clip(
             build_log_from_outcome(
                 source_app="admin",
                 streamer=normalized_streamer,
+                creator_id=creator_id,
                 outcome=outcome,
             ),
         )
@@ -128,6 +140,7 @@ def search_clip(
                 route=SEARCH_ROUTE,
                 input_type=input_type,
                 streamer=normalized_streamer,
+                creator_id=creator_id,
                 success=False,
                 http_status=400,
                 error_code="INPUT_DURATION_EXCEEDED",
@@ -150,6 +163,7 @@ def search_clip(
                 route=SEARCH_ROUTE,
                 input_type=input_type,
                 streamer=normalized_streamer,
+                creator_id=creator_id,
                 success=False,
                 http_status=400,
                 error_code="INVALID_UPLOAD",
@@ -171,6 +185,7 @@ def search_clip(
                 route=SEARCH_ROUTE,
                 input_type=input_type,
                 streamer=normalized_streamer,
+                creator_id=creator_id,
                 success=False,
                 http_status=400,
                 error_code="INVALID_TIKTOK_URL",
@@ -192,6 +207,7 @@ def search_clip(
                 route=SEARCH_ROUTE,
                 input_type=input_type,
                 streamer=normalized_streamer,
+                creator_id=creator_id,
                 success=False,
                 http_status=400,
                 error_code="DOWNLOAD_ERROR",
@@ -213,6 +229,7 @@ def search_clip(
                 route=SEARCH_ROUTE,
                 input_type=input_type,
                 streamer=normalized_streamer,
+                creator_id=creator_id,
                 success=False,
                 http_status=400,
                 error_code="PROCESSING_ERROR",

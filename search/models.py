@@ -62,6 +62,7 @@ class SearchRequestLog:
     route: str
     input_type: str | None = None
     streamer: str | None = None
+    creator_id: int | None = None
     success: bool = False
     http_status: int | None = None
     error_code: str | None = None

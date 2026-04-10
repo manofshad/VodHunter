@@ -612,6 +612,7 @@ class VectorStore:
                         route,
                         input_type,
                         streamer,
+                        creator_id,
                         success,
                         http_status,
                         error_code,
@@ -632,7 +633,7 @@ class VectorStore:
                         alignment_duration_ms
                     )
                     VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                     )
                     """,
                     (
@@ -640,6 +641,7 @@ class VectorStore:
                         log.route,
                         log.input_type,
                         log.streamer,
+                        log.creator_id,
                         bool(log.success),
                         log.http_status,
                         log.error_code,

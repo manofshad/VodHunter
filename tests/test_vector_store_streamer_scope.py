@@ -122,6 +122,7 @@ class TestVectorStoreStreamerScope:
                 route='/api/search/clip',
                 input_type='tiktok_url',
                 streamer='xqc',
+                creator_id=7,
                 success=False,
                 http_status=400,
                 error_code='DOWNLOAD_ERROR',
@@ -134,6 +135,7 @@ class TestVectorStoreStreamerScope:
         assert 'INSERT INTO search_requests' in query
         assert params[0] == 'public'
         assert params[2] == 'tiktok_url'
-        assert params[6] == 'DOWNLOAD_ERROR'
-        assert params[10] is None
-        assert params[20] is None
+        assert params[4] == 7
+        assert params[7] == 'DOWNLOAD_ERROR'
+        assert params[11] is None
+        assert params[21] is None

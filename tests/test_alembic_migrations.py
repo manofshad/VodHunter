@@ -84,3 +84,12 @@ class TestAlembicMigrations:
         with patch.object(revision, 'op', fake_op):
             revision.upgrade()
         assert fake_op.executed == ["ALTER TABLE videos ADD COLUMN IF NOT EXISTS streamed_at TIMESTAMPTZ"]
+
+    def test_search_request_creator_id_revision_updates_table(self) -> None:
+        revision = self._load_module('alembic/versions/20260408_0007_add_search_requests_creator_id.py', 'vodhunter_alembic_revision_0007')
+        fake_op = FakeOp()
+        with patch.object(revision, 'op', fake_op):
+            revision.upgrade()
+        assert any(('ADD COLUMN IF NOT EXISTS creator_id BIGINT REFERENCES creators(id)' in sql for sql in fake_op.executed))
+        assert any(('UPDATE search_requests AS sr' in sql for sql in fake_op.executed))
+        assert any(('CREATE INDEX IF NOT EXISTS idx_search_requests_creator_id_created_at' in sql for sql in fake_op.executed))
