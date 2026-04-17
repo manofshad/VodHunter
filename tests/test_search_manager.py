@@ -16,7 +16,12 @@ class FakeSearchService:
         self.searched_paths: list[tuple[str, str]] = []
         self.raise_on_search = False
 
-    def search_file(self, path: str, streamer: str) -> SearchExecutionResult:
+    def search_file(
+        self,
+        path: str,
+        streamer: str,
+        on_stage_change=None,
+    ) -> SearchExecutionResult:
         self.searched_paths.append((path, streamer))
         if self.raise_on_search:
             raise RuntimeError("search failed")

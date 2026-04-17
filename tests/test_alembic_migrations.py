@@ -93,3 +93,20 @@ class TestAlembicMigrations:
         assert any(('ADD COLUMN IF NOT EXISTS creator_id BIGINT REFERENCES creators(id)' in sql for sql in fake_op.executed))
         assert any(('UPDATE search_requests AS sr' in sql for sql in fake_op.executed))
         assert any(('CREATE INDEX IF NOT EXISTS idx_search_requests_creator_id_created_at' in sql for sql in fake_op.executed))
+
+    def test_search_job_fields_revision_backfills_job_status_from_success(self) -> None:
+        revision = self._load_module('alembic/versions/20260415_0008_add_search_job_fields.py', 'vodhunter_alembic_revision_0008')
+        fake_op = FakeOp()
+        with patch.object(revision, 'op', fake_op):
+            revision.upgrade()
+        assert any(('ADD COLUMN IF NOT EXISTS job_status TEXT NOT NULL DEFAULT \'completed\'' in sql for sql in fake_op.executed))
+        assert any(
+            (
+                "UPDATE search_requests\n        SET job_status = CASE WHEN success THEN 'completed' ELSE 'failed' END\n        "
+                in sql
+            )
+            for sql in fake_op.executed
+        )
+        assert not any(("WHERE job_status NOT IN ('queued', 'running', 'completed', 'failed')" in sql for sql in fake_op.executed))
+        assert any(('SET finished_at = COALESCE(finished_at, created_at)' in sql for sql in fake_op.executed))
+        assert any(('CREATE INDEX IF NOT EXISTS idx_search_requests_source_app_job_status_created_at' in sql for sql in fake_op.executed))

@@ -1,52 +1,31 @@
-from fastapi import APIRouter, Form, HTTPException, Request
+from fastapi import APIRouter, Form, HTTPException, Request, status
 
-from backend.schemas import ErrorResponse, SearchResponse, StreamerListItem
 from backend.routers.admin_search import _normalize_and_validate_streamer, _resolve_creator_id
-from backend.routers.search_logging import (
-    SEARCH_ROUTE,
-    build_log_from_outcome,
-    extract_download_host,
-    infer_input_type,
-    normalize_streamer_value,
-    persist_search_log,
+from backend.schemas import (
+    ErrorResponse,
+    SearchJobCreatedResponse,
+    SearchJobError,
+    SearchJobResponse,
+    SearchResponse,
+    StreamerListItem,
 )
-from backend.services.remote_clip_downloader import DownloadError, InvalidTikTokUrlError
-from backend.services.search_manager import InputDurationExceededError, SearchInputError
-from search.models import SearchRequestLog
 
 router = APIRouter(prefix="/api", tags=["search"])
 
 
 @router.post(
     "/search/clip",
-    response_model=SearchResponse,
+    response_model=SearchJobCreatedResponse,
     responses={400: {"model": ErrorResponse}},
+    status_code=status.HTTP_202_ACCEPTED,
 )
-def search_clip(
+def create_search_clip_job(
     request: Request,
     tiktok_url: str | None = Form(default=None),
     streamer: str | None = Form(default=None),
-) -> SearchResponse:
+) -> SearchJobCreatedResponse:
     has_url = bool((tiktok_url or "").strip())
-    normalized_streamer = normalize_streamer_value(streamer)
-    input_type = infer_input_type(has_file=False, has_url=has_url)
-    creator_id: int | None = None
     if not has_url:
-        persist_search_log(
-            request,
-            SearchRequestLog(
-                source_app="public",
-                route=SEARCH_ROUTE,
-                input_type=input_type,
-                streamer=normalized_streamer,
-                creator_id=creator_id,
-                success=False,
-                http_status=400,
-                error_code="INVALID_SEARCH_INPUT",
-                error_message="tiktok_url is required",
-                download_host=extract_download_host(tiktok_url),
-            ),
-        )
         raise HTTPException(
             status_code=400,
             detail={
@@ -55,149 +34,44 @@ def search_clip(
             },
         )
 
-    search_manager = request.app.state.search_manager
-    try:
-        normalized_streamer = _normalize_and_validate_streamer(request, streamer)
-        creator_id = _resolve_creator_id(request, normalized_streamer)
-    except HTTPException as exc:
-        detail = exc.detail if isinstance(exc.detail, dict) else {}
-        persist_search_log(
-            request,
-            SearchRequestLog(
-                source_app="public",
-                route=SEARCH_ROUTE,
-                input_type=input_type,
-                streamer=normalized_streamer,
-                creator_id=creator_id,
-                success=False,
-                http_status=exc.status_code,
-                error_code=str(detail.get("code") or "HTTP_ERROR"),
-                error_message=str(detail.get("message") or exc.detail),
-                download_source="tiktok",
-                download_host=extract_download_host(tiktok_url),
-            ),
-        )
-        raise
+    normalized_streamer = _normalize_and_validate_streamer(request, streamer)
+    creator_id = _resolve_creator_id(request, normalized_streamer)
+    search_id = request.app.state.search_job_service.create_public_search_job(
+        tiktok_url=str(tiktok_url).strip(),
+        streamer=normalized_streamer,
+        creator_id=creator_id,
+    )
+    return SearchJobCreatedResponse(search_id=search_id, status="queued", stage="validating")
 
-    try:
-        assert tiktok_url is not None
-        outcome = search_manager.search_tiktok_url(tiktok_url, normalized_streamer)
-        persist_search_log(
-            request,
-            build_log_from_outcome(
-                source_app="public",
-                streamer=normalized_streamer,
-                creator_id=creator_id,
-                outcome=outcome,
-            ),
-        )
-        return SearchResponse.from_result(outcome.result)
-    except InputDurationExceededError as exc:
-        persist_search_log(
-            request,
-            SearchRequestLog(
-                source_app="public",
-                route=SEARCH_ROUTE,
-                input_type=input_type,
-                streamer=normalized_streamer,
-                creator_id=creator_id,
-                success=False,
-                http_status=400,
-                error_code="INPUT_DURATION_EXCEEDED",
-                error_message=str(exc),
-                download_source="tiktok",
-                download_host=extract_download_host(tiktok_url),
-                input_duration_seconds=exc.duration_seconds,
-            ),
-        )
+
+@router.get(
+    "/search/clip/{search_id}",
+    response_model=SearchJobResponse,
+    responses={404: {"model": ErrorResponse}},
+)
+def get_search_clip_job(request: Request, search_id: int) -> SearchJobResponse:
+    job = request.app.state.search_job_service.get_public_search_job(search_id)
+    if job is None:
         raise HTTPException(
-            status_code=400,
-            detail={"code": "INPUT_DURATION_EXCEEDED", "message": str(exc)},
-        ) from exc
-    except SearchInputError as exc:
-        persist_search_log(
-            request,
-            SearchRequestLog(
-                source_app="public",
-                route=SEARCH_ROUTE,
-                input_type=input_type,
-                streamer=normalized_streamer,
-                creator_id=creator_id,
-                success=False,
-                http_status=400,
-                error_code="INVALID_UPLOAD",
-                error_message=str(exc),
-                download_source="tiktok",
-                download_host=extract_download_host(tiktok_url),
-            ),
+            status_code=404,
+            detail={
+                "code": "SEARCH_NOT_FOUND",
+                "message": "Search job was not found",
+            },
         )
-        raise HTTPException(
-            status_code=400,
-            detail={"code": "INVALID_UPLOAD", "message": str(exc)},
-        ) from exc
-    except InvalidTikTokUrlError as exc:
-        persist_search_log(
-            request,
-            SearchRequestLog(
-                source_app="public",
-                route=SEARCH_ROUTE,
-                input_type=input_type,
-                streamer=normalized_streamer,
-                creator_id=creator_id,
-                success=False,
-                http_status=400,
-                error_code="INVALID_TIKTOK_URL",
-                error_message=str(exc),
-                download_source="tiktok",
-                download_host=extract_download_host(tiktok_url),
-            ),
-        )
-        raise HTTPException(
-            status_code=400,
-            detail={"code": "INVALID_TIKTOK_URL", "message": str(exc)},
-        ) from exc
-    except DownloadError as exc:
-        persist_search_log(
-            request,
-            SearchRequestLog(
-                source_app="public",
-                route=SEARCH_ROUTE,
-                input_type=input_type,
-                streamer=normalized_streamer,
-                creator_id=creator_id,
-                success=False,
-                http_status=400,
-                error_code="DOWNLOAD_ERROR",
-                error_message=str(exc),
-                download_source="tiktok",
-                download_host=extract_download_host(tiktok_url),
-            ),
-        )
-        raise HTTPException(
-            status_code=400,
-            detail={"code": "DOWNLOAD_ERROR", "message": str(exc)},
-        ) from exc
-    except RuntimeError as exc:
-        persist_search_log(
-            request,
-            SearchRequestLog(
-                source_app="public",
-                route=SEARCH_ROUTE,
-                input_type=input_type,
-                streamer=normalized_streamer,
-                creator_id=creator_id,
-                success=False,
-                http_status=400,
-                error_code="PROCESSING_ERROR",
-                error_message=str(exc),
-                download_source="tiktok",
-                download_host=extract_download_host(tiktok_url),
-            ),
-        )
-        raise HTTPException(
-            status_code=400,
-            detail={"code": "PROCESSING_ERROR", "message": str(exc)},
-        ) from exc
+
+    return SearchJobResponse(
+        search_id=job.id,
+        status=job.status,
+        stage=job.stage,
+        created_at=job.created_at,
+        started_at=job.started_at,
+        finished_at=job.finished_at,
+        result=SearchResponse.from_result(job.result) if job.result is not None else None,
+        error=SearchJobError(code=job.error_code, message=job.error_message)
+        if job.error_code and job.error_message
+        else None,
+    )
 
 
 @router.get("/search/streamers", response_model=list[StreamerListItem])
