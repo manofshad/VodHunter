@@ -81,3 +81,16 @@ class SearchRequestLog:
     embed_duration_ms: int | None = None
     vector_query_duration_ms: int | None = None
     alignment_duration_ms: int | None = None
+
+
+@dataclass
+class SearchJobRecord:
+    id: int
+    status: str
+    stage: str | None
+    created_at: str
+    started_at: str | None
+    finished_at: str | None
+    result: SearchResult | None
+    error_code: str | None
+    error_message: str | None

@@ -1,5 +1,6 @@
 import logging
 import time
+from typing import Callable
 
 from search.alignment_service import AlignmentService
 from search.models import SearchExecutionMetadata, SearchExecutionResult, SearchResult
@@ -33,7 +34,12 @@ class SearchService:
         self.matcher = matcher
         self.alignment = alignment
 
-    def search_file(self, clip_path: str, streamer: str) -> SearchExecutionResult:
+    def search_file(
+        self,
+        clip_path: str,
+        streamer: str,
+        on_stage_change: Callable[[str], None] | None = None,
+    ) -> SearchExecutionResult:
         prepared_wav = None
         total_started_at = time.perf_counter()
         metadata = SearchExecutionMetadata()
@@ -42,11 +48,15 @@ class SearchService:
             if not normalized_streamer:
                 raise ValueError("streamer is required")
 
+            if on_stage_change is not None:
+                on_stage_change("preprocessing")
             started_at = time.perf_counter()
             prepared_wav = self.preprocessor.prepare(clip_path)
             preprocess_seconds = time.perf_counter() - started_at
             metadata.preprocess_duration_ms = _duration_ms(preprocess_seconds)
 
+            if on_stage_change is not None:
+                on_stage_change("embedding")
             started_at = time.perf_counter()
             query_embeddings, query_timestamps = self.query_embedder.embed(prepared_wav)
             embed_seconds = time.perf_counter() - started_at
@@ -65,6 +75,8 @@ class SearchService:
                 )
                 return SearchExecutionResult(result=result, metadata=metadata)
 
+            if on_stage_change is not None:
+                on_stage_change("matching")
             top_k = int(getattr(self.matcher, "top_k", 10))
             creator_id = self.store.get_creator_id_by_name(normalized_streamer)
             if creator_id is None:
@@ -140,6 +152,8 @@ class SearchService:
                 )
                 return SearchExecutionResult(result=result, metadata=metadata)
 
+            if on_stage_change is not None:
+                on_stage_change("finalizing")
             video_row = self.store.get_video_with_creator(alignment.video_id)
             if video_row is None:
                 result = SearchResult(

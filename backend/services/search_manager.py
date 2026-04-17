@@ -49,7 +49,12 @@ class SearchManager:
         if self.upload_temp_dir is not None:
             os.makedirs(self.upload_temp_dir, exist_ok=True)
 
-    def search_upload(self, file: UploadFile, streamer: str) -> SearchRequestOutcome:
+    def search_upload(
+        self,
+        file: UploadFile,
+        streamer: str,
+        on_stage_change: Callable[[str], None] | None = None,
+    ) -> SearchRequestOutcome:
         if self.upload_temp_dir is None:
             raise SearchInputError("File uploads are not enabled")
         if not file.filename:
@@ -67,8 +72,8 @@ class SearchManager:
             if os.path.getsize(temp_path) == 0:
                 raise SearchInputError("Uploaded file is empty")
 
-            input_duration_seconds = self._validate_duration(temp_path)
-            execution_result = self._search_local_file(temp_path, streamer)
+            input_duration_seconds = self._validate_duration(temp_path, on_stage_change=on_stage_change)
+            execution_result = self._search_local_file(temp_path, streamer, on_stage_change=on_stage_change)
             logger.info(
                 "timing event=search_upload seconds=%.2f streamer=%s",
                 time.perf_counter() - request_started_at,
@@ -86,16 +91,23 @@ class SearchManager:
             if os.path.exists(temp_path):
                 os.remove(temp_path)
 
-    def search_tiktok_url(self, url: str, streamer: str) -> SearchRequestOutcome:
+    def search_tiktok_url(
+        self,
+        url: str,
+        streamer: str,
+        on_stage_change: Callable[[str], None] | None = None,
+    ) -> SearchRequestOutcome:
         downloaded_path = ""
         request_started_at = time.perf_counter()
         input_duration_seconds: float | None = None
         parsed_url = urlparse((url or "").strip())
         try:
+            if on_stage_change is not None:
+                on_stage_change("downloading")
             result = self.remote_downloader.download_tiktok(url)
             downloaded_path = result.path
-            input_duration_seconds = self._validate_duration(downloaded_path)
-            execution_result = self._search_local_file(downloaded_path, streamer)
+            input_duration_seconds = self._validate_duration(downloaded_path, on_stage_change=on_stage_change)
+            execution_result = self._search_local_file(downloaded_path, streamer, on_stage_change=on_stage_change)
             logger.info(
                 "timing event=search_tiktok_url seconds=%.2f streamer=%s",
                 time.perf_counter() - request_started_at,
@@ -114,9 +126,11 @@ class SearchManager:
             if downloaded_path:
                 self.remote_downloader.cleanup(downloaded_path)
 
-    def _validate_duration(self, path: str) -> float | None:
+    def _validate_duration(self, path: str, on_stage_change: Callable[[str], None] | None = None) -> float | None:
         if self.max_duration_seconds is None:
             return None
+        if on_stage_change is not None:
+            on_stage_change("probing")
         started_at = time.perf_counter()
         try:
             duration_seconds = self.duration_probe(path)
@@ -136,8 +150,13 @@ class SearchManager:
             )
         return duration_seconds
 
-    def _search_local_file(self, path: str, streamer: str):
+    def _search_local_file(
+        self,
+        path: str,
+        streamer: str,
+        on_stage_change: Callable[[str], None] | None = None,
+    ):
         normalized_streamer = streamer.strip().lower()
         if not normalized_streamer:
             raise SearchInputError("streamer is required")
-        return self.search_service.search_file(path, normalized_streamer)
+        return self.search_service.search_file(path, normalized_streamer, on_stage_change=on_stage_change)
