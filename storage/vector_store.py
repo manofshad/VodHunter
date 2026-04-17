@@ -8,7 +8,7 @@ from typing import Any, List
 import numpy as np
 
 from backend.db_url import normalize_database_url
-from search.models import SearchRequestLog
+from search.models import SearchJobRecord, SearchRequestLog, SearchRequestOutcome, SearchResult
 
 
 logger = logging.getLogger("uvicorn.error")
@@ -99,6 +99,11 @@ class VectorStore:
                     ("videos", "thumbnail_url"),
                     ("videos", "streamed_at"),
                     ("fingerprint_embeddings", "creator_id"),
+                    ("search_requests", "job_status"),
+                    ("search_requests", "job_stage"),
+                    ("search_requests", "started_at"),
+                    ("search_requests", "finished_at"),
+                    ("search_requests", "tiktok_url"),
                 )
                 missing_columns: list[str] = []
                 for table_name, column_name in required_columns:
@@ -662,3 +667,273 @@ class VectorStore:
                         log.alignment_duration_ms,
                     ),
                 )
+
+    def create_public_search_job(self, *, tiktok_url: str, streamer: str, creator_id: int | None) -> int:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO search_requests (
+                        source_app,
+                        route,
+                        input_type,
+                        streamer,
+                        creator_id,
+                        success,
+                        job_status,
+                        job_stage,
+                        tiktok_url
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                    """,
+                    ("public", "/api/search/clip", "tiktok_url", streamer, creator_id, False, "queued", "validating", tiktok_url),
+                )
+                row = cur.fetchone()
+        if row is None:
+            raise RuntimeError("Failed to create public search job")
+        return int(row[0])
+
+    def update_search_job_status(
+        self,
+        search_id: int,
+        *,
+        status: str | None = None,
+        stage: str | None = None,
+        started: bool = False,
+    ) -> None:
+        assignments: list[str] = []
+        values: list[Any] = []
+        if status is not None:
+            assignments.append("job_status = %s")
+            values.append(status)
+        if stage is not None:
+            assignments.append("job_stage = %s")
+            values.append(stage)
+        if started:
+            assignments.append("started_at = COALESCE(started_at, NOW())")
+        if not assignments:
+            return
+        values.append(int(search_id))
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    UPDATE search_requests
+                    SET {', '.join(assignments)}
+                    WHERE id = %s
+                    """,
+                    values,
+                )
+
+    def complete_search_job(self, search_id: int, outcome: SearchRequestOutcome) -> None:
+        metadata = outcome.execution_metadata
+        result = outcome.result
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE search_requests
+                    SET success = TRUE,
+                        http_status = 200,
+                        error_code = NULL,
+                        error_message = NULL,
+                        result_reason = %s,
+                        found_match = %s,
+                        matched_video_id = %s,
+                        matched_timestamp_seconds = %s,
+                        score = %s,
+                        clip_filename = %s,
+                        download_source = %s,
+                        download_host = %s,
+                        input_duration_seconds = %s,
+                        total_duration_ms = %s,
+                        preprocess_duration_ms = %s,
+                        embed_duration_ms = %s,
+                        vector_query_duration_ms = %s,
+                        alignment_duration_ms = %s,
+                        job_status = 'completed',
+                        job_stage = NULL,
+                        finished_at = NOW()
+                    WHERE id = %s
+                    """,
+                    (
+                        metadata.result_reason or result.reason,
+                        metadata.found_match if metadata.found_match is not None else result.found,
+                        metadata.matched_video_id if metadata.matched_video_id is not None else result.video_id,
+                        metadata.matched_timestamp_seconds if metadata.matched_timestamp_seconds is not None else result.timestamp_seconds,
+                        metadata.score if metadata.score is not None else result.score,
+                        outcome.clip_filename,
+                        outcome.download_source,
+                        outcome.download_host,
+                        outcome.input_duration_seconds,
+                        outcome.total_duration_ms,
+                        metadata.preprocess_duration_ms,
+                        metadata.embed_duration_ms,
+                        metadata.vector_query_duration_ms,
+                        metadata.alignment_duration_ms,
+                        int(search_id),
+                    ),
+                )
+
+    def fail_search_job(
+        self,
+        search_id: int,
+        *,
+        error_code: str,
+        error_message: str,
+        http_status: int,
+        input_duration_seconds: float | None = None,
+    ) -> None:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE search_requests
+                    SET success = FALSE,
+                        http_status = %s,
+                        error_code = %s,
+                        error_message = %s,
+                        input_duration_seconds = COALESCE(%s, input_duration_seconds),
+                        job_status = 'failed',
+                        job_stage = NULL,
+                        finished_at = NOW()
+                    WHERE id = %s
+                    """,
+                    (int(http_status), error_code, error_message, input_duration_seconds, int(search_id)),
+                )
+
+    def get_public_search_job(self, search_id: int) -> SearchJobRecord | None:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        id,
+                        job_status,
+                        job_stage,
+                        created_at,
+                        started_at,
+                        finished_at,
+                        found_match,
+                        streamer,
+                        matched_video_id,
+                        matched_timestamp_seconds,
+                        score,
+                        result_reason,
+                        error_code,
+                        error_message
+                    FROM search_requests
+                    WHERE id = %s
+                      AND source_app = 'public'
+                    LIMIT 1
+                    """,
+                    (int(search_id),),
+                )
+                row = cur.fetchone()
+        if row is None:
+            return None
+        (
+            record_id,
+            status,
+            stage,
+            created_at,
+            started_at,
+            finished_at,
+            found_match,
+            streamer,
+            matched_video_id,
+            matched_timestamp_seconds,
+            score,
+            result_reason,
+            error_code,
+            error_message,
+        ) = row
+
+        result: SearchResult | None = None
+        if status == "completed":
+            result = SearchResult(
+                found=bool(found_match),
+                streamer=str(streamer) if streamer else None,
+                video_id=int(matched_video_id) if matched_video_id is not None else None,
+                score=float(score) if score is not None else None,
+                reason=str(result_reason) if result_reason else None,
+            )
+            if matched_video_id is not None:
+                video_row = self.get_video_with_creator(int(matched_video_id))
+                if video_row is not None:
+                    video_id, video_url, title, creator_name, thumbnail_url, profile_image_url = video_row
+                    result.streamer = creator_name
+                    result.profile_image_url = profile_image_url
+                    result.video_id = video_id
+                    result.video_url = video_url
+                    result.thumbnail_url = thumbnail_url
+                    result.title = title
+                    cur_timestamp = int(matched_timestamp_seconds) if matched_timestamp_seconds is not None else None
+                    result.timestamp_seconds = cur_timestamp
+                    if cur_timestamp is not None:
+                        from search.twitch_time import build_twitch_timestamp_url
+
+                        result.video_url_at_timestamp = build_twitch_timestamp_url(video_url, cur_timestamp)
+            else:
+                result.profile_image_url = self._get_profile_image_for_streamer(str(streamer) if streamer else None)
+
+        return SearchJobRecord(
+            id=int(record_id),
+            status=str(status),
+            stage=str(stage) if stage else None,
+            created_at=self._isoformat(created_at),
+            started_at=self._isoformat(started_at),
+            finished_at=self._isoformat(finished_at),
+            result=result,
+            error_code=str(error_code) if error_code else None,
+            error_message=str(error_message) if error_message else None,
+        )
+
+    def fail_incomplete_public_search_jobs(self, *, error_code: str, error_message: str) -> None:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE search_requests
+                    SET success = FALSE,
+                        http_status = 500,
+                        error_code = %s,
+                        error_message = %s,
+                        job_status = 'failed',
+                        job_stage = NULL,
+                        finished_at = COALESCE(finished_at, NOW())
+                    WHERE source_app = 'public'
+                      AND job_status IN ('queued', 'running')
+                    """,
+                    (error_code, error_message),
+                )
+
+    def _get_profile_image_for_streamer(self, streamer: str | None) -> str | None:
+        normalized_streamer = (streamer or "").strip().lower()
+        if not normalized_streamer:
+            return None
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT profile_image_url
+                    FROM creators
+                    WHERE LOWER(name) = %s
+                    LIMIT 1
+                    """,
+                    (normalized_streamer,),
+                )
+                row = cur.fetchone()
+        if row is None or not row[0]:
+            return None
+        return str(row[0])
+
+    def _isoformat(self, value: Any) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            if value.tzinfo is None:
+                value = value.replace(tzinfo=timezone.utc)
+            return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        return str(value)

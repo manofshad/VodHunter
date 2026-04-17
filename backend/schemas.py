@@ -81,3 +81,28 @@ class SearchResponse(BaseModel):
 class StreamerListItem(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     profile_image_url: str | None = None
+
+
+SearchJobStatus = Literal["queued", "running", "completed", "failed"]
+
+
+class SearchJobError(BaseModel):
+    code: str
+    message: str
+
+
+class SearchJobCreatedResponse(BaseModel):
+    search_id: int
+    status: SearchJobStatus
+    stage: str | None = None
+
+
+class SearchJobResponse(BaseModel):
+    search_id: int
+    status: SearchJobStatus
+    stage: str | None = None
+    created_at: str
+    started_at: str | None = None
+    finished_at: str | None = None
+    result: SearchResponse | None = None
+    error: SearchJobError | None = None

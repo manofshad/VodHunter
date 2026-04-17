@@ -1,8 +1,8 @@
 import { FormEvent, useEffect, useId, useMemo, useRef, useState } from "react";
 import { AlertCircle, Check, ChevronDown, Clipboard, ExternalLink, LoaderCircle, Search, TriangleAlert } from "lucide-react";
 
-import { listSearchableStreamers, searchClip } from "../api/client";
-import { SearchResponse, StreamerListItem } from "../api/types";
+import { createSearchJob, getSearchJob, listSearchableStreamers } from "../api/client";
+import { SearchJobResponse, SearchResponse, StreamerListItem } from "../api/types";
 import defaultAvatar from "../assets/default-avatar.svg";
 
 interface AvatarImageProps {
@@ -50,6 +50,57 @@ function getResultHref(result: SearchResponse | null): string | null {
   }
 
   return result.video_url_at_timestamp ?? null;
+}
+
+const ACTIVE_SEARCH_STORAGE_KEY = "vodhunter-public-active-search";
+
+function getStageMessage(stage: string | null): string {
+  switch (stage) {
+    case "validating":
+      return "Validating your TikTok URL.";
+    case "downloading":
+      return "Downloading the TikTok clip.";
+    case "probing":
+      return "Checking clip duration.";
+    case "preprocessing":
+      return "Preparing the clip audio for search.";
+    case "embedding":
+      return "Generating audio embeddings.";
+    case "matching":
+      return "Matching against indexed streamer audio.";
+    case "finalizing":
+      return "Finalizing the search result.";
+    default:
+      return "We are matching your TikTok clip against indexed streamer audio.";
+  }
+}
+
+function persistActiveSearch(searchId: number, tiktokUrl: string): void {
+  window.localStorage.setItem(
+    ACTIVE_SEARCH_STORAGE_KEY,
+    JSON.stringify({ searchId, tiktokUrl }),
+  );
+}
+
+function clearActiveSearch(): void {
+  window.localStorage.removeItem(ACTIVE_SEARCH_STORAGE_KEY);
+}
+
+function readActiveSearch(): { searchId: number; tiktokUrl: string } | null {
+  const raw = window.localStorage.getItem(ACTIVE_SEARCH_STORAGE_KEY);
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as { searchId?: number; tiktokUrl?: string };
+    if (typeof parsed.searchId !== "number" || typeof parsed.tiktokUrl !== "string") {
+      return null;
+    }
+    return { searchId: parsed.searchId, tiktokUrl: parsed.tiktokUrl };
+  } catch {
+    return null;
+  }
 }
 
 function Header() {
@@ -220,6 +271,8 @@ export default function SearchPage() {
   const [streamerError, setStreamerError] = useState<string | null>(null);
   const [isStreamerMenuOpen, setIsStreamerMenuOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [activeSearchId, setActiveSearchId] = useState<number | null>(null);
+  const [activeSearchStage, setActiveSearchStage] = useState<string | null>(null);
   const [lastSubmittedUrl, setLastSubmittedUrl] = useState("");
   const streamerTriggerRef = useRef<HTMLButtonElement | null>(null);
   const streamerMenuRef = useRef<HTMLDivElement | null>(null);
@@ -266,6 +319,19 @@ export default function SearchPage() {
   }, []);
 
   useEffect(() => {
+    const activeSearch = readActiveSearch();
+    if (activeSearch === null) {
+      return;
+    }
+
+    setActiveSearchId(activeSearch.searchId);
+    setActiveSearchStage("validating");
+    setLastSubmittedUrl(activeSearch.tiktokUrl);
+    setTiktokUrl(activeSearch.tiktokUrl);
+    setSubmitting(true);
+  }, []);
+
+  useEffect(() => {
     if (!isStreamerMenuOpen) {
       return;
     }
@@ -294,6 +360,66 @@ export default function SearchPage() {
     };
   }, [isStreamerMenuOpen]);
 
+  useEffect(() => {
+    if (activeSearchId === null) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const job = await getSearchJob(activeSearchId);
+        if (cancelled) {
+          return;
+        }
+        handlePolledJob(job);
+      } catch (err) {
+        if (cancelled) {
+          return;
+        }
+        setSubmitting(false);
+        setActiveSearchId(null);
+        setActiveSearchStage(null);
+        clearActiveSearch();
+        setRequestError(err instanceof Error ? err.message : "Search failed");
+      }
+    };
+
+    void poll();
+    const intervalId = window.setInterval(() => {
+      void poll();
+    }, 2000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [activeSearchId]);
+
+  const handlePolledJob = (job: SearchJobResponse) => {
+    setActiveSearchStage(job.stage);
+
+    if (job.status === "queued" || job.status === "running") {
+      setSubmitting(true);
+      return;
+    }
+
+    setSubmitting(false);
+    setActiveSearchId(null);
+    setActiveSearchStage(null);
+    clearActiveSearch();
+
+    if (job.status === "completed") {
+      setResult(job.result);
+      setRequestError(null);
+      return;
+    }
+
+    setResult(null);
+    setRequestError(job.error?.message ?? "Search failed");
+  };
+
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
     if (!hasUrl) {
@@ -310,16 +436,19 @@ export default function SearchPage() {
 
     try {
       setSubmitting(true);
+      setActiveSearchId(null);
+      setActiveSearchStage("validating");
       setStreamerError(null);
       setRequestError(null);
       setResult(null);
       setLastSubmittedUrl(submittedUrl);
-
-      const next = await searchClip({ tiktokUrl: submittedUrl, streamer });
-      setResult(next);
+      const created = await createSearchJob({ tiktokUrl: submittedUrl, streamer });
+      persistActiveSearch(created.search_id, submittedUrl);
+      setActiveSearchId(created.search_id);
+      setActiveSearchStage(created.stage);
     } catch (err) {
+      setActiveSearchStage(null);
       setRequestError(err instanceof Error ? err.message : "Search failed");
-    } finally {
       setSubmitting(false);
     }
   };
@@ -490,12 +619,12 @@ export default function SearchPage() {
                     {submitting ? (
                       <div className="mx-auto max-w-4xl rounded-xl border border-gray-700 bg-gray-900 p-6 text-center shadow-lg">
                         <LoaderCircle className="mx-auto size-7 animate-spin text-[#fb2844]" />
-                        <p className="mt-3 text-base font-semibold text-white">Searching Twitch VODs...</p>
-                        <p className="mt-2 text-sm text-gray-400">
-                          We are matching your TikTok clip against indexed streamer audio.
-                        </p>
-                      </div>
-                    ) : null}
+                            <p className="mt-3 text-base font-semibold text-white">Searching Twitch VODs...</p>
+                            <p className="mt-2 text-sm text-gray-400">
+                          {getStageMessage(activeSearchStage)}
+                            </p>
+                          </div>
+                        ) : null}
 
                     {!submitting && result ? <SearchResultCard result={result} lastSubmittedUrl={lastSubmittedUrl} /> : null}
 

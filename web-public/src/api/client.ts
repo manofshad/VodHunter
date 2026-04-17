@@ -1,4 +1,4 @@
-import { SearchResponse, StreamerListItem } from "./types";
+import { SearchJobCreatedResponse, SearchJobResponse, StreamerListItem } from "./types";
 
 const ENV_API_BASE = import.meta.env.VITE_API_BASE?.trim();
 const DEV_API_BASE = `http://${window.location.hostname}:8000/api`;
@@ -28,7 +28,7 @@ export async function listSearchableStreamers(): Promise<StreamerListItem[]> {
   return parseJson<StreamerListItem[]>(resp);
 }
 
-export async function searchClip(input: SearchClipInput): Promise<SearchResponse> {
+export async function createSearchJob(input: SearchClipInput): Promise<SearchJobCreatedResponse> {
   const form = new FormData();
   form.append("streamer", input.streamer);
   form.append("tiktok_url", input.tiktokUrl);
@@ -37,5 +37,10 @@ export async function searchClip(input: SearchClipInput): Promise<SearchResponse
     method: "POST",
     body: form,
   });
-  return parseJson<SearchResponse>(resp);
+  return parseJson<SearchJobCreatedResponse>(resp);
+}
+
+export async function getSearchJob(searchId: number): Promise<SearchJobResponse> {
+  const resp = await fetch(`${getApiBase()}/search/clip/${searchId}`);
+  return parseJson<SearchJobResponse>(resp);
 }

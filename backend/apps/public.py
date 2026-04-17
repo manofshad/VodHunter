@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from concurrent.futures import ThreadPoolExecutor
 import os
 import sys
 from pathlib import Path
@@ -17,6 +18,7 @@ from backend import config
 from backend import bootstrap_shared
 from backend.routers.health import router as health_router
 from backend.routers.search import router as search_router
+from backend.services.search_jobs import SearchJobService
 
 
 def _configure_cors(app: FastAPI) -> None:
@@ -41,11 +43,24 @@ def create_public_app(enable_lifespan: bool = True) -> FastAPI:
                 store=common_state["store"],
                 max_duration_seconds=config.SEARCH_MAX_DURATION_SECONDS_PUBLIC,
             )
+            search_job_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="public-search")
+            search_job_service = SearchJobService(
+                store=common_state["store"],
+                search_manager=search_state["search_manager"],
+                executor=search_job_executor,
+            )
+            search_job_service.fail_incomplete_public_search_jobs()
 
-            for key, value in {**common_state, **search_state}.items():
+            for key, value in {
+                **common_state,
+                **search_state,
+                "search_job_executor": search_job_executor,
+                "search_job_service": search_job_service,
+            }.items():
                 setattr(app.state, key, value)
 
             yield
+            search_job_executor.shutdown(wait=False)
 
         app = FastAPI(title="VodHunter Public API", lifespan=lifespan)
     else:

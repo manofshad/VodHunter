@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 
 from backend.apps.admin import create_admin_app
 from backend.apps.public import create_public_app
-from search.models import SearchExecutionMetadata, SearchRequestOutcome, SearchResult
+from search.models import SearchExecutionMetadata, SearchJobRecord, SearchRequestOutcome, SearchResult
 
 
 class StubSearchManager:
@@ -16,7 +16,7 @@ class StubSearchManager:
         self.raise_upload: Exception | None = None
         self.raise_url: Exception | None = None
 
-    def search_upload(self, file, streamer: str) -> SearchRequestOutcome:
+    def search_upload(self, file, streamer: str, on_stage_change=None) -> SearchRequestOutcome:
         self.upload_calls += 1
         self.last_streamer = streamer
         self.last_upload_filename = file.filename
@@ -36,7 +36,7 @@ class StubSearchManager:
             clip_filename=file.filename,
         )
 
-    def search_tiktok_url(self, url: str, streamer: str) -> SearchRequestOutcome:
+    def search_tiktok_url(self, url: str, streamer: str, on_stage_change=None) -> SearchRequestOutcome:
         self.url_calls += 1
         self.last_streamer = streamer
         if self.raise_url is not None:
@@ -77,10 +77,30 @@ class StubStore:
         self.logged_requests.append(log)
 
 
+class StubSearchJobService:
+    def __init__(self):
+        self.created_jobs: list[dict[str, object]] = []
+        self.jobs: dict[int, SearchJobRecord] = {}
+
+    def create_public_search_job(self, *, tiktok_url: str, streamer: str, creator_id: int | None) -> int:
+        self.created_jobs.append(
+            {
+                "tiktok_url": tiktok_url,
+                "streamer": streamer,
+                "creator_id": creator_id,
+            }
+        )
+        return 101
+
+    def get_public_search_job(self, search_id: int) -> SearchJobRecord | None:
+        return self.jobs.get(search_id)
+
+
 def build_client(app_factory):
     app = app_factory(enable_lifespan=False)
     app.state.store = StubStore()
     app.state.search_manager = StubSearchManager()
+    app.state.search_job_service = StubSearchJobService()
     return app, TestClient(app)
 
 
@@ -93,14 +113,17 @@ def test_public_search_endpoint_accepts_tiktok_url_only() -> None:
             data={"tiktok_url": "https://www.tiktok.com/@u/video/1", "streamer": "jason"},
         )
 
-    assert response.status_code == 200
-    assert response.json()["profile_image_url"] == "https://cdn/profile.png"
-    assert app.state.search_manager.url_calls == 1
-    assert app.state.search_manager.last_streamer == "jason"
-    assert len(app.state.store.logged_requests) == 1
-    assert app.state.store.logged_requests[0].source_app == "public"
-    assert app.state.store.logged_requests[0].success is True
-    assert app.state.store.logged_requests[0].creator_id == 2
+    assert response.status_code == 202
+    assert response.json() == {"search_id": 101, "status": "queued", "stage": "validating"}
+    assert app.state.search_manager.url_calls == 0
+    assert app.state.search_job_service.created_jobs == [
+        {
+            "tiktok_url": "https://www.tiktok.com/@u/video/1",
+            "streamer": "jason",
+            "creator_id": 2,
+        }
+    ]
+    assert len(app.state.store.logged_requests) == 0
 
 
 def test_public_search_endpoint_rejects_file_upload() -> None:
@@ -115,8 +138,7 @@ def test_public_search_endpoint_rejects_file_upload() -> None:
 
     assert response.status_code == 400
     assert response.json()["detail"]["code"] == "INVALID_SEARCH_INPUT"
-    assert len(app.state.store.logged_requests) == 1
-    assert app.state.store.logged_requests[0].error_code == "INVALID_SEARCH_INPUT"
+    assert app.state.search_job_service.created_jobs == []
 
 
 def test_public_search_endpoint_validates_streamer() -> None:
@@ -130,9 +152,40 @@ def test_public_search_endpoint_validates_streamer() -> None:
 
     assert response.status_code == 400
     assert response.json()["detail"]["code"] == "INVALID_STREAMER"
-    assert len(app.state.store.logged_requests) == 1
-    assert app.state.store.logged_requests[0].error_code == "INVALID_STREAMER"
-    assert app.state.store.logged_requests[0].creator_id is None
+    assert app.state.search_job_service.created_jobs == []
+
+
+def test_public_search_job_endpoint_returns_job_status() -> None:
+    app, client = build_client(create_public_app)
+    app.state.search_job_service.jobs[101] = SearchJobRecord(
+        id=101,
+        status="completed",
+        stage=None,
+        created_at="2026-04-15T00:00:00Z",
+        started_at="2026-04-15T00:00:01Z",
+        finished_at="2026-04-15T00:00:02Z",
+        result=SearchResult(found=False, streamer="jason", reason="url test"),
+        error_code=None,
+        error_message=None,
+    )
+
+    with client:
+        response = client.get("/api/search/clip/101")
+
+    assert response.status_code == 200
+    assert response.json()["search_id"] == 101
+    assert response.json()["status"] == "completed"
+    assert response.json()["result"]["reason"] == "url test"
+
+
+def test_public_search_job_endpoint_returns_404_for_unknown_job() -> None:
+    app, client = build_client(create_public_app)
+
+    with client:
+        response = client.get("/api/search/clip/999")
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "SEARCH_NOT_FOUND"
 
 
 def test_admin_search_endpoint_accepts_tiktok_url() -> None:
