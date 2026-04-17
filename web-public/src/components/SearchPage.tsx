@@ -209,7 +209,7 @@ function SearchResultCard({ result, lastSubmittedUrl }: SearchResultCardProps) {
           )}
         </div>
 
-        <div className="flex flex-col justify-between gap-4">
+        <div className="min-w-0 flex flex-col justify-between gap-4">
           <div>
             <div className="mb-3 flex items-center gap-3">
               <AvatarImage
@@ -222,8 +222,8 @@ function SearchResultCard({ result, lastSubmittedUrl }: SearchResultCardProps) {
               </p>
             </div>
             {resultHref ? (
-              <a href={resultHref} target="_blank" rel="noreferrer" className="group inline-flex items-start gap-3">
-                <h3 className="text-lg font-bold leading-tight text-white transition group-hover:text-gray-100 md:text-[1.5rem]">
+              <a href={resultHref} target="_blank" rel="noreferrer" className="group flex w-full items-start gap-3">
+                <h3 className="min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-lg font-bold leading-tight text-white transition group-hover:text-gray-100 md:text-[1.5rem]">
                   {result.title ?? "Matched Twitch VOD"}
                 </h3>
                 <ExternalLink className="mt-1 size-4 shrink-0 text-gray-400 transition group-hover:text-[#fb2844]" />
