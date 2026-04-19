@@ -47,6 +47,7 @@ web/.vite/
 .vscode/
 *.swp
 *.swo
+.worktrees/
 
 # Project runtime artifacts
 logs/
