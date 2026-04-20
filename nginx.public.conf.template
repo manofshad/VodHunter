@@ -27,6 +27,14 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
+    location /internal/ {
+        proxy_pass ${PUBLIC_API_UPSTREAM};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
     location @search_rate_limited {
         default_type application/json;
         return 429 '{"detail":{"code":"RATE_LIMITED","message":"Too many search requests. Please wait a moment and try again."}}';

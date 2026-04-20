@@ -139,3 +139,41 @@ class TestVectorStoreStreamerScope:
         assert params[7] == 'DOWNLOAD_ERROR'
         assert params[11] is None
         assert params[21] is None
+
+    def test_delete_video_index_removes_fingerprints_for_owned_video(self) -> None:
+        cursor = FakeCursor()
+        cursor._fetchone_results = [(7,)]
+        store = VectorStore.__new__(VectorStore)
+        store._connect = lambda: FakeConnection(cursor)
+
+        deleted = store.delete_video_index(55, actor_creator_id=7)
+
+        assert deleted is True
+        assert "SELECT creator_id" in cursor.executed[0][0]
+        assert cursor.executed[0][1] == (55,)
+        assert cursor.executed[1] == ("DELETE FROM fingerprints WHERE video_id = %s", (55,))
+
+    def test_request_video_reindex_clears_state_and_marks_unprocessed_for_owned_video(self) -> None:
+        cursor = FakeCursor()
+        cursor._fetchone_results = [(7,)]
+        store = VectorStore.__new__(VectorStore)
+        store._connect = lambda: FakeConnection(cursor)
+
+        requested = store.request_video_reindex(55, actor_creator_id=7)
+
+        assert requested is True
+        assert "SELECT creator_id" in cursor.executed[0][0]
+        assert cursor.executed[1] == ("DELETE FROM vod_ingest_state WHERE video_id = %s", (55,))
+        assert cursor.executed[2] == ("DELETE FROM fingerprints WHERE video_id = %s", (55,))
+        assert cursor.executed[3] == ("UPDATE videos SET processed = FALSE WHERE id = %s", (55,))
+
+    def test_request_video_reindex_rejects_non_owner(self) -> None:
+        cursor = FakeCursor()
+        cursor._fetchone_results = [(8,)]
+        store = VectorStore.__new__(VectorStore)
+        store._connect = lambda: FakeConnection(cursor)
+
+        requested = store.request_video_reindex(55, actor_creator_id=7)
+
+        assert requested is False
+        assert len(cursor.executed) == 1

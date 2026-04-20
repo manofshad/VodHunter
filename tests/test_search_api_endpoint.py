@@ -2,6 +2,7 @@ import io
 
 from fastapi.testclient import TestClient
 
+from backend import config
 from backend.apps.admin import create_admin_app
 from backend.apps.public import create_public_app
 from search.models import SearchExecutionMetadata, SearchJobRecord, SearchRequestOutcome, SearchResult
@@ -64,6 +65,8 @@ class StubStore:
             {"name": "jason", "profile_image_url": None},
         ]
         self.logged_requests = []
+        self.deleted_indexes: list[tuple[int, int]] = []
+        self.reindex_requests: list[tuple[int, int]] = []
 
     def list_searchable_streamers(self) -> list[dict[str, str | None]]:
         return list(self.streamers)
@@ -75,6 +78,14 @@ class StubStore:
 
     def log_search_request(self, log) -> None:
         self.logged_requests.append(log)
+
+    def delete_video_index(self, video_id: int, actor_creator_id: int) -> bool:
+        self.deleted_indexes.append((int(video_id), int(actor_creator_id)))
+        return int(video_id) != 404
+
+    def request_video_reindex(self, video_id: int, actor_creator_id: int) -> bool:
+        self.reindex_requests.append((int(video_id), int(actor_creator_id)))
+        return int(video_id) != 404
 
 
 class StubSearchJobService:
@@ -186,6 +197,66 @@ def test_public_search_job_endpoint_returns_404_for_unknown_job() -> None:
 
     assert response.status_code == 404
     assert response.json()["detail"]["code"] == "SEARCH_NOT_FOUND"
+
+
+def test_public_internal_delete_index_endpoint_requires_valid_key_and_calls_store() -> None:
+    app, client = build_client(create_public_app)
+    original_api_key = config.SEARCH_INTERNAL_API_KEY
+    config.SEARCH_INTERNAL_API_KEY = "test-internal-key"
+
+    try:
+        with client:
+            response = client.post(
+                "/internal/videos/13/delete-index",
+                json={"actor_creator_id": 1},
+                headers={"X-Internal-Api-Key": "test-internal-key"},
+            )
+    finally:
+        config.SEARCH_INTERNAL_API_KEY = original_api_key
+
+    assert response.status_code == 200
+    assert response.json() == {"video_id": 13, "status": "deleted"}
+    assert app.state.store.deleted_indexes == [(13, 1)]
+
+
+def test_public_internal_reindex_endpoint_rejects_invalid_key() -> None:
+    app, client = build_client(create_public_app)
+    original_api_key = config.SEARCH_INTERNAL_API_KEY
+    config.SEARCH_INTERNAL_API_KEY = "test-internal-key"
+
+    try:
+        with client:
+            response = client.post(
+                "/internal/videos/13/request-reindex",
+                json={"actor_creator_id": 1},
+                headers={"X-Internal-Api-Key": "wrong-key"},
+            )
+    finally:
+        config.SEARCH_INTERNAL_API_KEY = original_api_key
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Invalid internal API key"}
+    assert app.state.store.reindex_requests == []
+
+
+def test_public_internal_reindex_endpoint_returns_404_when_store_cannot_mutate() -> None:
+    app, client = build_client(create_public_app)
+    original_api_key = config.SEARCH_INTERNAL_API_KEY
+    config.SEARCH_INTERNAL_API_KEY = "test-internal-key"
+
+    try:
+        with client:
+            response = client.post(
+                "/internal/videos/404/request-reindex",
+                json={"actor_creator_id": 1},
+                headers={"X-Internal-Api-Key": "test-internal-key"},
+            )
+    finally:
+        config.SEARCH_INTERNAL_API_KEY = original_api_key
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Video not found"}
+    assert app.state.store.reindex_requests == [(404, 1)]
 
 
 def test_admin_search_endpoint_accepts_tiktok_url() -> None:

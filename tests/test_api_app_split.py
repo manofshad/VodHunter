@@ -28,10 +28,13 @@ class TestApiAppSplit:
         admin_paths = {route.path for route in admin_app.routes}
         assert '/api/health' in public_paths
         assert '/api/search/clip' in public_paths
+        assert '/internal/videos/{video_id}/delete-index' in public_paths
+        assert '/internal/videos/{video_id}/request-reindex' in public_paths
         assert '/api/live/status' not in public_paths
         assert '/api/twitch/eventsub' not in public_paths
         assert '/api/health' in admin_paths
         assert '/api/search/clip' in admin_paths
+        assert '/internal/videos/{video_id}/delete-index' not in admin_paths
         assert '/api/live/status' in admin_paths
         assert '/api/live/start' in admin_paths
         assert '/api/live/stop' in admin_paths

@@ -41,6 +41,7 @@ MODAL_SEARCH_APP_NAME = os.getenv("MODAL_SEARCH_APP_NAME", "").strip()
 MODAL_SEARCH_FUNCTION_NAME = os.getenv("MODAL_SEARCH_FUNCTION_NAME", "").strip()
 MODAL_SEARCH_TIMEOUT_SECONDS = float(os.getenv("MODAL_SEARCH_TIMEOUT_SECONDS", "60"))
 MODAL_SEARCH_MODEL_NAME = os.getenv("MODAL_SEARCH_MODEL_NAME", "").strip()
+SEARCH_INTERNAL_API_KEY = os.getenv("SEARCH_INTERNAL_API_KEY", "").strip()
 
 
 def validate_storage_config() -> None:

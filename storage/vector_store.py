@@ -556,6 +556,58 @@ class VectorStore:
             str(row[5]) if row[5] else None,
         )
 
+    def delete_video_index(self, video_id: int, actor_creator_id: int) -> bool:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT creator_id
+                    FROM videos
+                    WHERE id = %s
+                    LIMIT 1
+                    """,
+                    (int(video_id),),
+                )
+                row = cur.fetchone()
+                if row is None or int(row[0]) != int(actor_creator_id):
+                    return False
+
+                cur.execute(
+                    "DELETE FROM fingerprints WHERE video_id = %s",
+                    (int(video_id),),
+                )
+        return True
+
+    def request_video_reindex(self, video_id: int, actor_creator_id: int) -> bool:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT creator_id
+                    FROM videos
+                    WHERE id = %s
+                    LIMIT 1
+                    """,
+                    (int(video_id),),
+                )
+                row = cur.fetchone()
+                if row is None or int(row[0]) != int(actor_creator_id):
+                    return False
+
+                cur.execute(
+                    "DELETE FROM vod_ingest_state WHERE video_id = %s",
+                    (int(video_id),),
+                )
+                cur.execute(
+                    "DELETE FROM fingerprints WHERE video_id = %s",
+                    (int(video_id),),
+                )
+                cur.execute(
+                    "UPDATE videos SET processed = FALSE WHERE id = %s",
+                    (int(video_id),),
+                )
+        return True
+
 
     def list_live_sessions(self, limit: int, offset: int) -> list[dict[str, Any]]:
         with self._connect() as conn:
