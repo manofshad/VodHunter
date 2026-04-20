@@ -14,6 +14,36 @@ from search.models import SearchJobRecord, SearchRequestLog, SearchRequestOutcom
 logger = logging.getLogger("uvicorn.error")
 
 
+VIDEO_STATUS_INDEXING = "indexing"
+VIDEO_STATUS_SEARCHABLE = "searchable"
+VIDEO_STATUS_DELETED = "deleted"
+VIDEO_STATUS_REINDEX_REQUESTED = "reindex_requested"
+VIDEO_STATUSES = (
+    VIDEO_STATUS_INDEXING,
+    VIDEO_STATUS_SEARCHABLE,
+    VIDEO_STATUS_DELETED,
+    VIDEO_STATUS_REINDEX_REQUESTED,
+)
+
+
+class VideoMutationError(Exception):
+    pass
+
+
+class VideoNotFoundError(VideoMutationError):
+    pass
+
+
+class VideoOwnerMismatchError(VideoMutationError):
+    pass
+
+
+class InvalidVideoStateTransitionError(VideoMutationError):
+    def __init__(self, current_status: str):
+        self.current_status = str(current_status)
+        super().__init__(f"Cannot apply requested transition from status '{self.current_status}'")
+
+
 class VectorStore:
     def __init__(
         self,
@@ -46,6 +76,18 @@ class VectorStore:
         conn = self._psycopg.connect(self.database_url)
         self._register_vector(conn)
         return conn
+
+    def _normalize_video_status(self, status: str) -> str:
+        normalized_status = str(status).strip().lower()
+        if normalized_status not in VIDEO_STATUSES:
+            raise ValueError(f"Invalid video status: {status}")
+        return normalized_status
+
+    def _status_from_processed(self, processed: bool) -> str:
+        return VIDEO_STATUS_SEARCHABLE if bool(processed) else VIDEO_STATUS_INDEXING
+
+    def _processed_from_status(self, status: str) -> bool:
+        return self._normalize_video_status(status) != VIDEO_STATUS_INDEXING
 
     def ensure_schema_ready(self) -> None:
         with self._connect() as conn:
@@ -98,6 +140,7 @@ class VectorStore:
                     ("creators", "profile_image_url"),
                     ("videos", "thumbnail_url"),
                     ("videos", "streamed_at"),
+                    ("videos", "status"),
                     ("fingerprint_embeddings", "creator_id"),
                     ("search_requests", "job_status"),
                     ("search_requests", "job_stage"),
@@ -306,16 +349,23 @@ class VectorStore:
         processed: bool,
         thumbnail_url: str | None = None,
         streamed_at: Any = None,
+        status: str | None = None,
     ) -> int:
+        resolved_status = (
+            self._normalize_video_status(status)
+            if status is not None
+            else self._status_from_processed(processed)
+        )
+        resolved_processed = self._processed_from_status(resolved_status)
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO videos (creator_id, url, title, thumbnail_url, processed, streamed_at)
-                    VALUES (%s, %s, %s, %s, %s, %s)
+                    INSERT INTO videos (creator_id, url, title, thumbnail_url, processed, streamed_at, status)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
                     """,
-                    (int(creator_id), url, title, thumbnail_url, bool(processed), streamed_at),
+                    (int(creator_id), url, title, thumbnail_url, resolved_processed, streamed_at, resolved_status),
                 )
                 row = cur.fetchone()
         if row is None:
@@ -330,6 +380,7 @@ class VectorStore:
         thumbnail_url: str | None = None,
         processed: bool | None = None,
         streamed_at: Any = None,
+        status: str | None = None,
     ) -> None:
         assignments: list[str] = []
         values: list[Any] = []
@@ -340,9 +391,18 @@ class VectorStore:
         if thumbnail_url is not None:
             assignments.append("thumbnail_url = %s")
             values.append(thumbnail_url)
-        if processed is not None:
+        if status is not None:
+            resolved_status = self._normalize_video_status(status)
+            assignments.append("status = %s")
+            values.append(resolved_status)
+            assignments.append("processed = %s")
+            values.append(self._processed_from_status(resolved_status))
+        elif processed is not None:
+            resolved_status = self._status_from_processed(processed)
             assignments.append("processed = %s")
             values.append(bool(processed))
+            assignments.append("status = %s")
+            values.append(resolved_status)
         if streamed_at is not None:
             assignments.append("streamed_at = %s")
             values.append(streamed_at)
@@ -359,12 +419,161 @@ class VectorStore:
                 )
 
     def mark_video_processed(self, video_id: int, processed: bool = True) -> None:
+        resolved_status = self._status_from_processed(processed)
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "UPDATE videos SET processed = %s WHERE id = %s",
-                    (bool(processed), int(video_id)),
+                    "UPDATE videos SET processed = %s, status = %s WHERE id = %s",
+                    (bool(processed), resolved_status, int(video_id)),
                 )
+
+    def get_video_status(self, video_id: int) -> str | None:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT status
+                    FROM videos
+                    WHERE id = %s
+                    LIMIT 1
+                    """,
+                    (int(video_id),),
+                )
+                row = cur.fetchone()
+        if row is None or row[0] is None:
+            return None
+        return self._normalize_video_status(str(row[0]))
+
+    def update_video_status(self, video_id: int, status: str) -> None:
+        resolved_status = self._normalize_video_status(status)
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE videos SET status = %s, processed = %s WHERE id = %s",
+                    (resolved_status, self._processed_from_status(resolved_status), int(video_id)),
+                )
+
+    def _lock_video_for_mutation(self, cur, video_id: int) -> tuple[int, str]:
+        cur.execute(
+            """
+            SELECT creator_id, status
+            FROM videos
+            WHERE id = %s
+            LIMIT 1
+            FOR UPDATE
+            """,
+            (int(video_id),),
+        )
+        row = cur.fetchone()
+        if row is None:
+            raise VideoNotFoundError()
+        return int(row[0]), self._normalize_video_status(str(row[1]))
+
+    def delete_video_index(self, video_id: int, actor_creator_id: int) -> str:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                owner_creator_id, current_status = self._lock_video_for_mutation(cur, video_id)
+                if owner_creator_id != int(actor_creator_id):
+                    raise VideoOwnerMismatchError()
+                if current_status == VIDEO_STATUS_DELETED:
+                    return VIDEO_STATUS_DELETED
+                if current_status != VIDEO_STATUS_SEARCHABLE:
+                    raise InvalidVideoStateTransitionError(current_status)
+
+                cur.execute(
+                    """
+                    DELETE FROM fingerprint_embeddings
+                    WHERE fingerprint_id IN (
+                        SELECT id
+                        FROM fingerprints
+                        WHERE video_id = %s
+                    )
+                    """,
+                    (int(video_id),),
+                )
+                cur.execute(
+                    "DELETE FROM fingerprints WHERE video_id = %s",
+                    (int(video_id),),
+                )
+                cur.execute(
+                    "DELETE FROM vod_ingest_state WHERE video_id = %s",
+                    (int(video_id),),
+                )
+                cur.execute(
+                    "UPDATE videos SET status = %s, processed = %s WHERE id = %s",
+                    (
+                        VIDEO_STATUS_DELETED,
+                        self._processed_from_status(VIDEO_STATUS_DELETED),
+                        int(video_id),
+                    ),
+                )
+        return VIDEO_STATUS_DELETED
+
+    def request_video_reindex(self, video_id: int, actor_creator_id: int) -> str:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                owner_creator_id, current_status = self._lock_video_for_mutation(cur, video_id)
+                if owner_creator_id != int(actor_creator_id):
+                    raise VideoOwnerMismatchError()
+                if current_status == VIDEO_STATUS_REINDEX_REQUESTED:
+                    return VIDEO_STATUS_REINDEX_REQUESTED
+                if current_status != VIDEO_STATUS_DELETED:
+                    raise InvalidVideoStateTransitionError(current_status)
+
+                cur.execute(
+                    "DELETE FROM vod_ingest_state WHERE video_id = %s",
+                    (int(video_id),),
+                )
+                cur.execute(
+                    "UPDATE videos SET status = %s, processed = %s WHERE id = %s",
+                    (
+                        VIDEO_STATUS_REINDEX_REQUESTED,
+                        self._processed_from_status(VIDEO_STATUS_REINDEX_REQUESTED),
+                        int(video_id),
+                    ),
+                )
+        return VIDEO_STATUS_REINDEX_REQUESTED
+
+    def get_video_with_owner(
+        self,
+        video_id: int,
+    ) -> tuple[int, int, str, str, str | None, str, bool, Any, str, str | None] | None:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        videos.id,
+                        videos.creator_id,
+                        videos.url,
+                        videos.title,
+                        videos.thumbnail_url,
+                        videos.status,
+                        videos.processed,
+                        videos.streamed_at,
+                        creators.name,
+                        creators.profile_image_url
+                    FROM videos
+                    JOIN creators ON creators.id = videos.creator_id
+                    WHERE videos.id = %s
+                    """,
+                    (int(video_id),),
+                )
+                row = cur.fetchone()
+        if row is None:
+            return None
+        return (
+            int(row[0]),
+            int(row[1]),
+            str(row[2]),
+            str(row[3]),
+            str(row[4]) if row[4] else None,
+            self._normalize_video_status(str(row[5])),
+            bool(row[6]),
+            row[7],
+            str(row[8]),
+            str(row[9]) if row[9] else None,
+        )
 
     def get_vod_ingest_state(self, vod_platform_id: str) -> dict | None:
         with self._connect() as conn:
@@ -533,27 +742,16 @@ class VectorStore:
         return [(int(r[0]), int(r[1]), float(r[2])) for r in rows]
 
     def get_video_with_creator(self, video_id: int) -> tuple[int, str, str, str, str | None, str | None] | None:
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT videos.id, videos.url, videos.title, creators.name, videos.thumbnail_url, creators.profile_image_url
-                    FROM videos
-                    JOIN creators ON creators.id = videos.creator_id
-                    WHERE videos.id = %s
-                    """,
-                    (int(video_id),),
-                )
-                row = cur.fetchone()
+        row = self.get_video_with_owner(video_id)
         if row is None:
             return None
         return (
             int(row[0]),
-            str(row[1]),
             str(row[2]),
             str(row[3]),
+            str(row[8]),
             str(row[4]) if row[4] else None,
-            str(row[5]) if row[5] else None,
+            str(row[9]) if row[9] else None,
         )
 
     def delete_video_index(self, video_id: int, actor_creator_id: int) -> bool:

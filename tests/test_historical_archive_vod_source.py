@@ -10,6 +10,7 @@ class FakeStore:
         self.creators: dict[str, tuple[int, str, str, str | None]] = {}
         self.videos_by_url: dict[str, tuple[int, int, str, str, str | None, bool]] = {}
         self.vod_state: dict[str, dict] = {}
+        self.video_status_by_id: dict[int, str | None] = {}
 
     def create_or_get_creator(self, name: str, url: str, profile_image_url: str | None = None) -> int:
         existing = self.creators.get(url)
@@ -23,23 +24,38 @@ class FakeStore:
     def get_video_by_url(self, url: str):
         return self.videos_by_url.get(url)
 
-    def create_video(self, creator_id: int, url: str, title: str, processed: bool, thumbnail_url: str | None=None, streamed_at=None) -> int:
+    def create_video(self, creator_id: int, url: str, title: str, processed: bool, thumbnail_url: str | None=None, streamed_at=None, status: str | None = None) -> int:
         self._video_id += 1
+        resolved_status = status if status is not None else ('searchable' if bool(processed) else 'indexing')
         row = (self._video_id, int(creator_id), url, title, thumbnail_url, bool(processed), streamed_at)
         self.videos_by_url[url] = row
+        self.video_status_by_id[self._video_id] = resolved_status
         return self._video_id
 
-    def update_video_metadata(self, video_id: int, *, title: str | None=None, thumbnail_url: str | None=None, processed: bool | None=None, streamed_at=None) -> None:
+    def update_video_metadata(self, video_id: int, *, title: str | None=None, thumbnail_url: str | None=None, processed: bool | None=None, streamed_at=None, status: str | None = None) -> None:
         for url, row in list(self.videos_by_url.items()):
             if int(row[0]) != int(video_id):
                 continue
             self.videos_by_url[url] = (row[0], row[1], row[2], title if title is not None else row[3], thumbnail_url if thumbnail_url is not None else row[4], bool(processed) if processed is not None else row[5], streamed_at if streamed_at is not None else row[6])
+            if status is not None:
+                self.video_status_by_id[int(video_id)] = status
             return
 
     def mark_video_processed(self, video_id: int, processed: bool=True) -> None:
         for url, row in list(self.videos_by_url.items()):
             if int(row[0]) == int(video_id):
                 self.videos_by_url[url] = (row[0], row[1], row[2], row[3], row[4], bool(processed), row[6])
+                return
+
+    def get_video_status(self, video_id: int):
+        return self.video_status_by_id.get(int(video_id))
+
+    def update_video_status(self, video_id: int, status: str) -> None:
+        self.video_status_by_id[int(video_id)] = status
+        processed = status != 'indexing'
+        for url, row in list(self.videos_by_url.items()):
+            if int(row[0]) == int(video_id):
+                self.videos_by_url[url] = (row[0], row[1], row[2], row[3], row[4], processed, row[6])
                 return
 
     def get_vod_ingest_state(self, vod_platform_id: str):
@@ -74,6 +90,7 @@ class TestHistoricalArchiveVODSource:
             source.start()
             assert store.creators['https://twitch.tv/alice'][3] == 'https://cdn/alice.png'
             assert source.ingest_cursor_seconds == 120
+            assert store.get_video_status(video_id) == 'indexing'
             chunk = source.next_chunk()
             assert chunk is not None
             assert chunk is not None
@@ -103,5 +120,72 @@ class TestHistoricalArchiveVODSource:
             assert row is not None
             assert row is not None
             assert row[5]
+            assert store.get_video_status(source.video_id) == 'searchable'
             assert 'vod-1' not in store.vod_state
             assert source.is_finished
+
+    def test_reindex_requested_vod_clears_stale_cursor_and_restarts_from_zero(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = FakeStore()
+            creator_id = store.create_or_get_creator('alice', 'https://twitch.tv/alice')
+            video_id = store.create_video(
+                creator_id=creator_id,
+                url='https://www.twitch.tv/videos/vod-1',
+                title='Old',
+                thumbnail_url=None,
+                processed=True,
+                status='reindex_requested',
+            )
+            store.upsert_vod_ingest_state('vod-1', video_id, 'alice', 120, 180)
+            source = HistoricalArchiveVODSource(
+                streamer='alice',
+                vod_metadata=self._make_vod(),
+                store=store,
+                creator_metadata={'profile_image_url': 'https://cdn/alice.png'},
+                chunk_seconds=60,
+                temp_dir=f'{tmp}/chunks',
+            )
+
+            def fake_extract_chunk(start_seconds: int, duration_seconds: int) -> str:
+                out = os.path.join(source.temp_dir, f'chunk_{start_seconds}_{duration_seconds}.wav')
+                os.makedirs(source.temp_dir, exist_ok=True)
+                with open(out, 'wb') as handle:
+                    handle.write(b'fake')
+                return out
+
+            source._extract_chunk = fake_extract_chunk
+            source.start()
+
+            assert source.ingest_cursor_seconds == 0
+            assert store.get_video_status(video_id) == 'indexing'
+            assert store.vod_state['vod-1']['last_ingested_seconds'] == 0
+
+    def test_stop_does_not_commit_pending_progress(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = FakeStore()
+            source = HistoricalArchiveVODSource(
+                streamer='alice',
+                vod_metadata=self._make_vod(),
+                store=store,
+                creator_metadata={'profile_image_url': 'https://cdn/alice.png'},
+                chunk_seconds=60,
+                temp_dir=f'{tmp}/chunks',
+            )
+
+            def fake_extract_chunk(start_seconds: int, duration_seconds: int) -> str:
+                out = os.path.join(source.temp_dir, f'chunk_{start_seconds}_{duration_seconds}.wav')
+                os.makedirs(source.temp_dir, exist_ok=True)
+                with open(out, 'wb') as handle:
+                    handle.write(b'fake')
+                return out
+
+            source._extract_chunk = fake_extract_chunk
+            source.start()
+            chunk = source.next_chunk()
+
+            assert chunk is not None
+            assert store.vod_state['vod-1']['last_ingested_seconds'] == 0
+
+            source.stop()
+
+            assert store.vod_state['vod-1']['last_ingested_seconds'] == 0
