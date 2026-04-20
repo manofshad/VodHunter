@@ -84,15 +84,22 @@ class HistoricalArchiveVODSource(AudioSource):
                 thumbnail_url=self._vod_thumbnail_url,
                 processed=False,
                 streamed_at=self._streamed_at,
+                status="indexing",
             )
         else:
             self.video_id = int(existing_video[0])
+            existing_status = None
+            get_video_status = getattr(self.store, "get_video_status", None)
+            if callable(get_video_status):
+                existing_status = get_video_status(self.video_id)
+            if existing_status == "reindex_requested":
+                self.store.delete_vod_ingest_state(self._vod_platform_id)
             self.store.update_video_metadata(
                 self.video_id,
                 title=self._vod_title,
                 thumbnail_url=self._vod_thumbnail_url,
-                processed=False,
                 streamed_at=self._streamed_at,
+                status="indexing",
             )
 
         state = self.store.get_vod_ingest_state(self._vod_platform_id)
@@ -135,8 +142,11 @@ class HistoricalArchiveVODSource(AudioSource):
         )
 
     def stop(self) -> None:
-        self._commit_pending_progress()
         self._finished = True
+        self._pending_commit_end_seconds = None
+        if self._pending_chunk_path and os.path.exists(self._pending_chunk_path):
+            os.remove(self._pending_chunk_path)
+        self._pending_chunk_path = None
         if os.path.exists(self.temp_dir):
             shutil.rmtree(self.temp_dir, ignore_errors=True)
 
@@ -238,7 +248,11 @@ class HistoricalArchiveVODSource(AudioSource):
     def _finalize(self) -> None:
         self._commit_pending_progress()
         if self.video_id is not None:
-            self.store.mark_video_processed(self.video_id, processed=True)
+            update_video_status = getattr(self.store, "update_video_status", None)
+            if callable(update_video_status):
+                update_video_status(self.video_id, "searchable")
+            else:
+                self.store.mark_video_processed(self.video_id, processed=True)
         self.store.delete_vod_ingest_state(self._vod_platform_id)
         self._finished = True
         self._emit_progress(

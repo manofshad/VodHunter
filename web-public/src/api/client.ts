@@ -1,7 +1,7 @@
 import { SearchJobCreatedResponse, SearchJobResponse, StreamerListItem } from "./types";
 
 const ENV_API_BASE = import.meta.env.VITE_API_BASE?.trim();
-const DEV_API_BASE = `http://${window.location.hostname}:8000/api`;
+const DEV_API_BASE = `http://${window.location.hostname}:8001/api`;
 const PROD_API_BASE = "/api";
 const API_BASE = ENV_API_BASE || (import.meta.env.DEV ? DEV_API_BASE : PROD_API_BASE);
 

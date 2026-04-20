@@ -17,6 +17,7 @@ load_dotenv(Path(ROOT_DIR) / ".env")
 from backend import config
 from backend import bootstrap_shared
 from backend.routers.health import router as health_router
+from backend.routers.internal_videos import router as internal_videos_router
 from backend.routers.search import router as search_router
 from backend.services.search_jobs import SearchJobService
 
@@ -69,6 +70,7 @@ def create_public_app(enable_lifespan: bool = True) -> FastAPI:
     _configure_cors(app)
     app.include_router(health_router)
     app.include_router(search_router)
+    app.include_router(internal_videos_router)
     return app
 
 

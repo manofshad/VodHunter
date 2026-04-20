@@ -24,12 +24,21 @@ class FakeStore:
     def __init__(self):
         self.videos_by_url: dict[str, tuple[int, int, str, str, str | None, bool]] = {}
         self.vod_state: dict[str, dict] = {}
+        self.video_status_by_id: dict[int, str | None] = {}
+        self.deleted_vod_state_ids: list[str] = []
 
     def get_video_by_url(self, url: str):
         return self.videos_by_url.get(url)
 
+    def get_video_status(self, video_id: int):
+        return self.video_status_by_id.get(int(video_id))
+
     def get_vod_ingest_state(self, vod_platform_id: str):
         return self.vod_state.get(vod_platform_id)
+
+    def delete_vod_ingest_state(self, vod_platform_id: str) -> None:
+        self.deleted_vod_state_ids.append(vod_platform_id)
+        self.vod_state.pop(vod_platform_id, None)
 
 class FakeSource:
 
@@ -93,6 +102,118 @@ class TestRunBackfillIngest:
         assert any((line.startswith('starting vod 1/3 vod=resume') for line in logs))
         assert any((line.startswith('skip processed vod=processed') for line in logs))
         assert any((line.startswith('failed vod=fail') for line in logs))
+
+    def test_skips_deleted_and_restarts_reindex_requested_vod(self) -> None:
+        store = FakeStore()
+        store.videos_by_url['https://www.twitch.tv/videos/deleted'] = (
+            1,
+            1,
+            'https://www.twitch.tv/videos/deleted',
+            'Deleted',
+            None,
+            True,
+            None,
+        )
+        store.video_status_by_id[1] = 'deleted'
+        store.videos_by_url['https://www.twitch.tv/videos/reindex'] = (
+            2,
+            1,
+            'https://www.twitch.tv/videos/reindex',
+            'Needs reindex',
+            None,
+            True,
+            None,
+        )
+        store.video_status_by_id[2] = 'reindex_requested'
+        store.vod_state['reindex'] = {
+            'vod_platform_id': 'reindex',
+            'video_id': 2,
+            'streamer': 'alice',
+            'last_ingested_seconds': 90,
+            'last_seen_duration_seconds': 180,
+            'updated_at': 'now',
+        }
+        monitor = FakeMonitor(
+            [
+                {'id': 'deleted', 'url': 'https://www.twitch.tv/videos/deleted'},
+                {'id': 'reindex', 'url': 'https://www.twitch.tv/videos/reindex'},
+            ]
+        )
+        logs: list[str] = []
+        seen_vods: list[str] = []
+
+        def source_factory(**kwargs):
+            seen_vods.append(kwargs['vod_metadata']['id'])
+            return FakeSource(**kwargs)
+
+        result = run_backfill_ingest(
+            'alice',
+            7,
+            monitor=monitor,
+            build_store=lambda: self._build_state(store),
+            build_ingest=lambda: {'embedder': object()},
+            source_factory=source_factory,
+            session_factory=FakeSession,
+            out=logs.append,
+        )
+
+        assert seen_vods == ['reindex']
+        assert result.ingested == 1
+        assert result.resumed == 0
+        assert result.skipped == 1
+        assert store.deleted_vod_state_ids == ['reindex']
+        assert not any(line.startswith('resume vod=reindex') for line in logs)
+        assert any(line.startswith('skip deleted vod=deleted') for line in logs)
+        assert any(line.startswith('starting vod 2/2 vod=reindex') and 'cursor=0' in line for line in logs)
+
+    def test_resumes_indexing_vod_when_state_exists(self) -> None:
+        store = FakeStore()
+        store.videos_by_url['https://www.twitch.tv/videos/resume-indexing'] = (
+            3,
+            1,
+            'https://www.twitch.tv/videos/resume-indexing',
+            'Resume indexing',
+            None,
+            False,
+            None,
+        )
+        store.video_status_by_id[3] = 'indexing'
+        store.vod_state['resume-indexing'] = {
+            'vod_platform_id': 'resume-indexing',
+            'video_id': 3,
+            'streamer': 'alice',
+            'last_ingested_seconds': 30,
+            'last_seen_duration_seconds': 180,
+            'updated_at': 'now',
+        }
+        monitor = FakeMonitor(
+            [
+                {'id': 'resume-indexing', 'url': 'https://www.twitch.tv/videos/resume-indexing'},
+            ]
+        )
+        logs: list[str] = []
+        seen_vods: list[str] = []
+
+        def source_factory(**kwargs):
+            seen_vods.append(kwargs['vod_metadata']['id'])
+            return FakeSource(**kwargs)
+
+        result = run_backfill_ingest(
+            'alice',
+            7,
+            monitor=monitor,
+            build_store=lambda: self._build_state(store),
+            build_ingest=lambda: {'embedder': object()},
+            source_factory=source_factory,
+            session_factory=FakeSession,
+            out=logs.append,
+        )
+
+        assert seen_vods == ['resume-indexing']
+        assert result.ingested == 1
+        assert result.resumed == 1
+        assert not any(line.startswith('skip indexing vod=resume-indexing') for line in logs)
+        assert any(line.startswith('resume vod=resume-indexing cursor=30') for line in logs)
 
     def test_main_returns_non_zero_on_failure(self) -> None:
         import runners.run_backfill_ingest as module

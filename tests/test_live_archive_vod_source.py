@@ -53,6 +53,7 @@ class FakeStore:
         self.creators: dict[str, tuple[int, str, str, str | None]] = {}
         self.videos_by_url: dict[str, tuple[int, int, str, str, str | None, bool]] = {}
         self.vod_state: dict[str, dict] = {}
+        self.video_status_by_id: dict[int, str | None] = {}
         self.metadata_updates: list[dict[str, object]] = []
         self.creator_metadata_updates: list[dict[str, object]] = []
 
@@ -87,10 +88,11 @@ class FakeStore:
     def get_video_by_url(self, url: str):
         return self.videos_by_url.get(url)
 
-    def create_video(self, creator_id: int, url: str, title: str, processed: bool, thumbnail_url: str | None=None, streamed_at=None) -> int:
+    def create_video(self, creator_id: int, url: str, title: str, processed: bool, thumbnail_url: str | None=None, streamed_at=None, status: str | None = None) -> int:
         self._video_id += 1
         row = (self._video_id, int(creator_id), url, title, thumbnail_url, bool(processed), streamed_at)
         self.videos_by_url[url] = row
+        self.video_status_by_id[self._video_id] = status
         return self._video_id
 
     def mark_video_processed(self, video_id: int, processed: bool=True) -> None:
@@ -99,20 +101,45 @@ class FakeStore:
                 self.videos_by_url[url] = (row[0], row[1], row[2], row[3], row[4], bool(processed), row[6])
                 return
 
-    def update_video_metadata(self, video_id: int, *, title: str | None=None, thumbnail_url: str | None=None, processed: bool | None=None, streamed_at=None) -> None:
+    def update_video_metadata(self, video_id: int, *, title: str | None=None, thumbnail_url: str | None=None, processed: bool | None=None, streamed_at=None, status: str | None = None) -> None:
         self.metadata_updates.append(
             {
                 'video_id': int(video_id),
                 'title': title,
                 'thumbnail_url': thumbnail_url,
                 'processed': processed,
+                'status': status,
             }
         )
         for url, row in list(self.videos_by_url.items()):
             if int(row[0]) != int(video_id):
                 continue
-            self.videos_by_url[url] = (row[0], row[1], row[2], title if title is not None else row[3], thumbnail_url if thumbnail_url is not None else row[4], bool(processed) if processed is not None else row[5], row[6])
+            if status is not None:
+                self.video_status_by_id[int(video_id)] = status
+            resolved_processed = bool(processed) if processed is not None else row[5]
+            if status is not None:
+                resolved_processed = status != 'indexing'
+            self.videos_by_url[url] = (
+                row[0],
+                row[1],
+                row[2],
+                title if title is not None else row[3],
+                thumbnail_url if thumbnail_url is not None else row[4],
+                resolved_processed,
+                row[6],
+            )
             return
+
+    def get_video_status(self, video_id: int):
+        return self.video_status_by_id.get(int(video_id))
+
+    def update_video_status(self, video_id: int, status: str) -> None:
+        self.video_status_by_id[int(video_id)] = status
+        processed = status != 'indexing'
+        for url, row in list(self.videos_by_url.items()):
+            if int(row[0]) == int(video_id):
+                self.videos_by_url[url] = (row[0], row[1], row[2], row[3], row[4], processed, row[6])
+                return
 
     def get_vod_ingest_state(self, vod_platform_id: str):
         return self.vod_state.get(vod_platform_id)
@@ -150,6 +177,8 @@ class TestLiveArchiveVODSource:
             source = self._make_source(tmp, live_sequence=[True, True, True])
             source.start()
             assert source.store.creators['https://twitch.tv/alice'][3] == 'https://static-cdn.jtvnw.net/jtv_user_pictures/alice.png'
+            assert source.video_id is not None
+            assert source.store.get_video_status(source.video_id) == 'indexing'
             chunk1 = source.next_chunk()
             assert chunk1 is not None
             assert source.ingest_cursor_seconds == 0
@@ -173,12 +202,20 @@ class TestLiveArchiveVODSource:
             assert row is not None
             assert row[4] == 'https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg'
             assert row[5]
+            assert source.store.get_video_status(source.video_id) == 'searchable'
 
     def test_existing_video_metadata_is_refreshed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             source = self._make_source(tmp, live_sequence=[True])
             existing_creator_id = source.store.create_or_get_creator('alice', 'https://twitch.tv/alice')
-            source.store.create_video(creator_id=existing_creator_id, url='https://www.twitch.tv/videos/vod-1', title='Old title', thumbnail_url=None, processed=True)
+            source.store.create_video(
+                creator_id=existing_creator_id,
+                url='https://www.twitch.tv/videos/vod-1',
+                title='Old title',
+                thumbnail_url=None,
+                processed=True,
+                status=None,
+            )
             source.start()
             row = source.store.get_video_by_url('https://www.twitch.tv/videos/vod-1')
             assert row is not None
@@ -191,15 +228,100 @@ class TestLiveArchiveVODSource:
                     'video_id': source.video_id,
                     'title': None,
                     'thumbnail_url': None,
-                    'processed': False,
+                    'processed': None,
+                    'status': 'indexing',
                 },
                 {
                     'video_id': source.video_id,
                     'title': 'Live stream',
                     'thumbnail_url': 'https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg',
                     'processed': None,
+                    'status': None,
                 },
             ]
+
+    def test_deleted_existing_video_is_not_claimed_for_live_ingest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = self._make_source(tmp, live_sequence=[True, False, False])
+            existing_creator_id = source.store.create_or_get_creator('alice', 'https://twitch.tv/alice')
+            video_id = source.store.create_video(
+                creator_id=existing_creator_id,
+                url='https://www.twitch.tv/videos/vod-1',
+                title='Deleted title',
+                thumbnail_url=None,
+                processed=True,
+                status='deleted',
+            )
+            source.start()
+
+            assert source.video_id is None
+            assert source.store.get_video_status(video_id) == 'deleted'
+            assert source.store.metadata_updates == []
+
+    def test_searchable_existing_video_is_not_reclaimed_for_live_ingest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = self._make_source(tmp, live_sequence=[True, False, False])
+            existing_creator_id = source.store.create_or_get_creator('alice', 'https://twitch.tv/alice')
+            video_id = source.store.create_video(
+                creator_id=existing_creator_id,
+                url='https://www.twitch.tv/videos/vod-1',
+                title='Searchable title',
+                thumbnail_url=None,
+                processed=True,
+                status='searchable',
+            )
+            source.start()
+
+            assert source.video_id is None
+            assert source.is_finished
+            assert source.store.get_video_status(video_id) == 'searchable'
+            assert source.store.metadata_updates == []
+
+    def test_inflight_searchable_status_stops_live_ingest_without_finalize(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = self._make_source(tmp, live_sequence=[True, True])
+            source.start()
+
+            assert source.video_id is not None
+            source.store.update_video_status(source.video_id, 'searchable')
+
+            chunk = source.next_chunk()
+
+            assert chunk is None
+            assert source.video_id is None
+            assert source.is_finished
+            assert source.store.metadata_updates == []
+
+    def test_switching_to_new_vod_resets_duration_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = self._make_source(
+                tmp,
+                live_sequence=[True, True],
+                vod_sequence=[
+                    {
+                        'id': 'vod-1',
+                        'url': 'https://www.twitch.tv/videos/vod-1',
+                        'title': 'First VOD',
+                        'thumbnail_url': 'https://static-cdn.jtvnw.net/cf_vods/first.jpg',
+                        'duration_seconds': 300,
+                    },
+                    {
+                        'id': 'vod-2',
+                        'url': 'https://www.twitch.tv/videos/vod-2',
+                        'title': 'Second VOD',
+                        'thumbnail_url': 'https://static-cdn.jtvnw.net/cf_vods/second.jpg',
+                        'duration_seconds': 120,
+                    },
+                ],
+            )
+            source.start()
+            assert source._last_seen_duration_seconds == 300
+
+            source._last_refresh_at = 0.0
+            source._refresh_state(force=True)
+
+            assert source.current_vod_url == 'https://www.twitch.tv/videos/vod-2'
+            assert source._last_seen_duration_seconds == 120
 
     def test_refresh_updates_creator_profile_image_when_it_changes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -286,6 +408,7 @@ class TestLiveArchiveVODSource:
                     'title': 'Live stream',
                     'thumbnail_url': 'https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg',
                     'processed': None,
+                    'status': None,
                 },
             ]
 
@@ -366,5 +489,19 @@ class TestLiveArchiveVODSource:
                     'title': 'Updated live title',
                     'thumbnail_url': None,
                     'processed': None,
+                    'status': None,
                 },
             ]
+
+    def test_stop_does_not_commit_pending_progress(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = self._make_source(tmp, live_sequence=[True, True])
+            source.start()
+            chunk = source.next_chunk()
+
+            assert chunk is not None
+            assert source.store.vod_state['vod-1']['last_ingested_seconds'] == 0
+
+            source.stop()
+
+            assert source.store.vod_state['vod-1']['last_ingested_seconds'] == 0
