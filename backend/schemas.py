@@ -106,3 +106,12 @@ class SearchJobResponse(BaseModel):
     finished_at: str | None = None
     result: SearchResponse | None = None
     error: SearchJobError | None = None
+
+
+class InternalVideoMutationRequest(BaseModel):
+    actor_creator_id: int = Field(gt=0)
+
+
+class InternalVideoMutationResponse(BaseModel):
+    video_id: int
+    status: Literal["deleted", "reindex_requested"]

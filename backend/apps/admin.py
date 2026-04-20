@@ -18,6 +18,7 @@ from backend import bootstrap_admin, bootstrap_ingest, bootstrap_shared
 from backend.routers.admin_search import router as admin_search_router
 from backend.routers.eventsub import router as eventsub_router
 from backend.routers.health import router as health_router
+from backend.routers.internal_videos import router as internal_videos_router
 from backend.routers.live_monitor import router as live_monitor_router
 
 
@@ -67,6 +68,7 @@ def create_admin_app(enable_lifespan: bool = True) -> FastAPI:
     app.include_router(admin_search_router)
     app.include_router(live_monitor_router)
     app.include_router(eventsub_router)
+    app.include_router(internal_videos_router)
     return app
 
 

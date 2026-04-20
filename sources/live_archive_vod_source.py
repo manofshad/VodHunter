@@ -96,8 +96,11 @@ class LiveArchiveVODSource(AudioSource):
         return None
 
     def stop(self) -> None:
-        self._commit_pending_progress()
         self._finished = True
+        self._pending_commit_end_seconds = None
+        if self._pending_chunk_path and os.path.exists(self._pending_chunk_path):
+            os.remove(self._pending_chunk_path)
+        self._pending_chunk_path = None
 
         if os.path.exists(self.temp_dir):
             shutil.rmtree(self.temp_dir, ignore_errors=True)
@@ -133,6 +136,18 @@ class LiveArchiveVODSource(AudioSource):
         if self._vod_platform_id != vod_platform_id:
             self._switch_to_vod(latest_vod)
         else:
+            existing_status = self._get_current_video_status()
+            if existing_status in {"deleted", "searchable"}:
+                self._clear_active_vod(mark_finished=True)
+                return
+            if existing_status == "reindex_requested" and self._vod_platform_id is not None:
+                self.store.delete_vod_ingest_state(self._vod_platform_id)
+                if self.video_id is not None:
+                    self.store.update_video_metadata(self.video_id, status="indexing")
+                self.ingest_cursor_seconds = 0
+                self._last_seen_duration_seconds = 0
+                self._pending_commit_end_seconds = None
+                self._pending_chunk_path = None
             self._sync_video_metadata_if_changed(
                 title=str(latest_vod.get("title") or f"Live stream by {self.streamer}"),
                 thumbnail_url=str(latest_vod["thumbnail_url"]) if latest_vod.get("thumbnail_url") else None,
@@ -152,6 +167,7 @@ class LiveArchiveVODSource(AudioSource):
         self.current_vod_url = str(vod["url"])
         incoming_title = str(vod.get("title") or f"Live stream by {self.streamer}")
         incoming_thumbnail_url = str(vod["thumbnail_url"]) if vod.get("thumbnail_url") else None
+        self._last_seen_duration_seconds = 0
 
         raw_created_at = str(vod.get("created_at") or "").strip()
         streamed_at: datetime | None = None
@@ -184,12 +200,24 @@ class LiveArchiveVODSource(AudioSource):
                 thumbnail_url=self._vod_thumbnail_url,
                 processed=False,
                 streamed_at=streamed_at,
+                status="indexing",
             )
         else:
             self.video_id = int(existing_video[0])
+            existing_status = None
+            get_video_status = getattr(self.store, "get_video_status", None)
+            if callable(get_video_status):
+                existing_status = get_video_status(self.video_id)
+            if existing_status in {"deleted", "searchable"}:
+                self._vod_title = str(existing_video[3])
+                self._vod_thumbnail_url = str(existing_video[4]) if existing_video[4] is not None else None
+                self._clear_active_vod(mark_finished=True)
+                return
             self._vod_title = str(existing_video[3])
             self._vod_thumbnail_url = str(existing_video[4]) if existing_video[4] is not None else None
-            self.store.update_video_metadata(self.video_id, processed=False)
+            if existing_status == "reindex_requested":
+                self.store.delete_vod_ingest_state(self._vod_platform_id)
+            self.store.update_video_metadata(self.video_id, status="indexing")
             self._sync_video_metadata_if_changed(
                 title=incoming_title,
                 thumbnail_url=incoming_thumbnail_url,
@@ -207,6 +235,25 @@ class LiveArchiveVODSource(AudioSource):
         self._media_url = None
         self._media_url_resolved_at = 0.0
         self._no_growth_checks = 0
+
+    def _get_current_video_status(self) -> str | None:
+        if self.video_id is None:
+            return None
+        get_video_status = getattr(self.store, "get_video_status", None)
+        if not callable(get_video_status):
+            return None
+        return get_video_status(self.video_id)
+
+    def _clear_active_vod(self, *, mark_finished: bool) -> None:
+        self.video_id = None
+        self.ingest_cursor_seconds = 0
+        self._pending_commit_end_seconds = None
+        self._pending_chunk_path = None
+        self._media_url = None
+        self._media_url_resolved_at = 0.0
+        self._no_growth_checks = 0
+        if mark_finished:
+            self._finished = True
 
     def _sync_creator_metadata_if_changed(self, profile: dict | None) -> None:
         if self._creator_id is None or profile is None:
@@ -350,7 +397,11 @@ class LiveArchiveVODSource(AudioSource):
     def _finalize(self) -> None:
         self._commit_pending_progress()
         if self.video_id is not None:
-            self.store.mark_video_processed(self.video_id, processed=True)
+            update_video_status = getattr(self.store, "update_video_status", None)
+            if callable(update_video_status):
+                update_video_status(self.video_id, "searchable")
+            else:
+                self.store.mark_video_processed(self.video_id, processed=True)
         if self._vod_platform_id is not None:
             self.store.delete_vod_ingest_state(self._vod_platform_id)
         self._finished = True

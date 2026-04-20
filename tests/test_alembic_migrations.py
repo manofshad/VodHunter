@@ -110,3 +110,26 @@ class TestAlembicMigrations:
         assert not any(("WHERE job_status NOT IN ('queued', 'running', 'completed', 'failed')" in sql for sql in fake_op.executed))
         assert any(('SET finished_at = COALESCE(finished_at, created_at)' in sql for sql in fake_op.executed))
         assert any(('CREATE INDEX IF NOT EXISTS idx_search_requests_source_app_job_status_created_at' in sql for sql in fake_op.executed))
+
+    def test_video_status_revision_adds_status_column_and_backfills_from_processed(self) -> None:
+        revision = self._load_module(
+            'alembic/versions/20260419_0008_add_video_status_and_internal_api_fields.py',
+            'vodhunter_alembic_revision_video_status',
+        )
+        fake_op = FakeOp()
+        with patch.object(revision, 'op', fake_op):
+            revision.upgrade()
+        assert any(('ADD COLUMN IF NOT EXISTS status TEXT' in sql for sql in fake_op.executed))
+        assert any(
+            (
+                "SET status = CASE\n            WHEN processed THEN 'searchable'\n            ELSE 'indexing'\n        END" in sql
+            )
+            for sql in fake_op.executed
+        )
+        assert any(('ALTER COLUMN status SET NOT NULL' in sql for sql in fake_op.executed))
+        assert any(
+            (
+                "CHECK (status IN ('indexing', 'searchable', 'deleted', 'reindex_requested'))" in sql
+            )
+            for sql in fake_op.executed
+        )

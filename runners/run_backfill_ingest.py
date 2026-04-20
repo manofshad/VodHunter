@@ -20,6 +20,12 @@ from backend.bootstrap_ingest import build_ingest_state
 from backend.bootstrap_shared import build_store_state, prepare_runtime_dirs
 from pipeline.ingest_session import IngestSession
 from services.twitch_monitor import TwitchMonitor
+from storage.vector_store import (
+    VIDEO_STATUS_DELETED,
+    VIDEO_STATUS_INDEXING,
+    VIDEO_STATUS_REINDEX_REQUESTED,
+    VIDEO_STATUS_SEARCHABLE,
+)
 from sources.historical_archive_vod_source import HistoricalArchiveVODSource
 
 
@@ -29,6 +35,46 @@ class BackfillResult:
     resumed: int = 0
     skipped: int = 0
     failed: int = 0
+
+
+def _get_existing_video_status(
+    store: object,
+    existing_video: tuple[object, ...] | None,
+) -> str | None:
+    if existing_video is None:
+        return None
+
+    get_video_status = getattr(store, "get_video_status", None)
+    if not callable(get_video_status):
+        return None
+
+    status = get_video_status(int(existing_video[0]))
+    if status is None:
+        return None
+    return str(status).strip().lower() or None
+
+
+def _classify_backfill_candidate(
+    store: object,
+    existing_video: tuple[object, ...] | None,
+    existing_state: dict[str, object] | None,
+) -> tuple[bool, str | None, bool]:
+    if existing_video is None:
+        return True, None, False
+
+    existing_status = _get_existing_video_status(store, existing_video)
+    if existing_status == VIDEO_STATUS_REINDEX_REQUESTED:
+        return True, existing_status, True
+    if existing_status == VIDEO_STATUS_INDEXING:
+        if existing_state is not None:
+            return True, existing_status, False
+        return False, existing_status, False
+    if existing_status in {VIDEO_STATUS_SEARCHABLE, VIDEO_STATUS_DELETED}:
+        return False, existing_status, False
+
+    if bool(existing_video[5]):
+        return False, "processed", False
+    return True, None, False
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -71,13 +117,24 @@ def run_backfill_ingest(
     total_vods = len(vods)
     for index, vod in enumerate(vods, start=1):
         existing_video = store.get_video_by_url(str(vod["url"]))
-        if existing_video is not None and bool(existing_video[5]):
+        existing_state = store.get_vod_ingest_state(str(vod["id"]))
+        is_eligible, skip_reason, restart_from_scratch = _classify_backfill_candidate(
+            store,
+            existing_video,
+            existing_state,
+        )
+        if not is_eligible:
             result.skipped += 1
             out(f"starting vod {index}/{total_vods} vod={vod['id']} status=skip_check")
-            out(f"skip processed vod={vod['id']} url={vod['url']}")
+            out(f"skip {skip_reason} vod={vod['id']} url={vod['url']}")
             continue
 
-        existing_state = store.get_vod_ingest_state(str(vod["id"]))
+        if restart_from_scratch and existing_state is not None:
+            delete_vod_ingest_state = getattr(store, "delete_vod_ingest_state", None)
+            if callable(delete_vod_ingest_state):
+                delete_vod_ingest_state(str(vod["id"]))
+            existing_state = None
+
         starting_cursor = 0
         if existing_state is not None and int(existing_state.get("last_ingested_seconds", 0)) > 0:
             result.resumed += 1

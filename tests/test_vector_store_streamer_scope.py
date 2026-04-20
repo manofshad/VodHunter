@@ -110,7 +110,8 @@ class TestVectorStoreStreamerScope:
         assert 'title = %s' in query
         assert 'thumbnail_url = %s' in query
         assert 'processed = %s' in query
-        assert params == ['Updated title', 'https://cdn/thumb.jpg', False, 55]
+        assert 'status = %s' in query
+        assert params == ['Updated title', 'https://cdn/thumb.jpg', False, 'indexing', 55]
 
     def test_log_search_request_inserts_nullable_fields(self) -> None:
         cursor = FakeCursor()

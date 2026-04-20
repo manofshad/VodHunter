@@ -44,6 +44,7 @@ class SessionRunHandle:
     source: object
     thread: Thread
     error: Exception | None = None
+    interrupted: bool = False
 
 
 @dataclass
@@ -55,7 +56,31 @@ class BacklogCandidate:
 @dataclass
 class BacklogRunOutcome:
     preempted_for_live: bool = False
+    interrupted: bool = False
     error: Exception | None = None
+
+
+VIDEO_STATUS_INDEXING = "indexing"
+VIDEO_STATUS_SEARCHABLE = "searchable"
+VIDEO_STATUS_DELETED = "deleted"
+VIDEO_STATUS_REINDEX_REQUESTED = "reindex_requested"
+
+
+def _get_existing_video_status(
+    store: object,
+    existing_video: tuple[object, ...] | None,
+) -> str | None:
+    if existing_video is None:
+        return None
+
+    get_video_status = getattr(store, "get_video_status", None)
+    if not callable(get_video_status):
+        return None
+
+    status = get_video_status(int(existing_video[0]))
+    if status is None:
+        return None
+    return str(status).strip().lower() or None
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -143,6 +168,8 @@ def run_hybrid_ingest(
                 out(f"failed mode=live streamer={normalized_streamer} error={live_error}")
                 _sleep_interruptibly(retry_seconds, should_stop)
                 continue
+            if live_handle.interrupted:
+                break
 
             result.handoffs_to_backlog += 1
             out(f"handoff event=live_to_backlog streamer={normalized_streamer}")
@@ -198,10 +225,14 @@ def run_hybrid_ingest(
             should_log_watch = True
 
             if backlog_outcome.preempted_for_live:
+                if should_stop():
+                    break
                 result.handoffs_to_live += 1
                 out(f"handoff event=backlog_to_live streamer={normalized_streamer} vod={vod_id}")
                 force_live_handoff = True
                 continue
+            if backlog_outcome.interrupted:
+                break
             if backlog_outcome.error is not None:
                 result.failed += 1
                 out(f"failed mode=backlog vod={vod_id} url={vod['url']} error={backlog_outcome.error}")
@@ -237,7 +268,37 @@ def _build_backlog(
     for vod in vods:
         vod_id = str(vod["id"])
         existing_video = store.get_video_by_url(str(vod["url"]))
+        existing_status = _get_existing_video_status(store, existing_video)
         existing_state = store.get_vod_ingest_state(vod_id)
+
+        if existing_status == VIDEO_STATUS_REINDEX_REQUESTED:
+            if existing_state is not None:
+                delete_vod_ingest_state = getattr(store, "delete_vod_ingest_state", None)
+                if callable(delete_vod_ingest_state):
+                    delete_vod_ingest_state(vod_id)
+            backlog.append(BacklogCandidate(vod=vod, existing_state=None))
+            continue
+
+        if existing_status == VIDEO_STATUS_INDEXING:
+            if existing_state is not None:
+                backlog.append(BacklogCandidate(vod=vod, existing_state=existing_state))
+                continue
+            if vod_id not in skipped_vods_logged:
+                skipped_vods_logged.add(vod_id)
+                out(f"skip {existing_status} vod={vod_id} url={vod['url']}")
+            continue
+
+        if existing_status in {VIDEO_STATUS_DELETED, VIDEO_STATUS_SEARCHABLE}:
+            if vod_id not in skipped_vods_logged:
+                skipped_vods_logged.add(vod_id)
+                out(f"skip {existing_status} vod={vod_id} url={vod['url']}")
+            continue
+
+        if existing_video is not None and bool(existing_video[5]):
+            if vod_id not in skipped_vods_logged:
+                skipped_vods_logged.add(vod_id)
+                out(f"skip processed vod={vod_id} url={vod['url']}")
+            continue
 
         if existing_state is not None:
             backlog.append(BacklogCandidate(vod=vod, existing_state=existing_state))
@@ -246,10 +307,6 @@ def _build_backlog(
         if existing_video is None or not bool(existing_video[5]):
             backlog.append(BacklogCandidate(vod=vod, existing_state=None))
             continue
-
-        if vod_id not in skipped_vods_logged:
-            skipped_vods_logged.add(vod_id)
-            out(f"skip processed vod={vod_id} url={vod['url']}")
 
     return backlog
 
@@ -335,10 +392,13 @@ def _run_backlog_session(
     preempted_for_live = False
     while handle.thread.is_alive():
         if should_stop():
+            handle.interrupted = True
             handle.session.stop()
             break
         try:
             if twitch_monitor.is_live(streamer):
+                if not handle.thread.is_alive():
+                    break
                 preempted_for_live = True
                 out(f"handoff_requested event=backlog_to_live vod={vod_id}")
                 handle.session.stop()
@@ -350,6 +410,7 @@ def _run_backlog_session(
     handle.thread.join()
     return BacklogRunOutcome(
         preempted_for_live=preempted_for_live,
+        interrupted=handle.interrupted,
         error=handle.error,
     )
 
@@ -378,6 +439,7 @@ def _wait_for_session(
 ) -> Exception | None:
     while handle.thread.is_alive():
         if should_stop():
+            handle.interrupted = True
             handle.session.stop()
             break
         _sleep_interruptibly(wait_seconds, should_stop)
