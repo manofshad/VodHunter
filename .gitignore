@@ -58,6 +58,7 @@ tmp/
 # Project data artifacts (generated at runtime)
 data/
 temp_live_chunks/
+experiments/fingerprint_benchmark/artifacts/
 
 # Docs
 PRD.md
