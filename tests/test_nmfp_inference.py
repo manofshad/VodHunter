@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from pipeline.nmfp_inference import (
+    NMFP_MODEL_CONFIG_NAME,
     NMFPConfigurationError,
     NMFPFingerprinter,
     NMFPVersionMismatchError,
@@ -15,6 +16,10 @@ from pipeline.nmfp_inference import (
     model_artifact_identity,
     segment_audio_windows,
 )
+
+
+def test_released_nmfp_triplet_config_name_is_pinned():
+    assert NMFP_MODEL_CONFIG_NAME == "nmfp-triplet"
 
 
 class FakeBackend:
