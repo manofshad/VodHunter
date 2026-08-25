@@ -21,6 +21,8 @@ async function parseJson<T>(resp: Response): Promise<T> {
 export interface SearchClipInput {
   streamer: string;
   tiktokUrl: string;
+  streamedFrom?: string;
+  streamedTo?: string;
 }
 
 export async function listSearchableStreamers(): Promise<StreamerListItem[]> {
@@ -32,6 +34,12 @@ export async function createSearchJob(input: SearchClipInput): Promise<SearchJob
   const form = new FormData();
   form.append("streamer", input.streamer);
   form.append("tiktok_url", input.tiktokUrl);
+  if (input.streamedFrom) {
+    form.append("streamed_from", input.streamedFrom);
+  }
+  if (input.streamedTo) {
+    form.append("streamed_to", input.streamedTo);
+  }
 
   const resp = await fetch(`${getApiBase()}/search/clip`, {
     method: "POST",

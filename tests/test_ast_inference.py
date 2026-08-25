@@ -1,5 +1,5 @@
 import numpy as np
-from pipeline.ast_inference import compute_ast_embeddings
+from experiments.fingerprint_benchmark.engines.ast_embedder import compute_ast_embeddings
 
 class FakeTensor:
 

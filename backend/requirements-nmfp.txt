@@ -1,0 +1,14 @@
+# Pinned to the released nmfp-triplet TensorFlow runtime. Keep this isolated
+# from the public API image, which delegates fingerprinting to Modal.
+tensorflow==2.13.0
+essentia==2.1b6.dev1110
+numpy==1.24.3
+PyYAML==6.0.2
+scipy==1.11.4
+soundfile==0.13.1
+pandas==2.0.3
+python-dotenv>=1.0.1
+psycopg[binary]>=3.2.0
+# Newer releases require typing extensions that conflict with TensorFlow 2.13.
+pgvector==0.3.6
+yt-dlp>=2026.8.19

@@ -44,6 +44,22 @@ function formatDuration(value: number | null): string | null {
   return [hours, minutes, seconds].map((part) => String(part).padStart(2, "0")).join(":");
 }
 
+export function formatTimelineTime(value: number): string {
+  if (!Number.isFinite(value)) {
+    return "Unknown time";
+  }
+
+  const totalTenths = Math.max(0, Math.round(value * 10));
+  const hours = Math.floor(totalTenths / 36_000);
+  const minutes = Math.floor((totalTenths % 36_000) / 600);
+  const secondsWithTenths = (totalTenths % 600) / 10;
+  const seconds = Number.isInteger(secondsWithTenths)
+    ? String(secondsWithTenths).padStart(2, "0")
+    : secondsWithTenths.toFixed(1).padStart(4, "0");
+
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${seconds}`;
+}
+
 function getResultHref(result: SearchResponse | null): string | null {
   if (!result?.found) {
     return null;
@@ -64,10 +80,12 @@ function getStageMessage(stage: string | null): string {
       return "Checking clip duration.";
     case "preprocessing":
       return "Preparing the clip audio for search.";
-    case "embedding":
-      return "Generating audio embeddings.";
-    case "matching":
-      return "Matching against indexed streamer audio.";
+    case "fingerprinting":
+      return "Generating neural audio fingerprints.";
+    case "retrieving":
+      return "Retrieving candidate VOD fingerprints.";
+    case "aligning":
+      return "Building supported clip-to-VOD timeline segments.";
     case "finalizing":
       return "Finalizing the search result.";
     default:
@@ -75,10 +93,17 @@ function getStageMessage(stage: string | null): string {
   }
 }
 
-function persistActiveSearch(searchId: number, tiktokUrl: string): void {
+interface ActiveSearchState {
+  searchId: number;
+  tiktokUrl: string;
+  streamedFrom?: string;
+  streamedTo?: string;
+}
+
+function persistActiveSearch(searchId: number, tiktokUrl: string, streamedFrom: string, streamedTo: string): void {
   window.localStorage.setItem(
     ACTIVE_SEARCH_STORAGE_KEY,
-    JSON.stringify({ searchId, tiktokUrl }),
+    JSON.stringify({ searchId, tiktokUrl, streamedFrom, streamedTo }),
   );
 }
 
@@ -86,18 +111,23 @@ function clearActiveSearch(): void {
   window.localStorage.removeItem(ACTIVE_SEARCH_STORAGE_KEY);
 }
 
-function readActiveSearch(): { searchId: number; tiktokUrl: string } | null {
+function readActiveSearch(): ActiveSearchState | null {
   const raw = window.localStorage.getItem(ACTIVE_SEARCH_STORAGE_KEY);
   if (!raw) {
     return null;
   }
 
   try {
-    const parsed = JSON.parse(raw) as { searchId?: number; tiktokUrl?: string };
+    const parsed = JSON.parse(raw) as Partial<ActiveSearchState>;
     if (typeof parsed.searchId !== "number" || typeof parsed.tiktokUrl !== "string") {
       return null;
     }
-    return { searchId: parsed.searchId, tiktokUrl: parsed.tiktokUrl };
+    return {
+      searchId: parsed.searchId,
+      tiktokUrl: parsed.tiktokUrl,
+      streamedFrom: typeof parsed.streamedFrom === "string" ? parsed.streamedFrom : "",
+      streamedTo: typeof parsed.streamedTo === "string" ? parsed.streamedTo : "",
+    };
   } catch {
     return null;
   }
@@ -128,7 +158,7 @@ function FeatureGrid() {
     {
       title: "Audio-Based Matching",
       description:
-        "VodHunter uses audio embeddings and similarity search, so it can recognize moments even when titles, overlays, or edits differ.",
+        "VodHunter uses neural audio fingerprints and timeline alignment, so it can recognize supported moments across edited clips.",
     },
     {
       title: "Search Hours In Seconds",
@@ -157,10 +187,12 @@ interface SearchResultCardProps {
   lastSubmittedUrl: string;
 }
 
-function SearchResultCard({ result, lastSubmittedUrl }: SearchResultCardProps) {
+export function SearchResultCard({ result, lastSubmittedUrl }: SearchResultCardProps) {
   const resultHref = getResultHref(result);
   const formattedTimestamp = formatDuration(result.timestamp_seconds);
   const [thumbnailLoadFailed, setThumbnailLoadFailed] = useState(false);
+  const segments = result.segments ?? [];
+  const unmatchedRanges = result.unmatched_ranges ?? [];
   const detailRows = [
     formattedTimestamp ? { label: "Timestamp", value: formattedTimestamp, emphasize: true } : null,
     result.reason ? { label: "Match reason", value: result.reason } : null,
@@ -255,6 +287,71 @@ function SearchResultCard({ result, lastSubmittedUrl }: SearchResultCardProps) {
             </div>
           ))}
         </dl>
+
+        {segments.length > 0 ? (
+          <div className="border-t border-gray-700 pt-5 md:col-span-2">
+            <h4 className="text-sm font-semibold uppercase tracking-[0.16em] text-gray-300">
+              Matched clip segments
+            </h4>
+            <ol className="mt-3 grid gap-3">
+              {segments.map((segment, index) => {
+                const clipRange = `${formatTimelineTime(segment.query_start)}–${formatTimelineTime(segment.query_end)}`;
+                const vodRange = `${formatTimelineTime(segment.vod_start)}–${formatTimelineTime(segment.vod_end)}`;
+                const label = `VOD ${segment.video_id} · ${vodRange}`;
+                return (
+                  <li
+                    key={`${segment.video_id}-${segment.query_start}-${segment.vod_start}`}
+                    className="grid gap-2 rounded-lg border border-gray-700 bg-gray-800/70 p-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-gray-500">
+                        Clip {clipRange}
+                      </p>
+                      {segment.video_url_at_timestamp ? (
+                        <a
+                          href={segment.video_url_at_timestamp}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mt-1 inline-flex items-center gap-2 break-all font-semibold text-white transition hover:text-[#fb2844]"
+                          aria-label={`Open matched segment ${index + 1} in VOD ${segment.video_id} at ${formatTimelineTime(segment.vod_start)}`}
+                        >
+                          {label}
+                          <ExternalLink className="size-4 shrink-0" />
+                        </a>
+                      ) : (
+                        <p className="mt-1 font-semibold text-white">
+                          {label} <span className="font-normal text-gray-400">· Link unavailable</span>
+                        </p>
+                      )}
+                    </div>
+                    <span className="text-xs font-medium text-gray-400">Score {segment.score.toFixed(3)}</span>
+                  </li>
+                );
+              })}
+            </ol>
+          </div>
+        ) : null}
+
+        {unmatchedRanges.length > 0 ? (
+          <div className="border-t border-gray-700 pt-5 md:col-span-2">
+            <h4 className="text-sm font-semibold uppercase tracking-[0.16em] text-gray-300">
+              Unmatched clip ranges
+            </h4>
+            <p className="mt-2 text-sm leading-6 text-gray-400">
+              These portions did not contain enough continuous fingerprint evidence to identify a VOD moment.
+            </p>
+            <ul className="mt-3 flex flex-wrap gap-2">
+              {unmatchedRanges.map((range) => (
+                <li
+                  key={`${range.query_start}-${range.query_end}`}
+                  className="rounded-full border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm font-medium text-gray-200"
+                >
+                  {formatTimelineTime(range.query_start)}–{formatTimelineTime(range.query_end)}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
       </div>
     </section>
   );
@@ -262,6 +359,8 @@ function SearchResultCard({ result, lastSubmittedUrl }: SearchResultCardProps) {
 
 export default function SearchPage() {
   const [tiktokUrl, setTiktokUrl] = useState("");
+  const [streamedFrom, setStreamedFrom] = useState("");
+  const [streamedTo, setStreamedTo] = useState("");
   const [streamer, setStreamer] = useState("");
   const [streamers, setStreamers] = useState<StreamerListItem[]>([]);
   const [loadingStreamers, setLoadingStreamers] = useState(true);
@@ -328,6 +427,8 @@ export default function SearchPage() {
     setActiveSearchStage("validating");
     setLastSubmittedUrl(activeSearch.tiktokUrl);
     setTiktokUrl(activeSearch.tiktokUrl);
+    setStreamedFrom(activeSearch.streamedFrom ?? "");
+    setStreamedTo(activeSearch.streamedTo ?? "");
     setSubmitting(true);
   }, []);
 
@@ -433,6 +534,8 @@ export default function SearchPage() {
     }
 
     const submittedUrl = tiktokUrl.trim();
+    const submittedStreamedFrom = streamedFrom.trim();
+    const submittedStreamedTo = streamedTo.trim();
 
     try {
       setSubmitting(true);
@@ -442,8 +545,13 @@ export default function SearchPage() {
       setRequestError(null);
       setResult(null);
       setLastSubmittedUrl(submittedUrl);
-      const created = await createSearchJob({ tiktokUrl: submittedUrl, streamer });
-      persistActiveSearch(created.search_id, submittedUrl);
+      const created = await createSearchJob({
+        tiktokUrl: submittedUrl,
+        streamer,
+        streamedFrom: submittedStreamedFrom || undefined,
+        streamedTo: submittedStreamedTo || undefined,
+      });
+      persistActiveSearch(created.search_id, submittedUrl, submittedStreamedFrom, submittedStreamedTo);
       setActiveSearchId(created.search_id);
       setActiveSearchStage(created.stage);
     } catch (err) {
@@ -585,6 +693,40 @@ export default function SearchPage() {
                       </button>
                     </div>
                   </div>
+                </div>
+
+                <div className="grid gap-3 rounded-xl bg-gray-800/90 p-3 text-left md:grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)] md:items-end">
+                  <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-300 md:pb-3">
+                    Stream date range
+                  </div>
+                  <label className="grid gap-1 text-xs font-medium text-gray-300">
+                    From
+                    <input
+                      type="date"
+                      value={streamedFrom}
+                      max={streamedTo || undefined}
+                      disabled={submitting}
+                      onChange={(event) => {
+                        setStreamedFrom(event.target.value);
+                        setRequestError(null);
+                      }}
+                      className="h-10 rounded-lg border border-gray-700 bg-gray-900 px-3 text-sm text-gray-100 outline-none disabled:cursor-not-allowed disabled:text-gray-500"
+                    />
+                  </label>
+                  <label className="grid gap-1 text-xs font-medium text-gray-300">
+                    To
+                    <input
+                      type="date"
+                      value={streamedTo}
+                      min={streamedFrom || undefined}
+                      disabled={submitting}
+                      onChange={(event) => {
+                        setStreamedTo(event.target.value);
+                        setRequestError(null);
+                      }}
+                      className="h-10 rounded-lg border border-gray-700 bg-gray-900 px-3 text-sm text-gray-100 outline-none disabled:cursor-not-allowed disabled:text-gray-500"
+                    />
+                  </label>
                 </div>
 
                 <div className="min-h-6 text-left">

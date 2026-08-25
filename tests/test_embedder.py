@@ -1,71 +1,78 @@
-import tempfile
-from unittest.mock import patch
 import numpy as np
+
 from pipeline.embedder import Embedder
+from pipeline.nmfp_inference import (
+    NMFP_EMBEDDING_DIM,
+    NMFP_MODEL_VERSION,
+    NMFP_PREPROCESSING_VERSION,
+    NMFPExtractionMetrics,
+    NMFPExtractionResult,
+)
 
-class FakeTensor:
 
-    def to(self, device):
-        return self
-
-class FakeFeatureExtractor:
-
-    def __call__(self, batch_audio, sampling_rate, return_tensors):
-        return {'input_values': FakeTensor()}
-
-class FakePoolerOutput:
-
-    def __init__(self, values: np.ndarray):
-        self.values = values
-
-    def cpu(self):
-        return self
-
-    def numpy(self):
-        return self.values
-
-class FakeModelOutput:
-
-    def __init__(self, batch_size: int):
-        self.pooler_output = FakePoolerOutput(np.ones((batch_size, 3), dtype=np.float32))
-
-class FakeModel:
-
+class FakeFingerprinter:
     def __init__(self):
-        self.eval_calls = 0
-        self.to_device = None
+        self.calls: list[dict[str, object]] = []
+        self.is_loaded = True
 
-    def to(self, device):
-        self.to_device = device
-        return self
+    def extract_wav(
+        self,
+        audio_path,
+        *,
+        offset_seconds: float,
+        expected_model_version: str,
+        expected_preprocessing_version: str,
+    ) -> NMFPExtractionResult:
+        self.calls.append(
+            {
+                "audio_path": audio_path,
+                "offset_seconds": offset_seconds,
+                "expected_model_version": expected_model_version,
+                "expected_preprocessing_version": expected_preprocessing_version,
+            }
+        )
+        return NMFPExtractionResult(
+            embeddings=np.ones((2, NMFP_EMBEDDING_DIM), dtype=np.float32),
+            timestamps=np.array([offset_seconds, offset_seconds + 0.5], dtype=np.float32),
+            model_version=NMFP_MODEL_VERSION,
+            preprocessing_version=NMFP_PREPROCESSING_VERSION,
+            embedding_dim=NMFP_EMBEDDING_DIM,
+            metrics=NMFPExtractionMetrics(
+                cold_start=False,
+                model_load_duration_ms=0,
+                preprocessing_duration_ms=3,
+                inference_duration_ms=4,
+                total_duration_ms=7,
+                audio_duration_seconds=1.5,
+                fingerprint_count=2,
+            ),
+        )
 
-    def eval(self):
-        self.eval_calls += 1
-        return self
 
-    def __call__(self, **inputs):
-        batch_size = 1
-        return FakeModelOutput(batch_size=batch_size)
+def test_embedder_exposes_pinned_nmfp_contract() -> None:
+    fingerprinter = FakeFingerprinter()
+    embedder = Embedder(fingerprinter=fingerprinter)
 
-class TestEmbedder:
+    assert embedder.model_version == NMFP_MODEL_VERSION
+    assert embedder.preprocessing_version == NMFP_PREPROCESSING_VERSION
+    assert embedder.embedding_dim == 128
+    assert embedder.is_loaded
 
-    def test_constructor_does_not_load_model(self) -> None:
-        with patch('pipeline.embedder.load_ast_model') as model_loader:
-            embedder = Embedder()
-        assert embedder.feature_extractor is None
-        assert embedder.model is None
-        model_loader.assert_not_called()
 
-    def test_embed_loads_model_once_and_reuses_it(self) -> None:
-        fake_model = FakeModel()
-        audio = np.ones(16000, dtype=np.float32)
-        with tempfile.NamedTemporaryFile(suffix='.wav') as wav_file, patch('pipeline.embedder.load_wav_file', return_value=(audio, 16000)), patch('pipeline.embedder.load_ast_model', return_value=(FakeFeatureExtractor(), fake_model)) as model_loader:
-            embedder = Embedder()
-            first_embeddings, first_timestamps = embedder.embed(wav_file.name)
-            second_embeddings, second_timestamps = embedder.embed(wav_file.name)
-        assert model_loader.call_count == 1
-        assert fake_model.eval_calls == 0
-        assert first_embeddings.shape == (1, 3)
-        assert second_embeddings.shape == (1, 3)
-        np.testing.assert_array_equal(first_timestamps, np.array([0.0], dtype=np.float32))
-        np.testing.assert_array_equal(second_timestamps, np.array([0.0], dtype=np.float32))
+def test_embed_preserves_tuple_interface_and_validates_versions() -> None:
+    fingerprinter = FakeFingerprinter()
+    embedder = Embedder(fingerprinter=fingerprinter)
+
+    embeddings, timestamps = embedder.embed("clip.wav", offset_seconds=3.0)
+
+    assert embeddings.shape == (2, NMFP_EMBEDDING_DIM)
+    np.testing.assert_array_equal(timestamps, np.array([3.0, 3.5], dtype=np.float32))
+    assert fingerprinter.calls == [
+        {
+            "audio_path": "clip.wav",
+            "offset_seconds": 3.0,
+            "expected_model_version": NMFP_MODEL_VERSION,
+            "expected_preprocessing_version": NMFP_PREPROCESSING_VERSION,
+        }
+    ]
+    assert embedder.last_result is not None

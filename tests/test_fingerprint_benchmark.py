@@ -7,6 +7,13 @@ import numpy as np
 from experiments.fingerprint_benchmark.alignment import temporal_vector_alignment
 from experiments.fingerprint_benchmark.audio import generate_clean_queries
 from experiments.fingerprint_benchmark.config import BenchmarkConfig
+from experiments.fingerprint_benchmark.cut_detection import (
+    CutDetectionSettings,
+    FingerprintCandidate,
+    build_alignment_segments,
+    top_k_fingerprint_candidates,
+    unmatched_query_ranges,
+)
 from experiments.fingerprint_benchmark.engines.audfprint import MATCH_PATTERN
 from experiments.fingerprint_benchmark.engines.ast import ASTEngine
 from experiments.fingerprint_benchmark.engines.nmfp import NMFPEngine
@@ -51,6 +58,77 @@ def test_temporal_alignment_localizes_consistent_sequence() -> None:
     assert outcome.found
     assert outcome.start_seconds == 10.0
     assert outcome.diagnostics["best_votes"] == 3
+
+
+def _candidate(query_time: float, offset: float, *, similarity: float = 0.9, rank: int = 0):
+    query_index = round(query_time / 0.5)
+    vod_time = query_time + offset
+    return FingerprintCandidate(
+        query_index=query_index,
+        query_time=query_time,
+        database_index=round(vod_time / 0.5),
+        vod_time=vod_time,
+        offset=offset,
+        similarity=similarity,
+        rank=rank,
+    )
+
+
+def test_cut_detection_keeps_continuous_track_and_rejects_isolated_outlier() -> None:
+    settings = CutDetectionSettings(min_support=6, min_duration_seconds=4.0)
+    candidates = [_candidate(index * 0.5, 100.0) for index in range(20)]
+    candidates.append(_candidate(4.5, 500.0, similarity=0.99))
+
+    segments = build_alignment_segments(candidates, settings)
+
+    assert len(segments) == 1
+    assert segments[0].query_start == 0.0
+    assert segments[0].query_end == 10.0
+    assert segments[0].vod_start == 100.0
+    assert segments[0].supporting_fingerprints == 20
+
+
+def test_cut_detection_returns_two_tracks_with_unmatched_gap() -> None:
+    settings = CutDetectionSettings(
+        min_support=6,
+        min_duration_seconds=3.0,
+        max_unmatched_gap_seconds=1.0,
+    )
+    candidates = [_candidate(index * 0.5, 100.0) for index in range(12)]
+    candidates.extend(_candidate(8.0 + index * 0.5, 300.0) for index in range(12))
+
+    segments = build_alignment_segments(candidates, settings)
+    unmatched = unmatched_query_ranges(segments, 15.0)
+
+    assert [segment.offset_seconds for segment in segments] == [100.0, 300.0]
+    assert unmatched == [
+        {"query_start": 6.0, "query_end": 8.0},
+        {"query_start": 14.0, "query_end": 15.0},
+    ]
+
+
+def test_cut_detection_rejects_track_shorter_than_minimum_duration() -> None:
+    settings = CutDetectionSettings(min_support=4, min_duration_seconds=4.0)
+    candidates = [_candidate(index * 0.5, 100.0) for index in range(6)]
+
+    assert build_alignment_segments(candidates, settings) == []
+
+
+def test_top_k_fingerprint_candidates_preserves_ranked_matches() -> None:
+    query_embeddings = np.eye(2, dtype=np.float32)
+    database_embeddings = np.array([[0.0, 1.0], [1.0, 0.0], [0.8, 0.2]], dtype=np.float32)
+    candidates = top_k_fingerprint_candidates(
+        query_embeddings,
+        np.array([0.0, 0.5], dtype=np.float32),
+        database_embeddings,
+        np.array([10.0, 20.0, 30.0], dtype=np.float32),
+        top_k=2,
+    )
+
+    assert len(candidates) == 4
+    first_query = [candidate for candidate in candidates if candidate.query_index == 0]
+    assert [candidate.database_index for candidate in first_query] == [1, 2]
+    assert [candidate.rank for candidate in first_query] == [0, 1]
 
 
 def test_generate_clean_queries_is_deterministic(tmp_path: Path) -> None:

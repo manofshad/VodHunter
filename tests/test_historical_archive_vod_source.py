@@ -1,6 +1,13 @@
 import os
+import subprocess
 import tempfile
-from sources.historical_archive_vod_source import HistoricalArchiveVODSource
+from unittest.mock import patch
+
+from sources.historical_archive_vod_source import (
+    HistoricalArchiveVODSource,
+    parse_hls_media_playlist,
+    select_hls_chunk,
+)
 
 class FakeStore:
 
@@ -69,6 +76,93 @@ class FakeStore:
 
 class TestHistoricalArchiveVODSource:
 
+    def test_selects_only_overlapping_hls_segments_with_local_seek(self) -> None:
+        playlist = parse_hls_media_playlist(
+            """#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-TARGETDURATION:10
+#EXT-X-MEDIA-SEQUENCE:50
+#EXTINF:10.0,
+segment-0.ts
+#EXTINF:10.0,
+segment-1.ts
+#EXTINF:10.0,
+segment-2.ts
+#EXTINF:10.0,
+segment-3.ts
+#EXT-X-ENDLIST
+""",
+            "https://cdn.example.test/path/index.m3u8",
+        )
+
+        selection = select_hls_chunk(playlist, start_seconds=15.0, duration_seconds=12.0)
+
+        assert selection.local_seek_seconds == 5.0
+        assert selection.first_segment_start_seconds == 10.0
+        assert "#EXT-X-MEDIA-SEQUENCE:51" in selection.manifest
+        assert "https://cdn.example.test/path/segment-0.ts" not in selection.manifest
+        assert "https://cdn.example.test/path/segment-1.ts" in selection.manifest
+        assert "https://cdn.example.test/path/segment-2.ts" in selection.manifest
+        assert "https://cdn.example.test/path/segment-3.ts" not in selection.manifest
+
+    def test_extracts_from_local_hls_subset_and_validates_duration(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = HistoricalArchiveVODSource(
+                streamer='alice',
+                vod_metadata=self._make_vod(),
+                store=FakeStore(),
+                chunk_seconds=60,
+                temp_dir=f'{tmp}/chunks',
+            )
+            os.makedirs(source.temp_dir, exist_ok=True)
+            playlist = parse_hls_media_playlist(
+                """#EXTM3U
+#EXT-X-TARGETDURATION:10
+#EXTINF:10.0,
+segment-0.ts
+#EXTINF:10.0,
+segment-1.ts
+#EXTINF:10.0,
+segment-2.ts
+#EXT-X-ENDLIST
+""",
+                "https://cdn.example.test/index.m3u8",
+            )
+            ffmpeg_calls: list[list[str]] = []
+            ffmpeg_options: list[dict[str, object]] = []
+            subset_manifests: list[str] = []
+
+            def fake_run(command, **kwargs):
+                if command[0] == 'ffmpeg':
+                    ffmpeg_calls.append(list(command))
+                    ffmpeg_options.append(dict(kwargs))
+                    subset_path = command[command.index('-i') + 1]
+                    with open(subset_path, encoding='utf-8') as handle:
+                        subset_manifests.append(handle.read())
+                    output_path = command[-1]
+                    with open(output_path, 'wb') as handle:
+                        handle.write(b'R' * 1_000)
+                    return subprocess.CompletedProcess(command, 0, '', '')
+                if command[0] == 'ffprobe':
+                    return subprocess.CompletedProcess(command, 0, '12.000\n', '')
+                raise AssertionError(command)
+
+            with patch.object(source, '_load_media_playlist', return_value=playlist), patch(
+                'sources.historical_archive_vod_source.subprocess.run', side_effect=fake_run
+            ):
+                output_path = source._extract_chunk(15.0, 12.0)
+
+            assert os.path.exists(output_path)
+            assert len(ffmpeg_calls) == 1
+            command = ffmpeg_calls[0]
+            assert command.index('-i') < command.index('-ss')
+            assert command[command.index('-ss') + 1] == '5.000'
+            assert ffmpeg_options[0]['timeout'] == 180.0
+            assert 'segment-0.ts' not in subset_manifests[0]
+            assert 'segment-1.ts' in subset_manifests[0]
+            assert 'segment-2.ts' in subset_manifests[0]
+            assert not os.path.exists(f'{output_path}.m3u8')
+
     def _make_vod(self) -> dict[str, object]:
         return {'id': 'vod-1', 'url': 'https://www.twitch.tv/videos/vod-1', 'title': 'Historical stream', 'thumbnail_url': 'https://static-cdn.jtvnw.net/thumb.jpg', 'duration_seconds': 180}
 
@@ -80,7 +174,10 @@ class TestHistoricalArchiveVODSource:
             store.upsert_vod_ingest_state('vod-1', video_id, 'alice', 120, 180)
             source = HistoricalArchiveVODSource(streamer='alice', vod_metadata=self._make_vod(), store=store, creator_metadata={'profile_image_url': 'https://cdn/alice.png'}, chunk_seconds=60, temp_dir=f'{tmp}/chunks')
 
-            def fake_extract_chunk(start_seconds: int, duration_seconds: int) -> str:
+            extraction_calls: list[tuple[float, float]] = []
+
+            def fake_extract_chunk(start_seconds: float, duration_seconds: float) -> str:
+                extraction_calls.append((start_seconds, duration_seconds))
                 out = os.path.join(source.temp_dir, f'chunk_{start_seconds}_{duration_seconds}.wav')
                 os.makedirs(source.temp_dir, exist_ok=True)
                 with open(out, 'wb') as handle:
@@ -94,7 +191,9 @@ class TestHistoricalArchiveVODSource:
             chunk = source.next_chunk()
             assert chunk is not None
             assert chunk is not None
-            assert chunk.offset_seconds == 120.0
+            assert chunk.offset_seconds == 119.5
+            assert chunk.duration_seconds == 60.5
+            assert extraction_calls == [(119.5, 60.5)]
             assert store.vod_state['vod-1']['last_ingested_seconds'] == 120
             source.next_chunk()
             assert source.ingest_cursor_seconds == 180

@@ -111,3 +111,30 @@ URLs and local media are normalized to the same query format. Re-run `search --e
 ## Interpreting the first report
 
 The clean queries validate ingestion, localization, and adapter correctness. The ten real TikToks answer the actual overlay/music/SFX question. Three negatives only provide an early rejection signal and must not be used to overfit confidence thresholds. The CSV therefore preserves the raw best candidate even when the engine rejects it.
+
+## NMFP cut-aware alignment experiment
+
+`search-cuts` is an NMFP-only follow-up experiment for edited clips containing
+multiple portions of one VOD. It reuses the existing VOD index and cached query
+embeddings. For each query fingerprint it retains the top VOD candidates, groups
+consecutive candidates with a stable `vod_time - query_time` offset, rejects
+isolated matches, and returns every supported source segment plus unmatched query
+ranges.
+
+The TikTok discovery manifest can remain separate from the scored benchmark
+manifest:
+
+```bash
+python -m experiments.fingerprint_benchmark.benchmark search-cuts \
+  --manifest experiments/fingerprint_benchmark/artifacts/tiktok_discovery_manifest.jsonl \
+  --output experiments/fingerprint_benchmark/artifacts/results/nmfp_cut_detection.jsonl
+```
+
+Initial tunable rules are exposed as CLI flags: `--offset-tolerance`, `--max-gap`,
+`--min-support`, `--min-duration`, `--min-density`, `--merge-gap`, and
+`--merge-offset-tolerance`. The defaults require six fingerprints spanning at
+least four seconds, allow up to two seconds of missing evidence inside a track,
+and treat offsets within one second as the same fingerprint track. Neighboring
+tracks whose offsets differ by no more than four seconds are merged as one
+user-facing moment so small trims do not create redundant results. These are
+experiment defaults, not production thresholds.

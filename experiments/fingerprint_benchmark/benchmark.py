@@ -8,6 +8,7 @@ from typing import Iterable
 
 from .audio import generate_clean_queries, import_query, prepare_vod
 from .config import BenchmarkConfig
+from .cut_detection import CutDetectionSettings, CutSearchResult
 from .engines import ASTEngine, AudfprintEngine, NMFPEngine
 from .engines.base import BenchmarkEngine
 from .evaluate import load_results, write_reports
@@ -35,6 +36,15 @@ def selected_engines(name: str) -> tuple[str, ...]:
 
 
 def write_results(path: Path, results: Iterable[SearchResult]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_suffix(path.suffix + ".tmp")
+    with temp.open("w", encoding="utf-8") as handle:
+        for result in results:
+            handle.write(json.dumps(result.to_dict(), sort_keys=True) + "\n")
+    temp.replace(path)
+
+
+def write_cut_results(path: Path, results: Iterable[CutSearchResult]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_suffix(path.suffix + ".tmp")
     with temp.open("w", encoding="utf-8") as handle:
@@ -90,6 +100,40 @@ def run_search(
     return results
 
 
+def run_cut_search(
+    config: BenchmarkConfig,
+    manifest_path: Path,
+    *,
+    kind: str | None,
+    output_path: Path,
+    settings: CutDetectionSettings,
+) -> list[CutSearchResult]:
+    records = load_manifest(manifest_path)
+    if kind:
+        records = [record for record in records if record.kind == kind]
+    if not records:
+        raise RuntimeError("No benchmark queries matched the cut-search selection")
+
+    engine = NMFPEngine(config)
+    engine.prepare_queries(records, manifest_path)
+    results: list[CutSearchResult] = []
+    for record in records:
+        result = engine.search_cuts(
+            record,
+            record.resolved_path(manifest_path),
+            settings=settings,
+        )
+        segments = ", ".join(
+            f"clip={segment.query_start:.1f}-{segment.query_end:.1f}s "
+            f"vod={segment.vod_start:.1f}s support={segment.supporting_fingerprints}"
+            for segment in result.segments
+        )
+        print(f"nmfp_cut {record.query_id:20s} segments={len(result.segments)} {segments}")
+        results.append(result)
+    write_cut_results(output_path, results)
+    return results
+
+
 def create_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Three-engine benchmark for Twitch VOD 2848966623")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -112,6 +156,23 @@ def create_parser() -> argparse.ArgumentParser:
     search.add_argument("--engine", choices=("all",) + ENGINE_NAMES, default="all")
     search.add_argument("--kind", choices=("clean", "tiktok", "no_match"))
     search.add_argument("--continue-on-error", action="store_true")
+
+    cut_search = subparsers.add_parser(
+        "search-cuts",
+        help="Run NMFP-only per-fingerprint multi-cut alignment",
+    )
+    cut_search.add_argument("--manifest", type=Path)
+    cut_search.add_argument("--kind", choices=("clean", "tiktok", "no_match"), default="tiktok")
+    cut_search.add_argument("--output", type=Path)
+    cut_search.add_argument("--top-k", type=int, default=10)
+    cut_search.add_argument("--offset-tolerance", type=float, default=1.0)
+    cut_search.add_argument("--max-gap", type=float, default=2.0)
+    cut_search.add_argument("--min-support", type=int, default=6)
+    cut_search.add_argument("--min-duration", type=float, default=4.0)
+    cut_search.add_argument("--min-density", type=float, default=0.4)
+    cut_search.add_argument("--merge-gap", type=float, default=1.0)
+    cut_search.add_argument("--merge-offset-tolerance", type=float, default=4.0)
+    cut_search.add_argument("--max-segments", type=int, default=12)
 
     evaluate = subparsers.add_parser("evaluate", help="Generate CSV, JSON, and Markdown reports")
     evaluate.add_argument("--results", type=Path)
@@ -156,6 +217,40 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(summaries, indent=2, sort_keys=True))
     elif args.command == "search":
         run_search(config, args.engine, kind=args.kind, continue_on_error=args.continue_on_error)
+    elif args.command == "search-cuts":
+        manifest_path = args.manifest or config.manifest_path
+        output_path = args.output or (config.results_dir / "nmfp_cut_detection.jsonl")
+        settings = CutDetectionSettings(
+            top_k=args.top_k,
+            hop_seconds=config.nmfp_hop_seconds,
+            offset_bin_seconds=config.nmfp_hop_seconds,
+            offset_tolerance_seconds=args.offset_tolerance,
+            max_unmatched_gap_seconds=args.max_gap,
+            min_support=args.min_support,
+            min_duration_seconds=args.min_duration,
+            min_density=args.min_density,
+            merge_query_gap_seconds=args.merge_gap,
+            merge_offset_tolerance_seconds=args.merge_offset_tolerance,
+            max_segments=args.max_segments,
+        )
+        results = run_cut_search(
+            config,
+            manifest_path,
+            kind=args.kind,
+            output_path=output_path,
+            settings=settings,
+        )
+        print(
+            json.dumps(
+                {
+                    "queries": len(results),
+                    "segments": sum(len(result.segments) for result in results),
+                    "output": str(output_path),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
     elif args.command == "evaluate":
         results_path = args.results or (config.results_dir / "latest.jsonl")
         summary = write_reports(load_results(results_path), config.reports_dir)

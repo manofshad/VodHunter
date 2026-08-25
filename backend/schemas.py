@@ -60,6 +60,9 @@ class SearchResponse(BaseModel):
     timestamp_seconds: int | None = None
     score: float | None = None
     reason: str | None = None
+    segments: list["SearchSegmentResponse"] = Field(default_factory=list)
+    unmatched_ranges: list["UnmatchedRangeResponse"] = Field(default_factory=list)
+    query_duration_seconds: float | None = None
 
     @classmethod
     def from_result(cls, result: SearchResult) -> "SearchResponse":
@@ -75,7 +78,41 @@ class SearchResponse(BaseModel):
             timestamp_seconds=result.timestamp_seconds,
             score=result.score,
             reason=result.reason,
+            segments=[SearchSegmentResponse.from_segment(segment) for segment in result.segments],
+            unmatched_ranges=[UnmatchedRangeResponse.from_range(value) for value in result.unmatched_ranges],
+            query_duration_seconds=result.query_duration_seconds,
         )
+
+
+class SearchSegmentResponse(BaseModel):
+    query_start: float
+    query_end: float
+    video_id: int
+    vod_start: float
+    vod_end: float
+    video_url_at_timestamp: str | None = None
+    score: float
+
+    @classmethod
+    def from_segment(cls, segment) -> "SearchSegmentResponse":
+        return cls(
+            query_start=segment.query_start,
+            query_end=segment.query_end,
+            video_id=segment.video_id,
+            vod_start=segment.vod_start,
+            vod_end=segment.vod_end,
+            video_url_at_timestamp=segment.video_url_at_timestamp,
+            score=segment.score,
+        )
+
+
+class UnmatchedRangeResponse(BaseModel):
+    query_start: float
+    query_end: float
+
+    @classmethod
+    def from_range(cls, value) -> "UnmatchedRangeResponse":
+        return cls(query_start=value.query_start, query_end=value.query_end)
 
 
 class StreamerListItem(BaseModel):

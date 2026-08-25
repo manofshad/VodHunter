@@ -60,8 +60,21 @@ def build_log_from_outcome(
         total_duration_ms=outcome.total_duration_ms,
         preprocess_duration_ms=outcome.execution_metadata.preprocess_duration_ms,
         embed_duration_ms=outcome.execution_metadata.embed_duration_ms,
+        model_startup_duration_ms=outcome.execution_metadata.model_startup_duration_ms,
+        model_cold_start=outcome.execution_metadata.model_cold_start,
+        fingerprint_preprocessing_duration_ms=outcome.execution_metadata.fingerprint_preprocessing_duration_ms,
+        fingerprint_inference_duration_ms=outcome.execution_metadata.fingerprint_inference_duration_ms,
+        fingerprint_duration_ms=outcome.execution_metadata.fingerprint_duration_ms,
         vector_query_duration_ms=outcome.execution_metadata.vector_query_duration_ms,
         alignment_duration_ms=outcome.execution_metadata.alignment_duration_ms,
+        query_fingerprint_count=outcome.execution_metadata.query_fingerprint_count,
+        candidate_count=outcome.execution_metadata.candidate_count,
+        segment_count=outcome.execution_metadata.segment_count,
+        model_version=outcome.execution_metadata.model_version,
+        preprocessing_version=outcome.execution_metadata.preprocessing_version,
+        result_payload=outcome.result.to_dict(),
+        streamed_from=outcome.date_range.streamed_from if outcome.date_range is not None else None,
+        streamed_to=outcome.date_range.streamed_to if outcome.date_range is not None else None,
     )
 
 

@@ -1,5 +1,7 @@
 import os
 import tempfile
+import numpy as np
+from pipeline.nmfp_inference import segment_audio_windows
 from sources.live_archive_vod_source import LiveArchiveVODSource
 
 class FakeMonitor:
@@ -181,9 +183,23 @@ class TestLiveArchiveVODSource:
             assert source.store.get_video_status(source.video_id) == 'indexing'
             chunk1 = source.next_chunk()
             assert chunk1 is not None
+            assert chunk1.offset_seconds == 0.0
+            assert chunk1.duration_seconds == 60.0
             assert source.ingest_cursor_seconds == 0
             chunk2 = source.next_chunk()
             assert chunk2 is not None
+            assert chunk2.offset_seconds == 59.5
+            assert chunk2.duration_seconds == 60.5
+            cross_boundary_windows = segment_audio_windows(
+                np.zeros(round(chunk2.duration_seconds * 8_000), dtype=np.float32)
+            )
+            cross_boundary_timestamps = (
+                chunk2.offset_seconds
+                + np.arange(len(cross_boundary_windows), dtype=np.float32) * 0.5
+            )
+            assert cross_boundary_timestamps[0] == 59.5
+            assert 60.0 in cross_boundary_timestamps
+            assert cross_boundary_timestamps[-1] == 119.0
             assert source.ingest_cursor_seconds == 60
 
     def test_finalize_marks_video_processed(self) -> None:

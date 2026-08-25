@@ -33,6 +33,17 @@ body {
   flex-wrap: wrap;
 }
 
+.date-filter-row {
+  margin-top: 10px;
+}
+
+.date-filter-row label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.875rem;
+  color: #4f5b66;
+}
+
 input,
 select,
 button {
@@ -62,6 +73,69 @@ button {
   gap: 6px;
 }
 
+.segment-results {
+  margin-top: 10px;
+  padding-top: 12px;
+  border-top: 1px solid #d8e0e4;
+}
+
+.segment-results h3 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
+.segment-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.segment-list > li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #d8e0e4;
+  border-radius: 8px;
+  padding: 10px;
+  background: #f7fafb;
+}
+
+.segment-source {
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+
+.segment-score {
+  flex: 0 0 auto;
+  color: #4f5b66;
+  font-size: 0.875rem;
+}
+
+.unmatched-results p {
+  margin: 0 0 8px;
+  color: #4f5b66;
+}
+
+.unmatched-range-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.unmatched-range-list li {
+  border: 1px solid #d8e0e4;
+  border-radius: 999px;
+  padding: 4px 9px;
+  background: #f7fafb;
+  font-size: 0.875rem;
+}
+
 .table-wrap {
   margin-top: 12px;
   overflow-x: auto;
@@ -82,5 +156,10 @@ td {
 @media (max-width: 768px) {
   .container {
     padding: 12px;
+  }
+
+  .segment-list > li {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }

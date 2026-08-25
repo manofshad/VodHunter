@@ -5,7 +5,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT_DIR / "data"
 
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-VECTOR_DIM = int(os.getenv("VECTOR_DIM", "768"))
+VECTOR_DIM = int(os.getenv("VECTOR_DIM", "128"))
 HNSW_EF_SEARCH = int(os.getenv("HNSW_EF_SEARCH", "40"))
 TEMP_LIVE_DIR = str(DATA_DIR / "temp_live_chunks")
 TEMP_BACKFILL_DIR = str(DATA_DIR / "temp_backfill_chunks")
@@ -39,14 +39,54 @@ PUBLIC_API_ORIGIN = os.getenv("PUBLIC_API_ORIGIN", "").strip()
 ADMIN_API_ORIGIN = os.getenv("ADMIN_API_ORIGIN", "").strip()
 MODAL_SEARCH_APP_NAME = os.getenv("MODAL_SEARCH_APP_NAME", "").strip()
 MODAL_SEARCH_FUNCTION_NAME = os.getenv("MODAL_SEARCH_FUNCTION_NAME", "").strip()
-MODAL_SEARCH_TIMEOUT_SECONDS = float(os.getenv("MODAL_SEARCH_TIMEOUT_SECONDS", "60"))
-MODAL_SEARCH_MODEL_NAME = os.getenv("MODAL_SEARCH_MODEL_NAME", "").strip()
+MODAL_SEARCH_TIMEOUT_SECONDS = float(os.getenv("MODAL_SEARCH_TIMEOUT_SECONDS", "120"))
 INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY", "").strip()
+
+NMFP_CANONICAL_MODEL_VERSION = (
+    "nmfp-triplet@15c6f3bcdf6a6da1daddfe47a1ffa5a0d22deadc"
+    "+zenodo-15719945+ckpt-100"
+)
+NMFP_CANONICAL_PREPROCESSING_VERSION = "nmfp-8khz-mono-1s-hop0.5-mel-v1"
+NMFP_MODEL_VERSION = os.getenv(
+    "NMFP_MODEL_VERSION", NMFP_CANONICAL_MODEL_VERSION
+).strip()
+NMFP_PREPROCESSING_VERSION = os.getenv(
+    "NMFP_PREPROCESSING_VERSION", NMFP_CANONICAL_PREPROCESSING_VERSION
+).strip()
+NMFP_SAMPLE_RATE = int(os.getenv("NMFP_SAMPLE_RATE", "8000"))
+NMFP_WINDOW_SECONDS = float(os.getenv("NMFP_WINDOW_SECONDS", "1.0"))
+NMFP_HOP_SECONDS = float(os.getenv("NMFP_HOP_SECONDS", "0.5"))
+
+SEARCH_TOP_K = int(os.getenv("SEARCH_TOP_K", "10"))
+CUT_OFFSET_BIN_SECONDS = float(os.getenv("CUT_OFFSET_BIN_SECONDS", "0.5"))
+CUT_OFFSET_TOLERANCE_SECONDS = float(os.getenv("CUT_OFFSET_TOLERANCE_SECONDS", "1.0"))
+CUT_MAX_UNMATCHED_GAP_SECONDS = float(os.getenv("CUT_MAX_UNMATCHED_GAP_SECONDS", "2.0"))
+CUT_MIN_SUPPORT = int(os.getenv("CUT_MIN_SUPPORT", "6"))
+CUT_MIN_SEGMENT_DURATION_SECONDS = float(os.getenv("CUT_MIN_SEGMENT_DURATION_SECONDS", "4.0"))
+CUT_MIN_DENSITY = float(os.getenv("CUT_MIN_DENSITY", "0.4"))
+CUT_MERGE_QUERY_GAP_SECONDS = float(os.getenv("CUT_MERGE_QUERY_GAP_SECONDS", "1.0"))
+CUT_MERGE_OFFSET_TOLERANCE_SECONDS = float(os.getenv("CUT_MERGE_OFFSET_TOLERANCE_SECONDS", "4.0"))
+CUT_MAX_SEGMENTS = int(os.getenv("CUT_MAX_SEGMENTS", "12"))
 
 
 def validate_storage_config() -> None:
     if not DATABASE_URL:
         raise ValueError("DATABASE_URL is required")
+    if VECTOR_DIM != 128:
+        raise ValueError("VECTOR_DIM must be 128 for the pinned NMFP-triplet model")
+
+
+def validate_nmfp_config() -> None:
+    if NMFP_MODEL_VERSION != NMFP_CANONICAL_MODEL_VERSION:
+        raise ValueError("NMFP_MODEL_VERSION does not match the production index")
+    if NMFP_PREPROCESSING_VERSION != NMFP_CANONICAL_PREPROCESSING_VERSION:
+        raise ValueError("NMFP_PREPROCESSING_VERSION does not match the production index")
+    if NMFP_SAMPLE_RATE != 8000:
+        raise ValueError("NMFP_SAMPLE_RATE must be 8000 for the pinned model")
+    if NMFP_WINDOW_SECONDS != 1.0:
+        raise ValueError("NMFP_WINDOW_SECONDS must be 1.0 for the pinned model")
+    if NMFP_HOP_SECONDS != 0.5:
+        raise ValueError("NMFP_HOP_SECONDS must be 0.5 for the production index")
 
 
 def validate_modal_search_config() -> None:

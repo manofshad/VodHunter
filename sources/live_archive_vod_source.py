@@ -5,6 +5,7 @@ import time
 from datetime import datetime
 from typing import Optional
 
+from pipeline.nmfp_inference import NMFP_HOP_SECONDS, NMFP_SAMPLE_RATE
 from sources.audio_chunk import AudioChunk
 from sources.audio_source import AudioSource
 from services.twitch_monitor import TwitchMonitor
@@ -79,15 +80,18 @@ class LiveArchiveVODSource(AudioSource):
 
         if safe_end > cursor:
             chunk_len = min(self.chunk_seconds, safe_end - cursor)
-            chunk_path = self._extract_chunk(cursor, chunk_len)
+            extraction_start = max(0.0, float(cursor) - NMFP_HOP_SECONDS)
+            overlap_seconds = float(cursor) - extraction_start
+            extraction_duration = float(chunk_len) + overlap_seconds
+            chunk_path = self._extract_chunk(extraction_start, extraction_duration)
 
             self._pending_commit_end_seconds = cursor + chunk_len
             self._pending_chunk_path = chunk_path
 
             return AudioChunk(
                 audio_path=chunk_path,
-                offset_seconds=float(cursor),
-                duration_seconds=float(chunk_len),
+                offset_seconds=extraction_start,
+                duration_seconds=extraction_duration,
             )
 
         if self._last_is_live is False and self._no_growth_checks >= self.finalize_checks:
@@ -293,15 +297,17 @@ class LiveArchiveVODSource(AudioSource):
             thumbnail_url=thumbnail_url if should_update_thumbnail else None,
         )
 
-    def _extract_chunk(self, start_seconds: int, duration_seconds: int) -> str:
+    def _extract_chunk(self, start_seconds: float, duration_seconds: float) -> str:
         if duration_seconds <= 0:
             raise RuntimeError("duration_seconds must be positive")
         if not self.current_vod_url:
             raise RuntimeError("current_vod_url is not set")
 
+        start_milliseconds = int(round(float(start_seconds) * 1000.0))
+        duration_milliseconds = int(round(float(duration_seconds) * 1000.0))
         output_path = os.path.join(
             self.temp_dir,
-            f"vod_{self._vod_platform_id}_{start_seconds:08d}_{duration_seconds:04d}.wav",
+            f"vod_{self._vod_platform_id}_{start_milliseconds:012d}_{duration_milliseconds:08d}.wav",
         )
 
         media_url = self._resolve_media_url()
@@ -311,15 +317,17 @@ class LiveArchiveVODSource(AudioSource):
             "-loglevel",
             "error",
             "-ss",
-            str(start_seconds),
+            f"{float(start_seconds):.3f}",
             "-i",
             media_url,
             "-t",
-            str(duration_seconds),
+            f"{float(duration_seconds):.3f}",
             "-ar",
-            "16000",
+            str(NMFP_SAMPLE_RATE),
             "-ac",
             "1",
+            "-c:a",
+            "pcm_s16le",
             "-y",
             output_path,
         ]

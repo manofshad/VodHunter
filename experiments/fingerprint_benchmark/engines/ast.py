@@ -8,12 +8,10 @@ from pathlib import Path
 
 import numpy as np
 
-from pipeline.ast_inference import DEFAULT_AST_MODEL_NAME
-from pipeline.embedder import Embedder
-
 from ..alignment import temporal_vector_alignment
 from ..audio import extract_audio_clip, normalize_audio, probe_duration
 from ..models import QueryRecord, SearchResult
+from .ast_embedder import ASTEmbedder, DEFAULT_AST_MODEL_NAME
 from .base import BenchmarkEngine
 
 
@@ -22,11 +20,11 @@ class ASTEngine(BenchmarkEngine):
 
     def __init__(self, config):
         super().__init__(config)
-        self._embedder: Embedder | None = None
+        self._embedder: ASTEmbedder | None = None
 
-    def _get_embedder(self) -> Embedder:
+    def _get_embedder(self) -> ASTEmbedder:
         if self._embedder is None:
-            self._embedder = Embedder(model_name=DEFAULT_AST_MODEL_NAME)
+            self._embedder = ASTEmbedder(model_name=DEFAULT_AST_MODEL_NAME)
         return self._embedder
 
     @property

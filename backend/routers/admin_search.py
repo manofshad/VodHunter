@@ -8,6 +8,7 @@ from backend.routers.search_logging import (
     normalize_streamer_value,
     persist_search_log,
 )
+from backend.search_date_range import parse_search_date_range
 from backend.schemas import ErrorResponse, SearchResponse, StreamerListItem
 from backend.services.remote_clip_downloader import DownloadError, InvalidTikTokUrlError
 from backend.services.search_manager import InputDurationExceededError, SearchInputError
@@ -58,12 +59,15 @@ def search_clip(
     file: UploadFile | None = File(default=None),
     tiktok_url: str | None = Form(default=None),
     streamer: str | None = Form(default=None),
+    streamed_from: str | None = Form(default=None),
+    streamed_to: str | None = Form(default=None),
 ) -> SearchResponse:
     has_file = file is not None
     has_url = bool((tiktok_url or "").strip())
     input_type = infer_input_type(has_file=has_file, has_url=has_url)
     normalized_streamer = normalize_streamer_value(streamer)
     creator_id: int | None = None
+    date_range = parse_search_date_range(streamed_from, streamed_to)
     if has_file == has_url:
         persist_search_log(
             request,
@@ -80,6 +84,8 @@ def search_clip(
                 clip_filename=file.filename if file is not None else None,
                 download_source="tiktok" if has_url else None,
                 download_host=extract_download_host(tiktok_url),
+                streamed_from=date_range.streamed_from if date_range is not None else None,
+                streamed_to=date_range.streamed_to if date_range is not None else None,
             ),
         )
         raise HTTPException(
@@ -110,6 +116,8 @@ def search_clip(
                 clip_filename=file.filename if file is not None else None,
                 download_source="tiktok" if has_url else None,
                 download_host=extract_download_host(tiktok_url),
+                streamed_from=date_range.streamed_from if date_range is not None else None,
+                streamed_to=date_range.streamed_to if date_range is not None else None,
             ),
         )
         raise
@@ -118,10 +126,10 @@ def search_clip(
     try:
         if has_file:
             assert file is not None
-            outcome = search_manager.search_upload(file, normalized_streamer)
+            outcome = search_manager.search_upload(file, normalized_streamer, date_range=date_range)
         else:
             assert tiktok_url is not None
-            outcome = search_manager.search_tiktok_url(tiktok_url, normalized_streamer)
+            outcome = search_manager.search_tiktok_url(tiktok_url, normalized_streamer, date_range=date_range)
         persist_search_log(
             request,
             build_log_from_outcome(
@@ -149,6 +157,8 @@ def search_clip(
                 download_source="tiktok" if has_url else None,
                 download_host=extract_download_host(tiktok_url),
                 input_duration_seconds=exc.duration_seconds,
+                streamed_from=date_range.streamed_from if date_range is not None else None,
+                streamed_to=date_range.streamed_to if date_range is not None else None,
             ),
         )
         raise HTTPException(
@@ -171,6 +181,8 @@ def search_clip(
                 clip_filename=file.filename if file is not None else None,
                 download_source="tiktok" if has_url else None,
                 download_host=extract_download_host(tiktok_url),
+                streamed_from=date_range.streamed_from if date_range is not None else None,
+                streamed_to=date_range.streamed_to if date_range is not None else None,
             ),
         )
         raise HTTPException(
@@ -193,6 +205,8 @@ def search_clip(
                 clip_filename=file.filename if file is not None else None,
                 download_source="tiktok" if has_url else None,
                 download_host=extract_download_host(tiktok_url),
+                streamed_from=date_range.streamed_from if date_range is not None else None,
+                streamed_to=date_range.streamed_to if date_range is not None else None,
             ),
         )
         raise HTTPException(
@@ -215,6 +229,8 @@ def search_clip(
                 clip_filename=file.filename if file is not None else None,
                 download_source="tiktok" if has_url else None,
                 download_host=extract_download_host(tiktok_url),
+                streamed_from=date_range.streamed_from if date_range is not None else None,
+                streamed_to=date_range.streamed_to if date_range is not None else None,
             ),
         )
         raise HTTPException(
@@ -237,6 +253,8 @@ def search_clip(
                 clip_filename=file.filename if file is not None else None,
                 download_source="tiktok" if has_url else None,
                 download_host=extract_download_host(tiktok_url),
+                streamed_from=date_range.streamed_from if date_range is not None else None,
+                streamed_to=date_range.streamed_to if date_range is not None else None,
             ),
         )
         raise HTTPException(
