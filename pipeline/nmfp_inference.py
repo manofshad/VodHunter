@@ -21,7 +21,7 @@ NMFP_MODEL_VERSION = (
     "+zenodo-15719945+ckpt-100"
 )
 NMFP_PREPROCESSING_VERSION = "nmfp-8khz-mono-1s-hop0.5-mel-v1"
-NMFP_MODEL_CONFIG_NAME = "nmfp-triplet-hp_shn-Nppa_1-Na_768"
+NMFP_MODEL_CONFIG_NAME = "nmfp-triplet"
 NMFP_SAMPLE_RATE = 8000
 NMFP_WINDOW_SECONDS = 1.0
 NMFP_HOP_SECONDS = 0.5
