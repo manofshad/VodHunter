@@ -868,14 +868,16 @@ class VectorStore:
                             1 - (fe.embedding <=> query_row.embedding) AS similarity,
                             (
                                 ROW_NUMBER() OVER (
-                                    ORDER BY fe.embedding <=> query_row.embedding, fe.fingerprint_id
+                                    ORDER BY fe.embedding <=> query_row.embedding
                                 ) - 1
                             )::integer AS rank
                         FROM fingerprint_embeddings AS fe
                         JOIN fingerprints AS f ON f.id = fe.fingerprint_id
                         JOIN videos AS v ON v.id = f.video_id
                         WHERE {' AND '.join(predicates)}
-                        ORDER BY fe.embedding <=> query_row.embedding, fe.fingerprint_id
+                        -- Keep the inner order distance-only so pgvector can use
+                        -- the HNSW index. Tie-breaking happens after LIMIT.
+                        ORDER BY fe.embedding <=> query_row.embedding
                         LIMIT %s
                     ) AS neighbor
                     ORDER BY query_row.query_index, neighbor.rank
