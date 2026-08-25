@@ -15,7 +15,11 @@ def _route_paths(routes) -> set[str]:
         path = getattr(route, 'path', None)
         if path is not None:
             paths.add(path)
-        nested_routes = getattr(route, 'routes', None)
+        effective_candidates = getattr(route, 'effective_candidates', None)
+        if callable(effective_candidates):
+            nested_routes = effective_candidates()
+        else:
+            nested_routes = getattr(route, 'routes', None)
         if nested_routes is not None:
             paths.update(_route_paths(nested_routes))
     return paths
@@ -30,6 +34,14 @@ class StubMonitorManager:
         self.stop_calls += 1
 
 class TestApiAppSplit:
+
+    def test_route_paths_support_lazy_included_router(self) -> None:
+        class IncludedRouter:
+
+            def effective_candidates(self):
+                return [type('Route', (), {'path': '/api/health'})()]
+
+        assert _route_paths([IncludedRouter()]) == {'/api/health'}
 
     def test_ingest_bootstrap_does_not_import_fastapi(self) -> None:
         root = Path(__file__).resolve().parents[1]
