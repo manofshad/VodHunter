@@ -80,7 +80,10 @@ class TestHistoricalArchiveVODSource:
             store.upsert_vod_ingest_state('vod-1', video_id, 'alice', 120, 180)
             source = HistoricalArchiveVODSource(streamer='alice', vod_metadata=self._make_vod(), store=store, creator_metadata={'profile_image_url': 'https://cdn/alice.png'}, chunk_seconds=60, temp_dir=f'{tmp}/chunks')
 
-            def fake_extract_chunk(start_seconds: int, duration_seconds: int) -> str:
+            extraction_calls: list[tuple[float, float]] = []
+
+            def fake_extract_chunk(start_seconds: float, duration_seconds: float) -> str:
+                extraction_calls.append((start_seconds, duration_seconds))
                 out = os.path.join(source.temp_dir, f'chunk_{start_seconds}_{duration_seconds}.wav')
                 os.makedirs(source.temp_dir, exist_ok=True)
                 with open(out, 'wb') as handle:
@@ -94,7 +97,9 @@ class TestHistoricalArchiveVODSource:
             chunk = source.next_chunk()
             assert chunk is not None
             assert chunk is not None
-            assert chunk.offset_seconds == 120.0
+            assert chunk.offset_seconds == 119.5
+            assert chunk.duration_seconds == 60.5
+            assert extraction_calls == [(119.5, 60.5)]
             assert store.vod_state['vod-1']['last_ingested_seconds'] == 120
             source.next_chunk()
             assert source.ingest_cursor_seconds == 180

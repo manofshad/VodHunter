@@ -8,7 +8,6 @@ from search.modal_embedding_client import ModalEmbeddingClient
 from search.modal_query_embedder import ModalQueryEmbedder
 from search.query_preprocessor import QueryPreprocessor
 from search.search_service import SearchService
-from search.vector_matcher import VectorMatcher
 from storage.vector_store import VectorStore
 
 
@@ -25,11 +24,14 @@ def prepare_admin_runtime_dirs() -> None:
 
 def build_store_state() -> dict[str, object]:
     config.validate_storage_config()
+    config.validate_nmfp_config()
 
     store = VectorStore(
         database_url=config.DATABASE_URL,
         vector_dim=config.VECTOR_DIM,
         hnsw_ef_search=config.HNSW_EF_SEARCH,
+        model_version=config.NMFP_MODEL_VERSION,
+        preprocessing_version=config.NMFP_PREPROCESSING_VERSION,
     )
     store.ensure_schema_ready()
 
@@ -38,6 +40,7 @@ def build_store_state() -> dict[str, object]:
 
 def build_modal_query_embedder() -> ModalQueryEmbedder:
     config.validate_modal_search_config()
+    config.validate_nmfp_config()
     client = ModalEmbeddingClient(
         app_name=config.MODAL_SEARCH_APP_NAME,
         function_name=config.MODAL_SEARCH_FUNCTION_NAME,
@@ -46,7 +49,8 @@ def build_modal_query_embedder() -> ModalQueryEmbedder:
     return ModalQueryEmbedder(
         client=client,
         vector_dim=config.VECTOR_DIM,
-        model_version=config.MODAL_SEARCH_MODEL_NAME,
+        model_version=config.NMFP_MODEL_VERSION,
+        preprocessing_version=config.NMFP_PREPROCESSING_VERSION,
     )
 
 
@@ -59,11 +63,22 @@ def build_search_stack(
         store=store,
         preprocessor=QueryPreprocessor(temp_dir=config.TEMP_SEARCH_PREPROCESS_DIR),
         query_embedder=build_modal_query_embedder(),
-        matcher=VectorMatcher(top_k=10),
         alignment=AlignmentService(
-            store=store,
-            config=AlignmentConfig(min_vote_count=3, min_vote_ratio=0.08),
+            config=AlignmentConfig(
+                top_k=config.SEARCH_TOP_K,
+                fingerprint_hop_seconds=config.NMFP_HOP_SECONDS,
+                offset_bin_seconds=config.CUT_OFFSET_BIN_SECONDS,
+                offset_tolerance_seconds=config.CUT_OFFSET_TOLERANCE_SECONDS,
+                max_unmatched_gap_seconds=config.CUT_MAX_UNMATCHED_GAP_SECONDS,
+                min_support=config.CUT_MIN_SUPPORT,
+                min_segment_duration_seconds=config.CUT_MIN_SEGMENT_DURATION_SECONDS,
+                min_density=config.CUT_MIN_DENSITY,
+                merge_query_gap_seconds=config.CUT_MERGE_QUERY_GAP_SECONDS,
+                merge_offset_tolerance_seconds=config.CUT_MERGE_OFFSET_TOLERANCE_SECONDS,
+                max_segments=config.CUT_MAX_SEGMENTS,
+            ),
         ),
+        top_k=config.SEARCH_TOP_K,
     )
 
     search_manager = SearchManager(

@@ -1,4 +1,11 @@
-from runners.run_backfill_ingest import main, run_backfill_ingest
+import pytest
+
+from runners.run_backfill_ingest import (
+    FreshNMFPReindexPreconditionError,
+    main,
+    run_backfill_ingest,
+)
+
 
 class FakeMonitor:
 
@@ -215,11 +222,144 @@ class TestRunBackfillIngest:
         assert not any(line.startswith('skip indexing vod=resume-indexing') for line in logs)
         assert any(line.startswith('resume vod=resume-indexing cursor=30') for line in logs)
 
+    def test_fresh_nmfp_reindex_rejects_searchable_or_resumable_rows_before_model_build(self) -> None:
+        store = FakeStore()
+        store.videos_by_url['https://www.twitch.tv/videos/searchable'] = (
+            4,
+            1,
+            'https://www.twitch.tv/videos/searchable',
+            'Legacy searchable',
+            None,
+            True,
+            None,
+        )
+        store.video_status_by_id[4] = 'searchable'
+        store.videos_by_url['https://www.twitch.tv/videos/indexing'] = (
+            5,
+            1,
+            'https://www.twitch.tv/videos/indexing',
+            'Ambiguous partial index',
+            None,
+            False,
+            None,
+        )
+        store.video_status_by_id[5] = 'indexing'
+        store.vod_state['indexing'] = {
+            'vod_platform_id': 'indexing',
+            'video_id': 5,
+            'streamer': 'alice',
+            'last_ingested_seconds': 60,
+            'last_seen_duration_seconds': 180,
+            'updated_at': 'now',
+        }
+        monitor = FakeMonitor(
+            [
+                {'id': 'searchable', 'url': 'https://www.twitch.tv/videos/searchable'},
+                {'id': 'indexing', 'url': 'https://www.twitch.tv/videos/indexing'},
+            ]
+        )
+        build_ingest_calls: list[bool] = []
+
+        with pytest.raises(FreshNMFPReindexPreconditionError) as raised:
+            run_backfill_ingest(
+                'alice',
+                7,
+                fresh_nmfp_reindex=True,
+                monitor=monitor,
+                build_store=lambda: self._build_state(store),
+                build_ingest=lambda: build_ingest_calls.append(True) or {'embedder': object()},
+                source_factory=FakeSource,
+                session_factory=FakeSession,
+            )
+
+        message = str(raised.value)
+        assert 'Apply the NMFP schema migration first' in message
+        assert 'vod=searchable status=searchable has_saved_cursor=false' in message
+        assert 'vod=indexing status=indexing has_saved_cursor=true' in message
+        assert build_ingest_calls == []
+
+    def test_fresh_nmfp_reindex_accepts_migration_marked_rows_and_never_resumes_cursor(self) -> None:
+        store = FakeStore()
+        store.videos_by_url['https://www.twitch.tv/videos/reindex'] = (
+            6,
+            1,
+            'https://www.twitch.tv/videos/reindex',
+            'Prepared reindex',
+            None,
+            True,
+            None,
+        )
+        store.video_status_by_id[6] = 'reindex_requested'
+        store.vod_state['reindex'] = {
+            'vod_platform_id': 'reindex',
+            'video_id': 6,
+            'streamer': 'alice',
+            'last_ingested_seconds': 90,
+            'last_seen_duration_seconds': 180,
+            'updated_at': 'now',
+        }
+        monitor = FakeMonitor(
+            [{'id': 'reindex', 'url': 'https://www.twitch.tv/videos/reindex'}]
+        )
+        logs: list[str] = []
+
+        result = run_backfill_ingest(
+            'alice',
+            7,
+            fresh_nmfp_reindex=True,
+            monitor=monitor,
+            build_store=lambda: self._build_state(store),
+            build_ingest=lambda: {'embedder': object()},
+            source_factory=FakeSource,
+            session_factory=FakeSession,
+            out=logs.append,
+        )
+
+        assert result.ingested == 1
+        assert result.resumed == 0
+        assert store.deleted_vod_state_ids == ['reindex']
+        assert logs[0] == (
+            'fresh_nmfp_reindex preflight=passed '
+            'streamer=alice vod_count=1 resume_allowed=false'
+        )
+        assert not any(line.startswith('resume vod=reindex') for line in logs)
+        assert any(line.startswith('starting vod 1/1 vod=reindex') and 'cursor=0' in line for line in logs)
+
+    def test_fresh_nmfp_reindex_accepts_a_vod_missing_from_a_fresh_database(self) -> None:
+        store = FakeStore()
+        monitor = FakeMonitor(
+            [{'id': 'new-vod', 'url': 'https://www.twitch.tv/videos/new-vod'}]
+        )
+        logs: list[str] = []
+
+        result = run_backfill_ingest(
+            'alice',
+            7,
+            fresh_nmfp_reindex=True,
+            monitor=monitor,
+            build_store=lambda: self._build_state(store),
+            build_ingest=lambda: {'embedder': object()},
+            source_factory=FakeSource,
+            session_factory=FakeSession,
+            out=logs.append,
+        )
+
+        assert result.ingested == 1
+        assert result.resumed == 0
+        assert store.deleted_vod_state_ids == []
+        assert any(line.startswith('starting vod 1/1 vod=new-vod') and 'cursor=0' in line for line in logs)
+
     def test_main_returns_non_zero_on_failure(self) -> None:
         import runners.run_backfill_ingest as module
         original = module.run_backfill_ingest
         try:
-            module.run_backfill_ingest = lambda streamer, days: type('R', (), {'failed': 1})()
+            seen: list[tuple[str, int, bool]] = []
+            module.run_backfill_ingest = lambda streamer, days, fresh_nmfp_reindex=False: (
+                seen.append((streamer, days, fresh_nmfp_reindex))
+                or type('R', (), {'failed': 1})()
+            )
             assert main(['--streamer', 'alice', '--days', '3']) == 1
+            assert main(['--streamer', 'alice', '--days', '3', '--fresh-nmfp-reindex']) == 1
+            assert seen == [('alice', 3, False), ('alice', 3, True)]
         finally:
             module.run_backfill_ingest = original

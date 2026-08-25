@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import asdict, fields, is_dataclass
 from datetime import datetime, timezone
+import json
 import logging
 import time
 from typing import Any, List
@@ -8,10 +10,27 @@ from typing import Any, List
 import numpy as np
 
 from backend.db_url import normalize_database_url
-from search.models import SearchJobRecord, SearchRequestLog, SearchRequestOutcome, SearchResult
+from pipeline.nmfp_inference import (
+    NMFP_EMBEDDING_DIM,
+    NMFP_MODEL_VERSION,
+    NMFP_PREPROCESSING_VERSION,
+)
+from search.models import (
+    FingerprintCandidate,
+    SearchDateRange,
+    SearchJobRecord,
+    SearchRequestLog,
+    SearchRequestOutcome,
+    SearchResult,
+)
 
 
 logger = logging.getLogger("uvicorn.error")
+
+
+NMFP_VECTOR_DIM = NMFP_EMBEDDING_DIM
+DEFAULT_NMFP_MODEL_VERSION = NMFP_MODEL_VERSION
+DEFAULT_NMFP_PREPROCESSING_VERSION = NMFP_PREPROCESSING_VERSION
 
 
 VIDEO_STATUS_INDEXING = "indexing"
@@ -48,15 +67,25 @@ class VectorStore:
     def __init__(
         self,
         database_url: str,
-        vector_dim: int = 768,
+        vector_dim: int = NMFP_VECTOR_DIM,
         hnsw_ef_search: int = 40,
+        model_version: str = DEFAULT_NMFP_MODEL_VERSION,
+        preprocessing_version: str = DEFAULT_NMFP_PREPROCESSING_VERSION,
     ):
         self.database_url = self._normalize_database_url(database_url)
         if not self.database_url:
             raise ValueError("DATABASE_URL is required")
 
         self.vector_dim = int(vector_dim)
+        if self.vector_dim != NMFP_VECTOR_DIM:
+            raise ValueError(f"NMFP storage requires vector_dim={NMFP_VECTOR_DIM}")
         self.hnsw_ef_search = max(int(hnsw_ef_search), 1)
+        self.model_version = str(model_version).strip()
+        self.preprocessing_version = str(preprocessing_version).strip()
+        if not self.model_version:
+            raise ValueError("model_version is required")
+        if not self.preprocessing_version:
+            raise ValueError("preprocessing_version is required")
 
         try:
             import psycopg  # type: ignore
@@ -110,6 +139,7 @@ class VectorStore:
                     "videos",
                     "fingerprints",
                     "fingerprint_embeddings",
+                    "fingerprint_index_metadata",
                     "vod_ingest_state",
                     "search_requests",
                 )
@@ -142,11 +172,26 @@ class VectorStore:
                     ("videos", "streamed_at"),
                     ("videos", "status"),
                     ("fingerprint_embeddings", "creator_id"),
+                    ("fingerprint_embeddings", "model_version"),
+                    ("fingerprint_embeddings", "preprocessing_version"),
                     ("search_requests", "job_status"),
                     ("search_requests", "job_stage"),
                     ("search_requests", "started_at"),
                     ("search_requests", "finished_at"),
                     ("search_requests", "tiktok_url"),
+                    ("search_requests", "streamed_from"),
+                    ("search_requests", "streamed_to"),
+                    ("search_requests", "result_payload"),
+                    ("search_requests", "model_version"),
+                    ("search_requests", "preprocessing_version"),
+                    ("search_requests", "model_startup_duration_ms"),
+                    ("search_requests", "model_cold_start"),
+                    ("search_requests", "fingerprint_preprocessing_duration_ms"),
+                    ("search_requests", "fingerprint_inference_duration_ms"),
+                    ("search_requests", "fingerprint_duration_ms"),
+                    ("search_requests", "query_fingerprint_count"),
+                    ("search_requests", "candidate_count"),
+                    ("search_requests", "segment_count"),
                 )
                 missing_columns: list[str] = []
                 for table_name, column_name in required_columns:
@@ -172,9 +217,55 @@ class VectorStore:
                         f"(missing columns: {', '.join(missing_columns)})"
                     )
 
+                cur.execute(
+                    """
+                    SELECT format_type(attribute.atttypid, attribute.atttypmod)
+                    FROM pg_attribute AS attribute
+                    JOIN pg_class AS relation ON relation.oid = attribute.attrelid
+                    JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+                    WHERE namespace.nspname = current_schema()
+                      AND relation.relname = 'fingerprint_embeddings'
+                      AND attribute.attname = 'embedding'
+                      AND attribute.attnum > 0
+                      AND NOT attribute.attisdropped
+                    LIMIT 1
+                    """
+                )
+                vector_type_row = cur.fetchone()
+                expected_vector_type = f"vector({self.vector_dim})"
+                actual_vector_type = str(vector_type_row[0]) if vector_type_row and vector_type_row[0] else None
+                if actual_vector_type != expected_vector_type:
+                    raise RuntimeError(
+                        "Database embedding width does not match the configured NMFP model; "
+                        f"expected {expected_vector_type}, found {actual_vector_type or 'missing'}"
+                    )
+
+                cur.execute(
+                    """
+                    SELECT model_version, preprocessing_version, embedding_dim
+                    FROM fingerprint_index_metadata
+                    WHERE singleton = TRUE
+                    LIMIT 1
+                    """
+                )
+                metadata_row = cur.fetchone()
+                expected_metadata = (self.model_version, self.preprocessing_version, self.vector_dim)
+                actual_metadata = (
+                    (str(metadata_row[0]), str(metadata_row[1]), int(metadata_row[2]))
+                    if metadata_row is not None
+                    else None
+                )
+                if actual_metadata != expected_metadata:
+                    raise RuntimeError(
+                        "Database fingerprint index metadata is incompatible with the configured NMFP runtime; "
+                        f"expected={expected_metadata} found={actual_metadata or 'missing'}"
+                    )
+
     def append_vectors(self, embeddings: np.ndarray, ids: List[int], creator_id: int | None) -> None:
         if embeddings.size == 0:
             return
+        if embeddings.ndim != 2 or embeddings.shape[1] != self.vector_dim:
+            raise ValueError(f"embeddings must have shape (n, {self.vector_dim})")
         if len(embeddings) != len(ids):
             raise ValueError("embeddings/ids length mismatch")
         if creator_id is None:
@@ -185,12 +276,13 @@ class VectorStore:
                 int(fp_id),
                 embeddings[idx].astype(np.float32).tolist(),
                 int(creator_id),
-                "MIT/ast-finetuned-audioset-10-10-0.4593",
+                self.model_version,
+                self.preprocessing_version,
             )
             for idx, fp_id in enumerate(ids)
         ]
 
-        placeholders = ", ".join(["(%s, %s, %s, %s)"] * len(rows))
+        placeholders = ", ".join(["(%s, %s, %s, %s, %s)"] * len(rows))
         params: list[Any] = []
         for row in rows:
             params.extend(row)
@@ -199,12 +291,19 @@ class VectorStore:
             with conn.cursor() as cur:
                 cur.execute(
                     f"""
-                    INSERT INTO fingerprint_embeddings (fingerprint_id, embedding, creator_id, model_name)
+                    INSERT INTO fingerprint_embeddings (
+                        fingerprint_id,
+                        embedding,
+                        creator_id,
+                        model_version,
+                        preprocessing_version
+                    )
                     VALUES {placeholders}
                     ON CONFLICT (fingerprint_id) DO UPDATE
                     SET embedding = excluded.embedding,
                         creator_id = excluded.creator_id,
-                        model_name = excluded.model_name
+                        model_version = excluded.model_version,
+                        preprocessing_version = excluded.preprocessing_version
                     """,
                     params,
                 )
@@ -666,11 +765,160 @@ class VectorStore:
             last_seen_duration_seconds=last_seen_duration_seconds,
         )
 
+    def query_fingerprint_candidates(
+        self,
+        query_embeddings: np.ndarray,
+        query_timestamps: np.ndarray,
+        top_k: int,
+        creator_id: int,
+        model_version: str | None = None,
+        preprocessing_version: str | None = None,
+        date_range: SearchDateRange | None = None,
+    ) -> list[FingerprintCandidate]:
+        """Return ranked, timeline-aware NMFP candidates for every query fingerprint.
+
+        A single VALUES/LATERAL statement avoids one client/server round trip per
+        half-second query fingerprint while still allowing pgvector to perform a
+        top-k ordered scan for each query row.
+        """
+
+        if query_embeddings.size == 0:
+            return []
+        if query_embeddings.ndim != 2 or query_embeddings.shape[1] != self.vector_dim:
+            raise ValueError(f"query_embeddings must have shape (n, {self.vector_dim})")
+        if query_timestamps.ndim != 1 or len(query_timestamps) != len(query_embeddings):
+            raise ValueError("query_embeddings/query_timestamps length mismatch")
+        if int(creator_id) <= 0:
+            raise ValueError("creator_id is required")
+        if int(top_k) <= 0:
+            raise ValueError("top_k must be positive")
+
+        resolved_model_version = str(
+            model_version if model_version is not None else self.model_version
+        ).strip()
+        resolved_preprocessing_version = str(
+            preprocessing_version if preprocessing_version is not None else self.preprocessing_version
+        ).strip()
+        if not resolved_model_version:
+            raise ValueError("model_version is required")
+        if not resolved_preprocessing_version:
+            raise ValueError("preprocessing_version is required")
+
+        values_sql: list[str] = []
+        params: list[Any] = []
+        for query_index, (embedding, query_time) in enumerate(zip(query_embeddings, query_timestamps)):
+            values_sql.append("(%s, %s, %s::vector)")
+            params.extend(
+                [
+                    int(query_index),
+                    float(query_time),
+                    embedding.astype(np.float32).tolist(),
+                ]
+            )
+
+        predicates = [
+            "fe.creator_id = %s",
+            "v.creator_id = %s",
+            "fe.model_version = %s",
+            "fe.preprocessing_version = %s",
+            "v.status = 'searchable'",
+        ]
+        params.extend(
+            [
+                int(creator_id),
+                int(creator_id),
+                resolved_model_version,
+                resolved_preprocessing_version,
+            ]
+        )
+        has_date_bounds = date_range is not None and date_range.has_bounds
+        if has_date_bounds:
+            predicates.append("v.streamed_at IS NOT NULL")
+            if date_range.streamed_from is not None:
+                predicates.append("v.streamed_at >= %s")
+                params.append(date_range.streamed_from)
+            if date_range.streamed_to is not None:
+                predicates.append("v.streamed_at < %s")
+                params.append(date_range.streamed_to)
+        params.append(int(top_k))
+
+        started_at = time.perf_counter()
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"SET LOCAL hnsw.ef_search = {self.hnsw_ef_search}")
+                cur.execute(
+                    f"""
+                    WITH query_fingerprints(query_index, query_time, embedding) AS (
+                        VALUES {', '.join(values_sql)}
+                    )
+                    SELECT
+                        query_row.query_index,
+                        query_row.query_time,
+                        neighbor.fingerprint_id,
+                        neighbor.video_id,
+                        neighbor.vod_time,
+                        neighbor.similarity,
+                        neighbor.rank
+                    FROM query_fingerprints AS query_row
+                    CROSS JOIN LATERAL (
+                        SELECT
+                            fe.fingerprint_id,
+                            f.video_id,
+                            f.timestamp_seconds AS vod_time,
+                            1 - (fe.embedding <=> query_row.embedding) AS similarity,
+                            (
+                                ROW_NUMBER() OVER (
+                                    ORDER BY fe.embedding <=> query_row.embedding, fe.fingerprint_id
+                                ) - 1
+                            )::integer AS rank
+                        FROM fingerprint_embeddings AS fe
+                        JOIN fingerprints AS f ON f.id = fe.fingerprint_id
+                        JOIN videos AS v ON v.id = f.video_id
+                        WHERE {' AND '.join(predicates)}
+                        ORDER BY fe.embedding <=> query_row.embedding, fe.fingerprint_id
+                        LIMIT %s
+                    ) AS neighbor
+                    ORDER BY query_row.query_index, neighbor.rank
+                    """,
+                    tuple(params),
+                )
+                rows = cur.fetchall()
+        retrieval_seconds = time.perf_counter() - started_at
+
+        logger.info(
+            "timing event=vector_store_nmfp_candidates query_count=%d candidate_count=%d "
+            "creator_id=%d top_k=%d ef_search=%d date_filtered=%s seconds=%.3f "
+            "model_version=%s preprocessing_version=%s",
+            len(query_embeddings),
+            len(rows),
+            int(creator_id),
+            int(top_k),
+            self.hnsw_ef_search,
+            has_date_bounds,
+            retrieval_seconds,
+            resolved_model_version,
+            resolved_preprocessing_version,
+        )
+
+        return [
+            FingerprintCandidate(
+                query_index=int(row[0]),
+                query_time=float(row[1]),
+                fingerprint_id=int(row[2]),
+                video_id=int(row[3]),
+                vod_time=float(row[4]),
+                similarity=float(row[5]),
+                rank=int(row[6]),
+            )
+            for row in rows
+        ]
+
     def query_similar_fingerprint_ids(
         self,
         query_embeddings: np.ndarray,
         top_k: int,
         creator_id: int,
+        date_range: SearchDateRange | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         if query_embeddings.size == 0:
             return np.empty((0, 0), dtype=np.float32), np.empty((0, 0), dtype=np.int64)
@@ -682,32 +930,57 @@ class VectorStore:
         all_scores: list[list[float]] = []
         all_ids: list[list[int]] = []
         primary_query_seconds = 0.0
+        has_date_bounds = date_range is not None and date_range.has_bounds
 
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(f"SET LOCAL hnsw.ef_search = {self.hnsw_ef_search}")
                 for q in query_rows:
                     started_at = time.perf_counter()
-                    cur.execute(
-                        """
-                        SELECT fingerprint_id, (1 - (embedding <=> %s::vector)) AS score
-                        FROM fingerprint_embeddings
-                        WHERE creator_id = %s
-                        ORDER BY embedding <=> %s::vector
-                        LIMIT %s
-                        """,
-                        (q, int(creator_id), q, int(top_k)),
-                    )
+                    if has_date_bounds:
+                        predicates = ["fe.creator_id = %s", "v.creator_id = %s", "v.streamed_at IS NOT NULL"]
+                        params: list[Any] = [q, int(creator_id), int(creator_id)]
+                        if date_range.streamed_from is not None:
+                            predicates.append("v.streamed_at >= %s")
+                            params.append(date_range.streamed_from)
+                        if date_range.streamed_to is not None:
+                            predicates.append("v.streamed_at < %s")
+                            params.append(date_range.streamed_to)
+                        params.extend([q, int(top_k)])
+                        cur.execute(
+                            f"""
+                            SELECT fe.fingerprint_id, (1 - (fe.embedding <=> %s::vector)) AS score
+                            FROM fingerprint_embeddings fe
+                            JOIN fingerprints f ON f.id = fe.fingerprint_id
+                            JOIN videos v ON v.id = f.video_id
+                            WHERE {' AND '.join(predicates)}
+                            ORDER BY fe.embedding <=> %s::vector
+                            LIMIT %s
+                            """,
+                            tuple(params),
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            SELECT fingerprint_id, (1 - (embedding <=> %s::vector)) AS score
+                            FROM fingerprint_embeddings
+                            WHERE creator_id = %s
+                            ORDER BY embedding <=> %s::vector
+                            LIMIT %s
+                            """,
+                            (q, int(creator_id), q, int(top_k)),
+                        )
                     rows = cur.fetchall()
                     primary_query_seconds += time.perf_counter() - started_at
                     all_ids.append([int(r[0]) for r in rows])
                     all_scores.append([float(r[1]) for r in rows])
 
         logger.info(
-            "timing event=vector_store_knn query_count=%d creator_id=%d ef_search=%d primary_seconds=%.2f first_result_count=%d",
+            "timing event=vector_store_knn query_count=%d creator_id=%d ef_search=%d date_filtered=%s primary_seconds=%.2f first_result_count=%d",
             len(query_rows),
             int(creator_id),
             self.hnsw_ef_search,
+            has_date_bounds,
             primary_query_seconds,
             len(all_ids[0]) if all_ids else 0,
         )
@@ -805,6 +1078,31 @@ class VectorStore:
             for r in rows
         ]
 
+    def _serialize_search_result(self, result: SearchResult) -> str:
+        to_dict = getattr(result, "to_dict", None)
+        if callable(to_dict):
+            payload = to_dict()
+        elif is_dataclass(result):
+            payload = asdict(result)
+        else:  # pragma: no cover - SearchResult is a dataclass in production
+            payload = dict(vars(result))
+        return json.dumps(payload, separators=(",", ":"), sort_keys=True)
+
+    def _deserialize_search_result(self, payload: Any) -> SearchResult:
+        if isinstance(payload, str):
+            value = json.loads(payload)
+        elif isinstance(payload, dict):
+            value = payload
+        else:
+            raise ValueError("Stored search result payload must be a JSON object")
+
+        from_dict = getattr(SearchResult, "from_dict", None)
+        if callable(from_dict):
+            return from_dict(value)
+
+        known_fields = {field.name for field in fields(SearchResult)}
+        return SearchResult(**{key: item for key, item in value.items() if key in known_fields})
+
     def log_search_request(self, log: SearchRequestLog) -> None:
         with self._connect() as conn:
             with conn.cursor() as cur:
@@ -832,11 +1130,26 @@ class VectorStore:
                         total_duration_ms,
                         preprocess_duration_ms,
                         embed_duration_ms,
+                        model_startup_duration_ms,
+                        model_cold_start,
+                        fingerprint_preprocessing_duration_ms,
+                        fingerprint_inference_duration_ms,
+                        fingerprint_duration_ms,
                         vector_query_duration_ms,
-                        alignment_duration_ms
+                        alignment_duration_ms,
+                        query_fingerprint_count,
+                        candidate_count,
+                        segment_count,
+                        model_version,
+                        preprocessing_version,
+                        result_payload,
+                        streamed_from,
+                        streamed_to
                     )
                     VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s
                     )
                     """,
                     (
@@ -861,12 +1174,37 @@ class VectorStore:
                         log.total_duration_ms,
                         log.preprocess_duration_ms,
                         log.embed_duration_ms,
+                        log.model_startup_duration_ms,
+                        log.model_cold_start,
+                        log.fingerprint_preprocessing_duration_ms,
+                        log.fingerprint_inference_duration_ms,
+                        log.fingerprint_duration_ms,
                         log.vector_query_duration_ms,
                         log.alignment_duration_ms,
+                        log.query_fingerprint_count,
+                        log.candidate_count,
+                        log.segment_count,
+                        log.model_version or getattr(self, "model_version", DEFAULT_NMFP_MODEL_VERSION),
+                        log.preprocessing_version
+                        or getattr(
+                            self,
+                            "preprocessing_version",
+                            DEFAULT_NMFP_PREPROCESSING_VERSION,
+                        ),
+                        json.dumps(log.result_payload) if log.result_payload is not None else None,
+                        log.streamed_from,
+                        log.streamed_to,
                     ),
                 )
 
-    def create_public_search_job(self, *, tiktok_url: str, streamer: str, creator_id: int | None) -> int:
+    def create_public_search_job(
+        self,
+        *,
+        tiktok_url: str,
+        streamer: str,
+        creator_id: int | None,
+        date_range: SearchDateRange | None = None,
+    ) -> int:
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -880,12 +1218,30 @@ class VectorStore:
                         success,
                         job_status,
                         job_stage,
-                        tiktok_url
+                        tiktok_url,
+                        streamed_from,
+                        streamed_to,
+                        model_version,
+                        preprocessing_version
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
                     """,
-                    ("public", "/api/search/clip", "tiktok_url", streamer, creator_id, False, "queued", "validating", tiktok_url),
+                    (
+                        "public",
+                        "/api/search/clip",
+                        "tiktok_url",
+                        streamer,
+                        creator_id,
+                        False,
+                        "queued",
+                        "validating",
+                        tiktok_url,
+                        date_range.streamed_from if date_range is not None else None,
+                        date_range.streamed_to if date_range is not None else None,
+                        self.model_version,
+                        self.preprocessing_version,
+                    ),
                 )
                 row = cur.fetchone()
         if row is None:
@@ -927,6 +1283,11 @@ class VectorStore:
     def complete_search_job(self, search_id: int, outcome: SearchRequestOutcome) -> None:
         metadata = outcome.execution_metadata
         result = outcome.result
+        result_payload = self._serialize_search_result(result)
+        result_segments = getattr(result, "segments", None)
+        segment_count = getattr(metadata, "segment_count", None)
+        if segment_count is None and result_segments is not None:
+            segment_count = len(result_segments)
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -950,6 +1311,17 @@ class VectorStore:
                         embed_duration_ms = %s,
                         vector_query_duration_ms = %s,
                         alignment_duration_ms = %s,
+                        result_payload = %s::jsonb,
+                        model_version = %s,
+                        preprocessing_version = %s,
+                        model_startup_duration_ms = %s,
+                        model_cold_start = %s,
+                        fingerprint_preprocessing_duration_ms = %s,
+                        fingerprint_inference_duration_ms = %s,
+                        fingerprint_duration_ms = %s,
+                        query_fingerprint_count = %s,
+                        candidate_count = %s,
+                        segment_count = %s,
                         job_status = 'completed',
                         job_stage = NULL,
                         finished_at = NOW()
@@ -970,6 +1342,17 @@ class VectorStore:
                         metadata.embed_duration_ms,
                         metadata.vector_query_duration_ms,
                         metadata.alignment_duration_ms,
+                        result_payload,
+                        getattr(metadata, "model_version", None) or self.model_version,
+                        getattr(metadata, "preprocessing_version", None) or self.preprocessing_version,
+                        getattr(metadata, "model_startup_duration_ms", None),
+                        getattr(metadata, "model_cold_start", None),
+                        getattr(metadata, "fingerprint_preprocessing_duration_ms", None),
+                        getattr(metadata, "fingerprint_inference_duration_ms", None),
+                        getattr(metadata, "fingerprint_duration_ms", None),
+                        getattr(metadata, "query_fingerprint_count", None),
+                        getattr(metadata, "candidate_count", None),
+                        segment_count,
                         int(search_id),
                     ),
                 )
@@ -1020,7 +1403,8 @@ class VectorStore:
                         score,
                         result_reason,
                         error_code,
-                        error_message
+                        error_message,
+                        result_payload
                     FROM search_requests
                     WHERE id = %s
                       AND source_app = 'public'
@@ -1046,35 +1430,41 @@ class VectorStore:
             result_reason,
             error_code,
             error_message,
+            result_payload,
         ) = row
 
         result: SearchResult | None = None
         if status == "completed":
-            result = SearchResult(
-                found=bool(found_match),
-                streamer=str(streamer) if streamer else None,
-                video_id=int(matched_video_id) if matched_video_id is not None else None,
-                score=float(score) if score is not None else None,
-                reason=str(result_reason) if result_reason else None,
-            )
-            if matched_video_id is not None:
-                video_row = self.get_video_with_creator(int(matched_video_id))
-                if video_row is not None:
-                    video_id, video_url, title, creator_name, thumbnail_url, profile_image_url = video_row
-                    result.streamer = creator_name
-                    result.profile_image_url = profile_image_url
-                    result.video_id = video_id
-                    result.video_url = video_url
-                    result.thumbnail_url = thumbnail_url
-                    result.title = title
-                    cur_timestamp = int(matched_timestamp_seconds) if matched_timestamp_seconds is not None else None
-                    result.timestamp_seconds = cur_timestamp
-                    if cur_timestamp is not None:
-                        from search.twitch_time import build_twitch_timestamp_url
-
-                        result.video_url_at_timestamp = build_twitch_timestamp_url(video_url, cur_timestamp)
+            if result_payload is not None:
+                result = self._deserialize_search_result(result_payload)
             else:
-                result.profile_image_url = self._get_profile_image_for_streamer(str(streamer) if streamer else None)
+                # Compatibility for jobs completed before result_payload was
+                # introduced. New jobs always use the lossless JSONB branch.
+                result = SearchResult(
+                    found=bool(found_match),
+                    streamer=str(streamer) if streamer else None,
+                    video_id=int(matched_video_id) if matched_video_id is not None else None,
+                    score=float(score) if score is not None else None,
+                    reason=str(result_reason) if result_reason else None,
+                )
+                if matched_video_id is not None:
+                    video_row = self.get_video_with_creator(int(matched_video_id))
+                    if video_row is not None:
+                        video_id, video_url, title, creator_name, thumbnail_url, profile_image_url = video_row
+                        result.streamer = creator_name
+                        result.profile_image_url = profile_image_url
+                        result.video_id = video_id
+                        result.video_url = video_url
+                        result.thumbnail_url = thumbnail_url
+                        result.title = title
+                        cur_timestamp = int(matched_timestamp_seconds) if matched_timestamp_seconds is not None else None
+                        result.timestamp_seconds = cur_timestamp
+                        if cur_timestamp is not None:
+                            from search.twitch_time import build_twitch_timestamp_url
+
+                            result.video_url_at_timestamp = build_twitch_timestamp_url(video_url, cur_timestamp)
+                else:
+                    result.profile_image_url = self._get_profile_image_for_streamer(str(streamer) if streamer else None)
 
         return SearchJobRecord(
             id=int(record_id),

@@ -37,6 +37,10 @@ class BackfillResult:
     failed: int = 0
 
 
+class FreshNMFPReindexPreconditionError(RuntimeError):
+    """Raised when a guarded fresh reindex is attempted on an unprepared database."""
+
+
 def _get_existing_video_status(
     store: object,
     existing_video: tuple[object, ...] | None,
@@ -77,10 +81,64 @@ def _classify_backfill_candidate(
     return True, None, False
 
 
+def _validate_fresh_nmfp_reindex(
+    store: object,
+    vods: list[dict[str, object]],
+) -> None:
+    """Fail closed unless the schema migration prepared every retained VOD.
+
+    The NMFP schema migration deletes incompatible fingerprints/cursors and marks
+    active videos ``reindex_requested``. This preflight makes the first backfill
+    after that migration explicit: it must not skip a legacy searchable row or
+    resume an ambiguous ``indexing`` cursor. Deleted videos remain intentionally
+    excluded, and VODs not yet present in the database are safe to ingest.
+    """
+
+    problems: list[str] = []
+    for vod in vods:
+        vod_id = str(vod.get("id") or "").strip() or "<missing>"
+        vod_url = str(vod.get("url") or "").strip()
+        existing_video = store.get_video_by_url(vod_url)
+        existing_state = store.get_vod_ingest_state(vod_id)
+
+        if existing_video is None:
+            if existing_state is not None:
+                problems.append(f"vod={vod_id} status=missing_video has_saved_cursor=true")
+            continue
+
+        existing_status = _get_existing_video_status(store, existing_video)
+        if existing_status in {VIDEO_STATUS_REINDEX_REQUESTED, VIDEO_STATUS_DELETED}:
+            continue
+
+        fallback_status = existing_status
+        if fallback_status is None:
+            fallback_status = "processed" if bool(existing_video[5]) else "unknown"
+        problems.append(
+            f"vod={vod_id} status={fallback_status} "
+            f"has_saved_cursor={'true' if existing_state is not None else 'false'}"
+        )
+
+    if problems:
+        details = "; ".join(problems)
+        raise FreshNMFPReindexPreconditionError(
+            "Fresh NMFP reindex preflight failed. Apply the NMFP schema migration first; "
+            "it must clear incompatible fingerprints/cursors and mark active videos "
+            f"reindex_requested. Refusing to skip or resume ambiguous rows: {details}"
+        )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Backfill Twitch archive VODs for a streamer.")
     parser.add_argument("--streamer", required=True, help="Twitch login name")
     parser.add_argument("--days", required=True, type=int, help="Number of past days to ingest")
+    parser.add_argument(
+        "--fresh-nmfp-reindex",
+        action="store_true",
+        help=(
+            "Guard the first full NMFP backfill after migration: require active existing "
+            "videos to be reindex_requested and never resume a saved cursor"
+        ),
+    )
     return parser
 
 
@@ -88,6 +146,7 @@ def run_backfill_ingest(
     streamer: str,
     days: int,
     *,
+    fresh_nmfp_reindex: bool = False,
     monitor: TwitchMonitor | None = None,
     build_store: Callable[[], dict[str, object]] = build_store_state,
     build_ingest: Callable[[], dict[str, object]] = build_ingest_state,
@@ -103,15 +162,23 @@ def run_backfill_ingest(
 
     prepare_runtime_dirs()
     store_state = build_store()
-    ingest_state = build_ingest()
     store = store_state["store"]
-    embedder = ingest_state["embedder"]
 
     twitch_monitor = monitor or TwitchMonitor.from_env()
     creator_metadata = twitch_monitor.get_user_profile(normalized_streamer)
     user_id = str(creator_metadata["id"])
     cutoff = datetime.now(timezone.utc) - timedelta(days=int(days))
     vods = twitch_monitor.list_archive_vods_since(user_id=user_id, created_after=cutoff)
+
+    if fresh_nmfp_reindex:
+        _validate_fresh_nmfp_reindex(store, vods)
+        out(
+            "fresh_nmfp_reindex preflight=passed "
+            f"streamer={normalized_streamer} vod_count={len(vods)} resume_allowed=false"
+        )
+
+    ingest_state = build_ingest()
+    embedder = ingest_state["embedder"]
 
     result = BackfillResult()
     total_vods = len(vods)
@@ -194,7 +261,11 @@ def run_backfill_ingest(
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    result = run_backfill_ingest(args.streamer, args.days)
+    result = run_backfill_ingest(
+        args.streamer,
+        args.days,
+        fresh_nmfp_reindex=args.fresh_nmfp_reindex,
+    )
     return 1 if result.failed else 0
 
 

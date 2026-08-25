@@ -12,6 +12,7 @@ import numpy as np
 
 from ..alignment import temporal_vector_alignment
 from ..audio import extract_audio_clip, probe_duration, run_command
+from ..cut_detection import CutDetectionSettings, CutSearchResult, cut_aware_vector_alignment
 from ..external import nmfp_python
 from ..models import QueryRecord, SearchResult
 from .base import BenchmarkEngine
@@ -211,3 +212,35 @@ class NMFPEngine(BenchmarkEngine):
         )
         outcome.diagnostics["model_name"] = "nmfp-triplet"
         return self.timed_result(query, started_at, outcome)
+
+    def search_cuts(
+        self,
+        query: QueryRecord,
+        query_path: Path,
+        *,
+        settings: CutDetectionSettings,
+    ) -> CutSearchResult:
+        """Map independently edited portions of one query onto the VOD timeline."""
+
+        if not self.embeddings_path.exists() or not self.timestamps_path.exists():
+            raise FileNotFoundError("NMFP index does not exist; run index first")
+        query_embeddings_path = self.query_embeddings_dir / f"{query.query_id}.npy"
+        if not query_embeddings_path.exists():
+            raise FileNotFoundError(
+                f"NMFP query embeddings do not exist for {query.query_id}; "
+                "prepare the selected manifest before cut-aware search"
+            )
+        query_embeddings = np.load(query_embeddings_path).astype(np.float32)
+        query_timestamps = np.arange(len(query_embeddings), dtype=np.float32) * settings.hop_seconds
+        duration = query.duration_seconds or probe_duration(query_path)
+        result = cut_aware_vector_alignment(
+            query.query_id,
+            query_embeddings,
+            query_timestamps,
+            np.load(self.embeddings_path, mmap_mode="r"),
+            np.load(self.timestamps_path, mmap_mode="r"),
+            query_duration_seconds=duration,
+            settings=settings,
+        )
+        result.diagnostics["model_name"] = "nmfp-triplet"
+        return result

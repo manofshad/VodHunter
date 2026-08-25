@@ -2,10 +2,10 @@ import os
 import math
 import shutil
 import soundfile as sf
-import numpy as np
 from datetime import datetime
 from typing import Optional
 
+from pipeline.nmfp_inference import NMFP_HOP_SECONDS, NMFP_SAMPLE_RATE
 from sources.audio_source import AudioSource
 from sources.audio_chunk import AudioChunk
 
@@ -37,6 +37,7 @@ class VODSource(AudioSource):
         self._creator_id: int | None = None
         self._chunks = []
         self._index = 0
+        self._completed = False
 
 
     # --------------------
@@ -58,46 +59,44 @@ class VODSource(AudioSource):
             url=self.video_url,
             title=self.title,
             thumbnail_url=self.thumbnail_url,
-            processed=True,
+            processed=False,
+            status="indexing",
             streamed_at=self.streamed_at,
         )
 
         os.makedirs(self.temp_dir, exist_ok=True)
 
         audio, sr = sf.read(self.audio_path)
-        if sr != 16000:
-            raise ValueError(f"Expected 16kHz WAV, got {sr}")
+        if sr != NMFP_SAMPLE_RATE:
+            raise ValueError(f"Expected {NMFP_SAMPLE_RATE}Hz WAV, got {sr}")
 
-        samples_per_chunk = self.chunk_seconds * 16000
+        samples_per_chunk = self.chunk_seconds * NMFP_SAMPLE_RATE
+        overlap_samples = int(round(NMFP_HOP_SECONDS * NMFP_SAMPLE_RATE))
         total_samples = len(audio)
         num_chunks = math.ceil(total_samples / samples_per_chunk)
 
         self._chunks.clear()
         self._index = 0
+        self._completed = False
 
         for i in range(num_chunks):
-            start = i * samples_per_chunk
-            end = start + samples_per_chunk
+            logical_start = i * samples_per_chunk
+            start = max(0, logical_start - overlap_samples)
+            end = min(logical_start + samples_per_chunk, total_samples)
             chunk_audio = audio[start:end]
-
-            if len(chunk_audio) < samples_per_chunk:
-                chunk_audio = np.pad(
-                    chunk_audio,
-                    (0, samples_per_chunk - len(chunk_audio)),
-                )
 
             chunk_path = os.path.join(
                 self.temp_dir,
                 f"vod_chunk_{i:06d}.wav",
             )
 
-            sf.write(chunk_path, chunk_audio, 16000)
+            sf.write(chunk_path, chunk_audio, NMFP_SAMPLE_RATE, subtype="PCM_16")
 
             self._chunks.append(
                 AudioChunk(
                     audio_path=chunk_path,
-                    offset_seconds=i * self.chunk_seconds,
-                    duration_seconds=self.chunk_seconds,
+                    offset_seconds=start / float(NMFP_SAMPLE_RATE),
+                    duration_seconds=len(chunk_audio) / float(NMFP_SAMPLE_RATE),
                 )
             )
 
@@ -106,6 +105,13 @@ class VODSource(AudioSource):
         Return the next chunk, or None if finished.
         """
         if self._index >= len(self._chunks):
+            if not self._completed and self.video_id is not None:
+                update_video_status = getattr(self.store, "update_video_status", None)
+                if callable(update_video_status):
+                    update_video_status(self.video_id, "searchable")
+                else:
+                    self.store.mark_video_processed(self.video_id, processed=True)
+                self._completed = True
             return None
 
         chunk = self._chunks[self._index]

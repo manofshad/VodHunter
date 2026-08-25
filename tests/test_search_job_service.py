@@ -1,8 +1,9 @@
 from concurrent.futures import Future
+from datetime import datetime, timezone
 
 from backend.services.search_jobs import SearchJobService
 from backend.services.remote_clip_downloader import DownloadError
-from search.models import SearchExecutionMetadata, SearchRequestOutcome, SearchResult
+from search.models import SearchDateRange, SearchExecutionMetadata, SearchRequestOutcome, SearchResult
 
 
 class InlineExecutor:
@@ -23,8 +24,15 @@ class StubStore:
         self.failed = []
         self.recovered = []
 
-    def create_public_search_job(self, *, tiktok_url: str, streamer: str, creator_id: int | None) -> int:
-        self.created_jobs.append((tiktok_url, streamer, creator_id))
+    def create_public_search_job(
+        self,
+        *,
+        tiktok_url: str,
+        streamer: str,
+        creator_id: int | None,
+        date_range: SearchDateRange | None = None,
+    ) -> int:
+        self.created_jobs.append((tiktok_url, streamer, creator_id, date_range))
         return 7
 
     def update_search_job_status(self, search_id: int, *, status=None, stage=None, started=False) -> None:
@@ -46,8 +54,16 @@ class StubStore:
 class StubSearchManager:
     def __init__(self):
         self.raise_error = None
+        self.date_ranges: list[SearchDateRange | None] = []
 
-    def search_tiktok_url(self, url: str, streamer: str, on_stage_change=None) -> SearchRequestOutcome:
+    def search_tiktok_url(
+        self,
+        url: str,
+        streamer: str,
+        date_range: SearchDateRange | None = None,
+        on_stage_change=None,
+    ) -> SearchRequestOutcome:
+        self.date_ranges.append(date_range)
         if on_stage_change is not None:
             on_stage_change("downloading")
             on_stage_change("embedding")
@@ -73,13 +89,33 @@ def test_search_job_service_completes_job() -> None:
     )
 
     assert search_id == 7
-    assert store.created_jobs == [("https://www.tiktok.com/@u/video/1", "jason", 2)]
+    assert store.created_jobs == [("https://www.tiktok.com/@u/video/1", "jason", 2, None)]
     assert store.status_updates[0] == (7, "running", "validating", True)
     assert (7, None, "downloading", False) in store.status_updates
     assert (7, None, "embedding", False) in store.status_updates
     assert (7, None, "finalizing", False) in store.status_updates
     assert store.completed[0][0] == 7
     assert store.failed == []
+
+
+def test_search_job_service_forwards_date_range() -> None:
+    store = StubStore()
+    manager = StubSearchManager()
+    service = SearchJobService(store=store, search_manager=manager, executor=InlineExecutor())
+    date_range = SearchDateRange(
+        streamed_from=datetime(2026, 4, 1, tzinfo=timezone.utc),
+        streamed_to=datetime(2026, 4, 8, tzinfo=timezone.utc),
+    )
+
+    service.create_public_search_job(
+        tiktok_url="https://www.tiktok.com/@u/video/1",
+        streamer="jason",
+        creator_id=2,
+        date_range=date_range,
+    )
+
+    assert store.created_jobs == [("https://www.tiktok.com/@u/video/1", "jason", 2, date_range)]
+    assert manager.date_ranges == [date_range]
 
 
 def test_search_job_service_fails_job_for_handled_error() -> None:

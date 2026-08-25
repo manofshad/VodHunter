@@ -10,7 +10,7 @@ from fastapi import UploadFile
 
 from backend.services.media_duration import MediaDurationError, probe_media_duration_seconds
 from backend.services.remote_clip_downloader import RemoteClipDownloader
-from search.models import SearchRequestOutcome
+from search.models import SearchDateRange, SearchRequestOutcome
 from search.search_service import SearchService
 
 logger = logging.getLogger("uvicorn.error")
@@ -53,6 +53,7 @@ class SearchManager:
         self,
         file: UploadFile,
         streamer: str,
+        date_range: SearchDateRange | None = None,
         on_stage_change: Callable[[str], None] | None = None,
     ) -> SearchRequestOutcome:
         if self.upload_temp_dir is None:
@@ -73,7 +74,13 @@ class SearchManager:
                 raise SearchInputError("Uploaded file is empty")
 
             input_duration_seconds = self._validate_duration(temp_path, on_stage_change=on_stage_change)
-            execution_result = self._search_local_file(temp_path, streamer, on_stage_change=on_stage_change)
+            execution_result = self._search_local_file(
+                temp_path,
+                streamer,
+                date_range=date_range,
+                on_stage_change=on_stage_change,
+                query_duration_seconds=input_duration_seconds,
+            )
             logger.info(
                 "timing event=search_upload seconds=%.2f streamer=%s",
                 time.perf_counter() - request_started_at,
@@ -86,6 +93,7 @@ class SearchManager:
                 clip_filename=file.filename,
                 input_duration_seconds=input_duration_seconds,
                 total_duration_ms=_duration_ms(time.perf_counter() - request_started_at),
+                date_range=date_range,
             )
         finally:
             if os.path.exists(temp_path):
@@ -95,6 +103,7 @@ class SearchManager:
         self,
         url: str,
         streamer: str,
+        date_range: SearchDateRange | None = None,
         on_stage_change: Callable[[str], None] | None = None,
     ) -> SearchRequestOutcome:
         downloaded_path = ""
@@ -107,7 +116,13 @@ class SearchManager:
             result = self.remote_downloader.download_tiktok(url)
             downloaded_path = result.path
             input_duration_seconds = self._validate_duration(downloaded_path, on_stage_change=on_stage_change)
-            execution_result = self._search_local_file(downloaded_path, streamer, on_stage_change=on_stage_change)
+            execution_result = self._search_local_file(
+                downloaded_path,
+                streamer,
+                date_range=date_range,
+                on_stage_change=on_stage_change,
+                query_duration_seconds=input_duration_seconds,
+            )
             logger.info(
                 "timing event=search_tiktok_url seconds=%.2f streamer=%s",
                 time.perf_counter() - request_started_at,
@@ -121,6 +136,7 @@ class SearchManager:
                 download_host=(parsed_url.hostname or "").lower() or None,
                 input_duration_seconds=input_duration_seconds,
                 total_duration_ms=_duration_ms(time.perf_counter() - request_started_at),
+                date_range=date_range,
             )
         finally:
             if downloaded_path:
@@ -154,9 +170,17 @@ class SearchManager:
         self,
         path: str,
         streamer: str,
+        date_range: SearchDateRange | None = None,
         on_stage_change: Callable[[str], None] | None = None,
+        query_duration_seconds: float | None = None,
     ):
         normalized_streamer = streamer.strip().lower()
         if not normalized_streamer:
             raise SearchInputError("streamer is required")
-        return self.search_service.search_file(path, normalized_streamer, on_stage_change=on_stage_change)
+        return self.search_service.search_file(
+            path,
+            normalized_streamer,
+            date_range=date_range,
+            on_stage_change=on_stage_change,
+            query_duration_seconds=query_duration_seconds,
+        )

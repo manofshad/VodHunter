@@ -1,6 +1,7 @@
 import io
 import os
 import tempfile
+from datetime import datetime, timezone
 
 import pytest
 from fastapi import UploadFile
@@ -8,21 +9,25 @@ from fastapi import UploadFile
 from backend.services.media_duration import MediaDurationError
 from backend.services.remote_clip_downloader import DownloadResult
 from backend.services.search_manager import InputDurationExceededError, SearchInputError, SearchManager
-from search.models import SearchExecutionMetadata, SearchExecutionResult, SearchResult
+from search.models import SearchDateRange, SearchExecutionMetadata, SearchExecutionResult, SearchResult
 
 
 class FakeSearchService:
     def __init__(self):
         self.searched_paths: list[tuple[str, str]] = []
+        self.date_ranges: list[SearchDateRange | None] = []
         self.raise_on_search = False
 
     def search_file(
         self,
         path: str,
         streamer: str,
+        date_range: SearchDateRange | None = None,
         on_stage_change=None,
+        query_duration_seconds: float | None = None,
     ) -> SearchExecutionResult:
         self.searched_paths.append((path, streamer))
+        self.date_ranges.append(date_range)
         if self.raise_on_search:
             raise RuntimeError("search failed")
         return SearchExecutionResult(
@@ -153,6 +158,22 @@ class TestSearchManager:
             assert downloader.cleaned_paths == [clip_path]
             assert outcome.download_source == "tiktok"
             assert outcome.download_host == "www.tiktok.com"
+
+    def test_search_tiktok_url_forwards_date_range(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            clip_path = os.path.join(tmp, "clip.mp4")
+            with open(clip_path, "wb") as f:
+                f.write(b"clip")
+            date_range = SearchDateRange(
+                streamed_from=datetime(2026, 4, 1, tzinfo=timezone.utc),
+                streamed_to=datetime(2026, 4, 8, tzinfo=timezone.utc),
+            )
+            service = FakeSearchService()
+            downloader = FakeDownloader(downloaded_path=clip_path)
+            manager = SearchManager(search_service=service, remote_downloader=downloader)
+            outcome = manager.search_tiktok_url("https://www.tiktok.com/@user/video/1", "xqc", date_range=date_range)
+            assert service.date_ranges == [date_range]
+            assert outcome.date_range == date_range
 
     def test_search_tiktok_url_cleans_up_on_search_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

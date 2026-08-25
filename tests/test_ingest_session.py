@@ -1,4 +1,5 @@
 import numpy as np
+from types import SimpleNamespace
 from pipeline.ingest_session import IngestSession
 from sources.audio_chunk import AudioChunk
 
@@ -54,3 +55,41 @@ class TestIngestSession:
         _, ids, creator_id = store.append_call
         assert ids == [101]
         assert creator_id == 7
+
+    def test_rejects_extraction_identity_that_does_not_match_index(self) -> None:
+        source = FakeSource()
+        store = FakeStore()
+        store.model_version = "expected-model"
+        store.preprocessing_version = "expected-preprocessing"
+
+        class MismatchedEmbedder:
+            def extract(self, audio_path: str, offset_seconds: float = 0.0):
+                return SimpleNamespace(
+                    embeddings=np.array([[0.1, 0.2]], dtype=np.float32),
+                    timestamps=np.array([offset_seconds], dtype=np.float32),
+                    model_version="different-model",
+                    preprocessing_version="expected-preprocessing",
+                    metrics=SimpleNamespace(
+                        audio_duration_seconds=1.0,
+                        cold_start=False,
+                        model_load_duration_ms=0,
+                        preprocessing_duration_ms=1,
+                        inference_duration_ms=1,
+                        total_duration_ms=2,
+                        fingerprint_count=1,
+                    ),
+                )
+
+        session = IngestSession(
+            source=source,
+            embedder=MismatchedEmbedder(),
+            store=store,
+            poll_interval=0.0,
+        )
+
+        try:
+            session.run()
+        except ValueError as exc:
+            assert "model version" in str(exc)
+        else:
+            raise AssertionError("Expected mismatched ingest identity to fail")

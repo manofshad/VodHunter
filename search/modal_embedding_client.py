@@ -48,6 +48,7 @@ class ModalEmbeddingClient:
                 filename=request.filename,
                 offset_seconds=request.offset_seconds,
                 model_version=request.model_version,
+                preprocessing_version=request.preprocessing_version,
             )
 
         try:
@@ -73,4 +74,11 @@ class ModalEmbeddingClient:
             model_name=raw["model_name"],
             embedding_dim=int(raw["embedding_dim"]),
             duration_seconds=raw.get("duration_seconds"),
+            model_version=str(raw.get("model_version") or raw["model_name"]),
+            preprocessing_version=str(raw.get("preprocessing_version") or ""),
+            cold_start=bool(raw.get("cold_start", False)),
+            model_load_duration_ms=int(raw.get("model_load_duration_ms") or 0),
+            preprocessing_duration_ms=int(raw.get("preprocessing_duration_ms") or 0),
+            inference_duration_ms=int(raw.get("inference_duration_ms") or 0),
+            total_duration_ms=int(raw.get("total_duration_ms") or 0),
         )

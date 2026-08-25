@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Form, HTTPException, Request, status
 
 from backend.routers.admin_search import _normalize_and_validate_streamer, _resolve_creator_id
+from backend.search_date_range import parse_search_date_range
 from backend.schemas import (
     ErrorResponse,
     SearchJobCreatedResponse,
@@ -23,6 +24,8 @@ def create_search_clip_job(
     request: Request,
     tiktok_url: str | None = Form(default=None),
     streamer: str | None = Form(default=None),
+    streamed_from: str | None = Form(default=None),
+    streamed_to: str | None = Form(default=None),
 ) -> SearchJobCreatedResponse:
     has_url = bool((tiktok_url or "").strip())
     if not has_url:
@@ -36,10 +39,12 @@ def create_search_clip_job(
 
     normalized_streamer = _normalize_and_validate_streamer(request, streamer)
     creator_id = _resolve_creator_id(request, normalized_streamer)
+    date_range = parse_search_date_range(streamed_from, streamed_to)
     search_id = request.app.state.search_job_service.create_public_search_job(
         tiktok_url=str(tiktok_url).strip(),
         streamer=normalized_streamer,
         creator_id=creator_id,
+        date_range=date_range,
     )
     return SearchJobCreatedResponse(search_id=search_id, status="queued", stage="validating")
 

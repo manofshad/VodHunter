@@ -5,7 +5,7 @@ import logging
 
 from backend.services.remote_clip_downloader import DownloadError, InvalidTikTokUrlError
 from backend.services.search_manager import InputDurationExceededError, SearchInputError
-from search.models import SearchJobRecord
+from search.models import SearchDateRange, SearchJobRecord
 
 
 logger = logging.getLogger("uvicorn.error")
@@ -17,13 +17,21 @@ class SearchJobService:
         self.search_manager = search_manager
         self.executor = executor
 
-    def create_public_search_job(self, *, tiktok_url: str, streamer: str, creator_id: int | None) -> int:
+    def create_public_search_job(
+        self,
+        *,
+        tiktok_url: str,
+        streamer: str,
+        creator_id: int | None,
+        date_range: SearchDateRange | None = None,
+    ) -> int:
         search_id = self.store.create_public_search_job(
             tiktok_url=tiktok_url,
             streamer=streamer,
             creator_id=creator_id,
+            date_range=date_range,
         )
-        self.executor.submit(self._run_public_search_job, search_id, tiktok_url, streamer)
+        self.executor.submit(self._run_public_search_job, search_id, tiktok_url, streamer, date_range)
         return search_id
 
     def get_public_search_job(self, search_id: int) -> SearchJobRecord | None:
@@ -38,7 +46,13 @@ class SearchJobService:
             error_message="The server restarted before this search completed. Please run the search again.",
         )
 
-    def _run_public_search_job(self, search_id: int, tiktok_url: str, streamer: str) -> None:
+    def _run_public_search_job(
+        self,
+        search_id: int,
+        tiktok_url: str,
+        streamer: str,
+        date_range: SearchDateRange | None,
+    ) -> None:
         try:
             self.store.update_search_job_status(
                 search_id,
@@ -49,6 +63,7 @@ class SearchJobService:
             outcome = self.search_manager.search_tiktok_url(
                 tiktok_url,
                 streamer,
+                date_range=date_range,
                 on_stage_change=lambda stage: self.store.update_search_job_status(search_id, stage=stage),
             )
             self.store.update_search_job_status(search_id, stage="finalizing")
