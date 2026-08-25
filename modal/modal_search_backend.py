@@ -54,7 +54,13 @@ app = modal.App("vodhunter-search-embedder")
 _EMBEDDER = Embedder()
 
 
-@app.function(image=image, gpu="T4", scaledown_window=300)
+@app.function(
+    image=image,
+    gpu="T4",
+    min_containers=0,
+    max_containers=1,
+    scaledown_window=300,
+)
 def embed_search_wav(
     wav_bytes: bytes,
     request_id: str = "",
