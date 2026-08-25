@@ -1,137 +1,86 @@
 # VodHunter
 
-https://vodhunter.dev/
+[vodhunter.dev](https://vodhunter.dev/) searches short-form audio against Twitch VODs. The production search path uses NMFP neural audio fingerprints and can map an edited query to multiple, possibly non-contiguous VOD ranges.
 
-VodHunter is an audio-based search engine that matches short clips (TikTok, uploads, etc.) to timestamps inside Twitch VODs using vector embeddings and similarity search.
+## Production architecture
 
-Instead of manually searching through hours of streams, VodHunter allows a user to upload a short clip and instantly locate the exact moment it occurred in a Twitch VOD.
+The ingest and query paths share one immutable fingerprint identity:
 
-VodHunter helps viewers recover the full context behind viral clips while also helping streamers bring attention back to their original broadcasts. In this way, VodHunter acts as a bridge between short-form content and long-form streams.
+- model: `nmfp-triplet@15c6f3bcdf6a6da1daddfe47a1ffa5a0d22deadc+zenodo-15719945+ckpt-100`
+- preprocessing: `nmfp-8khz-mono-1s-hop0.5-mel-v1`
+- output width: 128 dimensions
+- audio: 8 kHz mono, 1-second windows, 0.5-second fingerprint hop
 
----
-
-<img width="1460" height="768" alt="image" src="https://github.com/user-attachments/assets/7cb3d336-f7e3-43b2-b9a0-e8efe11d9a46" />
-
-
-
----
-
-# Core Components
-
-### Frontend
-
-The public interface is a React application that allows users to upload audio clips or paste TikTok URLs.  
-The frontend sends search requests to the FastAPI backend and displays matched Twitch timestamps.
-
-### Public API
-
-The backend is a FastAPI service responsible for orchestrating the search pipeline. It performs input validation, audio preprocessing, remote embedding requests, vector search, and timestamp alignment.
-
-Primary responsibilities include:
-
-- handling search requests
-- preprocessing audio with ffmpeg
-- requesting query embeddings from Modal
-- performing vector similarity search
-- returning the best matching Twitch timestamp
-
-### Vector Database
-
-Postgres with the **pgvector** extension is used to store audio fingerprint embeddings.  
-This allows the system to perform efficient similarity search directly inside the database.
-
-### GPU Embedding Worker
-
-Query embeddings are generated through **Modal** GPU workers during search requests.
-
-### Ingest Pipeline
-
-A separate ingest process converts Twitch VODs into searchable embeddings by extracting audio chunks and storing them in the database.
-
----
-
-# Search Pipeline
-
-The search pipeline matches a short audio clip against indexed Twitch VODs.
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant Frontend
-    participant API
-    participant Modal
-    participant DB
-
-    User->>Frontend: Upload clip / TikTok URL
-    Frontend->>API: POST /api/search/clip
-
-    API->>API: Normalize audio (ffmpeg)
-
-    API->>Modal: Generate query embeddings
-    Modal-->>API: embeddings
-
-    API->>DB: pgvector similarity search
-    DB-->>API: nearest matches
-
-    API->>API: timestamp alignment
-    API-->>Frontend: Twitch timestamp result
-```
-Search process:
-
-1. The clip is normalized into a consistent audio format using **ffmpeg**.
-2. **Modal** runs the AST audio model and returns embeddings for the clip.
-3. The embeddings are compared against stored fingerprints using **pgvector similarity search**.
-4. The system determines the best matching timestamp within the Twitch VOD.
-
----
-
-# Ingest Pipeline
-
-The ingest pipeline indexes Twitch VODs into searchable embeddings.
+The service rejects a database, worker response, or local runtime whose dimensions or version identifiers differ. Do not change any part of this identity in isolation; a different checkpoint or preprocessing contract requires a new index and a full reindex.
 
 ```mermaid
 flowchart LR
-    Twitch["Twitch VOD"]
-    YTDLP["yt-dlp"]
-    FFMPEG["ffmpeg chunk extraction"]
-    Embed["AST embedding"]
-    Store["pgvector storage"]
+    VOD["Twitch VOD"] --> Extract["ffmpeg: 8 kHz mono"]
+    Extract --> IngestNMFP["persistent NMFP ingest model"]
+    IngestNMFP --> Vectors["Postgres + pgvector(128)"]
 
-    Twitch --> YTDLP
-    YTDLP --> FFMPEG
-    FFMPEG --> Embed
-    Embed --> Store
+    Query["TikTok / uploaded clip"] --> Normalize["ffmpeg normalization"]
+    Normalize --> Modal["persistent NMFP Modal worker"]
+    Modal --> Candidates["top-k neighbors per fingerprint"]
+    Vectors --> Candidates
+    Candidates --> Align["video + stable-offset track alignment"]
+    Align --> Result["primary timestamp + segments + unmatched ranges"]
 ```
 
-Ingest process:
+Ingestion resolves VOD media with `yt-dlp`, extracts overlapping audio chunks, fingerprints them locally, and stores the timestamped vectors with the model and preprocessing versions. Search normalizes the query, obtains timestamped fingerprints from a persistent Modal container, retrieves the top 10 candidates for every query fingerprint, and aligns candidates by both video ID and stable `VOD time - query time` offset.
 
-1. Twitch VOD URLs are resolved using **yt-dlp**.
-2. Audio is extracted and divided into fixed-length chunks.
-3. Each chunk is converted into an embedding using the **AST audio model**.
-4. Embeddings are stored in Postgres using **pgvector**.
+The public endpoint is asynchronous: `POST /api/search/clip` creates a job and `GET /api/search/clip/{search_id}` returns its state and durable result. The admin endpoint uses the same search pipeline synchronously and also accepts direct file uploads. A successful result retains the legacy top-level timestamp/URL while adding `segments` and `unmatched_ranges`.
 
-These stored fingerprints allow the system to later match user clips to the correct VOD timestamp.
+NMFP only reports ranges with enough consistent evidence. Very short sections, fully overlaid audio, silence, heavy transformation, or isolated nearest neighbors can remain unmatched. An unmatched range is an honest lack of support, not proof that the source audio never occurred in a VOD.
 
----
+## Cut-aware alignment defaults
 
-# Testing
+All alignment thresholds are environment-configurable:
 
-Install dev dependencies with:
+| Setting | Default | Environment variable |
+|---|---:|---|
+| neighbors per fingerprint | 10 | `SEARCH_TOP_K` |
+| fingerprint hop | 0.5 s | `NMFP_HOP_SECONDS` |
+| offset bin | 0.5 s | `CUT_OFFSET_BIN_SECONDS` |
+| offset tolerance within a track | +/- 1 s | `CUT_OFFSET_TOLERANCE_SECONDS` |
+| maximum unsupported gap | 2 s | `CUT_MAX_UNMATCHED_GAP_SECONDS` |
+| minimum support | 6 fingerprints | `CUT_MIN_SUPPORT` |
+| minimum segment duration | 4 s | `CUT_MIN_SEGMENT_DURATION_SECONDS` |
+| minimum density | 0.4 | `CUT_MIN_DENSITY` |
+| merge query gap | 1 s | `CUT_MERGE_QUERY_GAP_SECONDS` |
+| merge offset tolerance | 4 s | `CUT_MERGE_OFFSET_TOLERANCE_SECONDS` |
+| maximum returned segments | 12 | `CUT_MAX_SEGMENTS` |
 
-```bash
-pip install -r backend/requirements-dev.txt
-```
+Treat these as tuned defaults, not guarantees. Evaluate changes against representative edits before rollout.
 
-Run the Python test suite with:
+## Setup and operations
+
+Copy `.env.example` to an ignored `.env`, fill secrets locally, and keep the pinned NMFP values unchanged. Production API and NMFP worker dependencies are intentionally separated; see the requirements files for each runtime.
+
+The production schema migration is destructive to incompatible fingerprint data by design. The old production database no longer exists, so rollout assumes a fresh database or a complete rebuild rather than a zero-downtime vector conversion. Apply migrations and run the guarded first backfill as described in [NMFP production operations](docs/nmfp-production-operations.md). That guide also covers resumability, version checks, metrics, and rollback boundaries.
+
+No deployment, Modal publish, or external database creation is performed by repository commands unless an operator explicitly runs the relevant external tooling.
+
+## Latency measurements
+
+The experiment's roughly 231-240 ms median was cached NMFP alignment using already-extracted query fingerprints. It excluded TensorFlow/container startup and query fingerprint extraction, so it is not end-to-end production latency.
+
+Production records audio normalization, cold model startup, fingerprint preprocessing/inference/total extraction, vector retrieval, cut alignment, and total request latency separately. Compare cold requests with cold requests and warm requests with warm requests; do not present the cached experiment number as upload-to-result latency.
+
+## Testing
+
+Run the Python suite with:
 
 ```bash
 python3 -m pytest
 ```
 
-Keep test-only dependencies in [`backend/requirements-dev.txt`](/Volumes/workstation/twitchVodHunter/VodHunter/backend/requirements-dev.txt), not [`backend/requirements.txt`](/Volumes/workstation/twitchVodHunter/VodHunter/backend/requirements.txt), because local dev/tests still need the full runtime dependency set while the production public API image installs the slimmer [`backend/requirements-api-public.txt`](/Volumes/workstation/twitchVodHunter/VodHunter/backend/requirements-api-public.txt).
+The frontend packages have their own build/test commands under `web-public` and `web-admin`.
 
----
+## Third-party licensing status
 
-# License
+The upstream `neural-music-fp` implementation used by NMFP is identified as AGPLv3. The product owner confirmed that the production licensing decision is resolved for this migration. Preserve the upstream notices and the separately distributed checkpoint terms when packaging the worker.
 
-This project is licensed under the **MIT License**.
+## License
+
+VodHunter's own source is licensed under the MIT License.

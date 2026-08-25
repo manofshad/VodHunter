@@ -1,6 +1,8 @@
+from datetime import datetime, timezone
+
 import pytest
 import numpy as np
-from search.models import SearchRequestLog
+from search.models import SearchDateRange, SearchRequestLog
 from storage.vector_store import VectorStore
 
 class FakeCursor:
@@ -58,8 +60,61 @@ class TestVectorStoreStreamerScope:
         assert 'SET LOCAL hnsw.ef_search = 40' in cursor.executed[0][0]
         query_sql, query_params = cursor.executed[1]
         assert 'JOIN creators c ON c.id = v.creator_id' not in query_sql
+        assert 'JOIN videos v ON v.id = f.video_id' not in query_sql
         assert 'WHERE creator_id = %s' in query_sql
         assert query_params[1] == 99
+
+    def test_query_similar_fingerprint_ids_filters_by_streamed_at_range(self) -> None:
+        cursor = FakeCursor()
+        store = VectorStore.__new__(VectorStore)
+        store.hnsw_ef_search = 40
+        store._connect = lambda: FakeConnection(cursor)
+        date_range = SearchDateRange(
+            streamed_from=datetime(2026, 4, 1, tzinfo=timezone.utc),
+            streamed_to=datetime(2026, 4, 8, tzinfo=timezone.utc),
+        )
+        scores, ids = store.query_similar_fingerprint_ids(
+            query_embeddings=np.array([[0.1, 0.2]], dtype=np.float32),
+            top_k=2,
+            creator_id=99,
+            date_range=date_range,
+        )
+        assert scores[0][0] == pytest.approx(0.91, abs=1e-06)
+        assert ids.tolist() == [[11, 12]]
+        query_sql, query_params = cursor.executed[1]
+        assert 'FROM fingerprint_embeddings fe' in query_sql
+        assert 'JOIN fingerprints f ON f.id = fe.fingerprint_id' in query_sql
+        assert 'JOIN videos v ON v.id = f.video_id' in query_sql
+        assert 'fe.creator_id = %s' in query_sql
+        assert 'v.creator_id = %s' in query_sql
+        assert 'v.streamed_at IS NOT NULL' in query_sql
+        assert 'v.streamed_at >= %s' in query_sql
+        assert 'v.streamed_at < %s' in query_sql
+        assert query_params == (
+            [0.10000000149011612, 0.20000000298023224],
+            99,
+            99,
+            datetime(2026, 4, 1, tzinfo=timezone.utc),
+            datetime(2026, 4, 8, tzinfo=timezone.utc),
+            [0.10000000149011612, 0.20000000298023224],
+            2,
+        )
+
+    def test_query_similar_fingerprint_ids_supports_open_ended_streamed_at_range(self) -> None:
+        cursor = FakeCursor()
+        store = VectorStore.__new__(VectorStore)
+        store.hnsw_ef_search = 40
+        store._connect = lambda: FakeConnection(cursor)
+        store.query_similar_fingerprint_ids(
+            query_embeddings=np.array([[0.1, 0.2]], dtype=np.float32),
+            top_k=2,
+            creator_id=99,
+            date_range=SearchDateRange(streamed_to=datetime(2026, 4, 8, tzinfo=timezone.utc)),
+        )
+        query_sql, query_params = cursor.executed[1]
+        assert 'v.streamed_at >= %s' not in query_sql
+        assert 'v.streamed_at < %s' in query_sql
+        assert query_params[3] == datetime(2026, 4, 8, tzinfo=timezone.utc)
 
     def test_get_creator_id_by_name_normalizes_input(self) -> None:
         cursor = FakeCursor()
@@ -140,3 +195,5 @@ class TestVectorStoreStreamerScope:
         assert params[7] == 'DOWNLOAD_ERROR'
         assert params[11] is None
         assert params[21] is None
+        assert params[23] is None
+        assert params[24] is None

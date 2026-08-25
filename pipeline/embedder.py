@@ -1,58 +1,52 @@
-from typing import Optional, Tuple
+from __future__ import annotations
+
+from pathlib import Path
 
 import numpy as np
-import torch
-from transformers import ASTFeatureExtractor, ASTModel
 
-from pipeline.ast_inference import (
-    DEFAULT_AST_MODEL_NAME,
-    compute_ast_embeddings,
-    load_ast_model,
-    load_wav_file,
-    pick_torch_device,
+from pipeline.nmfp_inference import (
+    NMFP_EMBEDDING_DIM,
+    NMFP_MODEL_VERSION,
+    NMFP_PREPROCESSING_VERSION,
+    NMFPExtractionResult,
+    NMFPFingerprinter,
 )
 
 
 class Embedder:
-    def __init__(self, model_name: str = DEFAULT_AST_MODEL_NAME):
-        self.model_name = model_name
-        self.device = self._pick_device()
-        self.feature_extractor: Optional[ASTFeatureExtractor] = None
-        self.model: Optional[ASTModel] = None
+    """Production NMFP embedder shared by VOD ingestion and local queries."""
 
-    def _pick_device(self) -> torch.device:
-        return pick_torch_device()
+    model_version = NMFP_MODEL_VERSION
+    preprocessing_version = NMFP_PREPROCESSING_VERSION
+    embedding_dim = NMFP_EMBEDDING_DIM
 
-    def _ensure_loaded(self) -> None:
-        if self.feature_extractor is not None and self.model is not None:
-            return
+    def __init__(self, fingerprinter: NMFPFingerprinter | None = None):
+        self.fingerprinter = fingerprinter or NMFPFingerprinter()
+        self.last_result: NMFPExtractionResult | None = None
 
-        self.feature_extractor, self.model = load_ast_model(self.model_name, self.device)
+    @property
+    def is_loaded(self) -> bool:
+        return self.fingerprinter.is_loaded
+
+    def extract(
+        self,
+        audio_path: str | Path,
+        *,
+        offset_seconds: float = 0.0,
+    ) -> NMFPExtractionResult:
+        result = self.fingerprinter.extract_wav(
+            audio_path,
+            offset_seconds=offset_seconds,
+            expected_model_version=self.model_version,
+            expected_preprocessing_version=self.preprocessing_version,
+        )
+        self.last_result = result
+        return result
 
     def embed(
         self,
         audio_path: str,
         offset_seconds: float = 0.0,
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Parameters:
-            audio_path: path to WAV file (16kHz mono)
-            offset_seconds: absolute offset to add to timestamps
-
-        Returns:
-            embeddings: (N, D)
-            timestamps: (N,)
-        """
-        self._ensure_loaded()
-        assert self.feature_extractor is not None
-        assert self.model is not None
-
-        audio_data, sr = load_wav_file(audio_path)
-        return compute_ast_embeddings(
-            audio_data=audio_data,
-            sample_rate=sr,
-            feature_extractor=self.feature_extractor,
-            model=self.model,
-            device=self.device,
-            offset_seconds=offset_seconds,
-        )
+    ) -> tuple[np.ndarray, np.ndarray]:
+        result = self.extract(audio_path, offset_seconds=offset_seconds)
+        return result.embeddings, result.timestamps

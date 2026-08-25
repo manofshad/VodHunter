@@ -1,42 +1,56 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import modal
 
-from pipeline.ast_inference import (
-    DEFAULT_AST_MODEL_NAME,
-    compute_ast_embeddings,
-    load_ast_model,
-    load_wav_bytes,
-    pick_torch_device,
+from pipeline.embedder import Embedder
+from pipeline.nmfp_inference import (
+    NMFP_CODE_COMMIT,
+    NMFP_MODEL_ARCHIVE_MD5,
+    NMFP_MODEL_VERSION,
+    NMFP_PREPROCESSING_VERSION,
 )
 
-MODEL_NAME = os.getenv("MODAL_SEARCH_MODEL_NAME", DEFAULT_AST_MODEL_NAME)
+
+NMFP_REPOSITORY_PATH = "/opt/neural-music-fp"
+NMFP_MODEL_CONFIG_PATH = (
+    "/opt/neural-music-fp/pretrained_models/nmfp-triplet/config.yaml"
+)
+NMFP_MODEL_URL = (
+    "https://zenodo.org/api/records/15719945/files/nmfp-triplet.zip/content"
+)
 
 image = (
-    modal.Image.debian_slim(python_version="3.11")
-    .apt_install("libsndfile1")
-    .pip_install("numpy", "soundfile", "transformers", "torch")
+    modal.Image.from_registry(
+        "nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04",
+        add_python="3.11",
+    )
+    .apt_install("libsndfile1", "git", "curl", "unzip")
+    .pip_install(
+        "tensorflow==2.13.0",
+        "essentia==2.1b6.dev1110",
+        "numpy==1.24.3",
+        "PyYAML==6.0.2",
+        "scipy==1.11.4",
+        "soundfile==0.13.1",
+    )
+    .run_commands(
+        f"git clone https://github.com/raraz15/neural-music-fp.git {NMFP_REPOSITORY_PATH}",
+        f"git -C {NMFP_REPOSITORY_PATH} checkout --detach {NMFP_CODE_COMMIT}",
+        f"curl -L --fail --silent --show-error -o /tmp/nmfp-triplet.zip {NMFP_MODEL_URL}",
+        f"echo '{NMFP_MODEL_ARCHIVE_MD5}  /tmp/nmfp-triplet.zip' | md5sum -c -",
+        f"mkdir -p {NMFP_REPOSITORY_PATH}/pretrained_models",
+        f"unzip -q /tmp/nmfp-triplet.zip -d {NMFP_REPOSITORY_PATH}/pretrained_models",
+        "rm /tmp/nmfp-triplet.zip",
+    )
     .add_local_python_source("pipeline")
 )
 
 app = modal.App("vodhunter-search-embedder")
 
-_DEVICE = None
-_FEATURE_EXTRACTOR = None
-_MODEL = None
-
-
-def _ensure_loaded():
-    global _DEVICE, _FEATURE_EXTRACTOR, _MODEL
-    if _DEVICE is not None and _FEATURE_EXTRACTOR is not None and _MODEL is not None:
-        return _DEVICE, _FEATURE_EXTRACTOR, _MODEL
-
-    _DEVICE = pick_torch_device()
-    _FEATURE_EXTRACTOR, _MODEL = load_ast_model(MODEL_NAME, _DEVICE)
-    return _DEVICE, _FEATURE_EXTRACTOR, _MODEL
+# The object and its TensorFlow model live for the lifetime of a warm Modal container.
+_EMBEDDER = Embedder()
 
 
 @app.function(image=image, gpu="T4", scaledown_window=300)
@@ -45,37 +59,41 @@ def embed_search_wav(
     request_id: str = "",
     filename: str = "",
     offset_seconds: float = 0.0,
-    model_version: str = "",
+    model_version: str = NMFP_MODEL_VERSION,
+    preprocessing_version: str = NMFP_PREPROCESSING_VERSION,
 ):
     del request_id
     del filename
 
-    device, feature_extractor, model = _ensure_loaded()
-    audio_data, sample_rate = load_wav_bytes(wav_bytes)
-    embeddings, timestamps = compute_ast_embeddings(
-        audio_data=audio_data,
-        sample_rate=sample_rate,
-        feature_extractor=feature_extractor,
-        model=model,
-        device=device,
+    result = _EMBEDDER.fingerprinter.extract_wav_bytes(
+        wav_bytes,
         offset_seconds=offset_seconds,
+        expected_model_version=model_version,
+        expected_preprocessing_version=preprocessing_version,
     )
 
-    duration_seconds = 0.0
-    if sample_rate > 0:
-        duration_seconds = float(len(audio_data) / sample_rate)
-
     return {
-        "embeddings": embeddings.tolist(),
-        "timestamps": timestamps.tolist(),
-        "model_name": model_version or MODEL_NAME,
-        "embedding_dim": int(embeddings.shape[1]) if embeddings.ndim == 2 else 0,
-        "duration_seconds": duration_seconds,
+        "embeddings": result.embeddings.tolist(),
+        "timestamps": result.timestamps.tolist(),
+        "model_name": result.model_version,
+        "model_version": result.model_version,
+        "preprocessing_version": result.preprocessing_version,
+        "embedding_dim": result.embedding_dim,
+        "duration_seconds": result.metrics.audio_duration_seconds,
+        "cold_start": result.metrics.cold_start,
+        "model_load_duration_ms": result.metrics.model_load_duration_ms,
+        "preprocessing_duration_ms": result.metrics.preprocessing_duration_ms,
+        "inference_duration_ms": result.metrics.inference_duration_ms,
+        "total_duration_ms": result.metrics.total_duration_ms,
     }
 
 
 @app.local_entrypoint()
-def smoke(wav_path: str, model_version: str = ""):
+def smoke(
+    wav_path: str,
+    model_version: str = NMFP_MODEL_VERSION,
+    preprocessing_version: str = NMFP_PREPROCESSING_VERSION,
+):
     wav_bytes = Path(wav_path).read_bytes()
     result = embed_search_wav.remote(
         wav_bytes=wav_bytes,
@@ -83,6 +101,7 @@ def smoke(wav_path: str, model_version: str = ""):
         filename=Path(wav_path).name,
         offset_seconds=0.0,
         model_version=model_version,
+        preprocessing_version=preprocessing_version,
     )
     print(
         {
@@ -90,6 +109,11 @@ def smoke(wav_path: str, model_version: str = ""):
             "embedding_dim": result["embedding_dim"],
             "timestamp_count": len(result["timestamps"]),
             "model_name": result["model_name"],
+            "preprocessing_version": result["preprocessing_version"],
             "duration_seconds": result["duration_seconds"],
+            "cold_start": result["cold_start"],
+            "model_load_duration_ms": result["model_load_duration_ms"],
+            "preprocessing_duration_ms": result["preprocessing_duration_ms"],
+            "inference_duration_ms": result["inference_duration_ms"],
         }
     )

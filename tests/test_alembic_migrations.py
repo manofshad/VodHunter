@@ -133,3 +133,68 @@ class TestAlembicMigrations:
             )
             for sql in fake_op.executed
         )
+
+    def test_search_date_range_revision_adds_fields_and_streamed_at_index(self) -> None:
+        revision = self._load_module(
+            'alembic/versions/20260522_0009_add_search_date_range_fields.py',
+            'vodhunter_alembic_revision_search_date_range',
+        )
+        fake_op = FakeOp()
+        with patch.object(revision, 'op', fake_op):
+            revision.upgrade()
+        assert any(('ADD COLUMN IF NOT EXISTS streamed_from TIMESTAMPTZ' in sql for sql in fake_op.executed))
+        assert any(('ADD COLUMN IF NOT EXISTS streamed_to TIMESTAMPTZ' in sql for sql in fake_op.executed))
+        assert any(('CREATE INDEX IF NOT EXISTS idx_videos_creator_streamed_at' in sql for sql in fake_op.executed))
+        assert any(('WHERE streamed_at IS NOT NULL' in sql for sql in fake_op.executed))
+
+    def test_nmfp_revision_rebuilds_vectors_and_adds_durable_results(self) -> None:
+        revision = self._load_module(
+            'alembic/versions/20260824_0010_nmfp_production_schema.py',
+            'vodhunter_alembic_revision_nmfp_production',
+        )
+        fake_op = FakeOp()
+        with patch.object(revision, 'op', fake_op):
+            revision.upgrade()
+
+        combined_sql = '\n'.join(fake_op.executed)
+        assert revision.down_revision == '20260522_0009'
+        assert 'DELETE FROM fingerprint_embeddings' in combined_sql
+        assert 'DELETE FROM fingerprints' in combined_sql
+        assert 'DELETE FROM vod_ingest_state' in combined_sql
+        assert "SET status = 'reindex_requested'" in combined_sql
+        assert 'ALTER COLUMN embedding TYPE vector(128)' in combined_sql
+        assert 'ADD COLUMN IF NOT EXISTS model_version TEXT' in combined_sql
+        assert 'ADD COLUMN IF NOT EXISTS preprocessing_version TEXT' in combined_sql
+        assert 'ALTER COLUMN model_version SET NOT NULL' in combined_sql
+        assert 'ALTER COLUMN preprocessing_version SET NOT NULL' in combined_sql
+        assert 'DROP COLUMN IF EXISTS model_name' in combined_sql
+        assert 'CREATE INDEX IF NOT EXISTS idx_fingerprint_embeddings_hnsw_cos' in combined_sql
+        assert 'CREATE TABLE IF NOT EXISTS fingerprint_index_metadata' in combined_sql
+        assert 'INSERT INTO fingerprint_index_metadata' in combined_sql
+        assert 'nmfp-triplet@15c6f3bcdf6a6da1daddfe47a1ffa5a0d22deadc+zenodo-15719945+ckpt-100' in combined_sql
+        assert 'nmfp-8khz-mono-1s-hop0.5-mel-v1' in combined_sql
+        assert 'ADD COLUMN IF NOT EXISTS result_payload JSONB' in combined_sql
+        assert 'ADD COLUMN IF NOT EXISTS model_startup_duration_ms INTEGER' in combined_sql
+        assert 'ADD COLUMN IF NOT EXISTS model_cold_start BOOLEAN' in combined_sql
+        assert 'ADD COLUMN IF NOT EXISTS fingerprint_preprocessing_duration_ms INTEGER' in combined_sql
+        assert 'ADD COLUMN IF NOT EXISTS fingerprint_inference_duration_ms INTEGER' in combined_sql
+        assert 'ADD COLUMN IF NOT EXISTS fingerprint_duration_ms INTEGER' in combined_sql
+        assert 'ADD COLUMN IF NOT EXISTS query_fingerprint_count INTEGER' in combined_sql
+        assert 'ADD COLUMN IF NOT EXISTS candidate_count INTEGER' in combined_sql
+        assert 'ADD COLUMN IF NOT EXISTS segment_count INTEGER' in combined_sql
+
+    def test_nmfp_revision_downgrade_does_not_reinterpret_nmfp_vectors_as_ast(self) -> None:
+        revision = self._load_module(
+            'alembic/versions/20260824_0010_nmfp_production_schema.py',
+            'vodhunter_alembic_revision_nmfp_production_downgrade',
+        )
+        fake_op = FakeOp()
+        with patch.object(revision, 'op', fake_op):
+            revision.downgrade()
+
+        combined_sql = '\n'.join(fake_op.executed)
+        assert combined_sql.index('DELETE FROM fingerprint_embeddings') < combined_sql.index(
+            'ALTER COLUMN embedding TYPE vector(768)'
+        )
+        assert 'DROP TABLE IF EXISTS fingerprint_index_metadata' in combined_sql
+        assert 'DROP COLUMN IF EXISTS result_payload' in combined_sql

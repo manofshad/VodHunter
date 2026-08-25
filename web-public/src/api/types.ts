@@ -1,3 +1,18 @@
+export interface SearchSegment {
+  query_start: number;
+  query_end: number;
+  video_id: number;
+  vod_start: number;
+  vod_end: number;
+  video_url_at_timestamp: string | null;
+  score: number;
+}
+
+export interface UnmatchedRange {
+  query_start: number;
+  query_end: number;
+}
+
 export interface SearchResponse {
   found: boolean;
   streamer: string | null;
@@ -10,6 +25,9 @@ export interface SearchResponse {
   timestamp_seconds: number | null;
   score: number | null;
   reason: string | null;
+  segments: SearchSegment[];
+  unmatched_ranges: UnmatchedRange[];
+  query_duration_seconds: number | null;
 }
 
 export interface SearchJobCreatedResponse {

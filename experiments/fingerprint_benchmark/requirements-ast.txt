@@ -1,0 +1,5 @@
+# Legacy AST benchmark only; AST is not part of the production search runtime.
+--extra-index-url https://download.pytorch.org/whl/cpu
+transformers>=4.40.0
+torch>=2.2.0
+soundfile>=0.12.1

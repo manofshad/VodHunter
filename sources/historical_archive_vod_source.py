@@ -5,6 +5,7 @@ import time
 from datetime import datetime
 from typing import Any, Callable, Optional
 
+from pipeline.nmfp_inference import NMFP_HOP_SECONDS, NMFP_SAMPLE_RATE
 from sources.audio_chunk import AudioChunk
 from sources.audio_source import AudioSource
 from storage.vector_store import VectorStore
@@ -131,14 +132,17 @@ class HistoricalArchiveVODSource(AudioSource):
                 "percent_complete": ((self.ingest_cursor_seconds + chunk_len) / self._duration_seconds) * 100.0,
             }
         )
-        chunk_path = self._extract_chunk(self.ingest_cursor_seconds, chunk_len)
+        extraction_start = max(0.0, float(self.ingest_cursor_seconds) - NMFP_HOP_SECONDS)
+        overlap_seconds = float(self.ingest_cursor_seconds) - extraction_start
+        extraction_duration = float(chunk_len) + overlap_seconds
+        chunk_path = self._extract_chunk(extraction_start, extraction_duration)
         self._pending_commit_end_seconds = self.ingest_cursor_seconds + chunk_len
         self._pending_chunk_path = chunk_path
 
         return AudioChunk(
             audio_path=chunk_path,
-            offset_seconds=float(self.ingest_cursor_seconds),
-            duration_seconds=float(chunk_len),
+            offset_seconds=extraction_start,
+            duration_seconds=extraction_duration,
         )
 
     def stop(self) -> None:
@@ -158,10 +162,12 @@ class HistoricalArchiveVODSource(AudioSource):
     def is_finished(self) -> bool:
         return self._finished
 
-    def _extract_chunk(self, start_seconds: int, duration_seconds: int) -> str:
+    def _extract_chunk(self, start_seconds: float, duration_seconds: float) -> str:
+        start_milliseconds = int(round(float(start_seconds) * 1000.0))
+        duration_milliseconds = int(round(float(duration_seconds) * 1000.0))
         output_path = os.path.join(
             self.temp_dir,
-            f"vod_{self._vod_platform_id}_{start_seconds:08d}_{duration_seconds:04d}.wav",
+            f"vod_{self._vod_platform_id}_{start_milliseconds:012d}_{duration_milliseconds:08d}.wav",
         )
         media_url = self._resolve_media_url()
         cmd = [
@@ -169,15 +175,17 @@ class HistoricalArchiveVODSource(AudioSource):
             "-loglevel",
             "error",
             "-ss",
-            str(start_seconds),
+            f"{float(start_seconds):.3f}",
             "-i",
             media_url,
             "-t",
-            str(duration_seconds),
+            f"{float(duration_seconds):.3f}",
             "-ar",
-            "16000",
+            str(NMFP_SAMPLE_RATE),
             "-ac",
             "1",
+            "-c:a",
+            "pcm_s16le",
             "-y",
             output_path,
         ]
