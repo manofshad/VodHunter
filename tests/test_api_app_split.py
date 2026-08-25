@@ -1,5 +1,7 @@
 import asyncio
 import importlib
+from pathlib import Path
+import subprocess
 import sys
 from unittest.mock import patch
 from fastapi.testclient import TestClient
@@ -15,6 +17,27 @@ class StubMonitorManager:
         self.stop_calls += 1
 
 class TestApiAppSplit:
+
+    def test_ingest_bootstrap_does_not_import_fastapi(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        code = """
+import builtins
+real_import = builtins.__import__
+def blocked_import(name, *args, **kwargs):
+    if name == "fastapi" or name.startswith("fastapi."):
+        raise ModuleNotFoundError("fastapi intentionally unavailable")
+    return real_import(name, *args, **kwargs)
+builtins.__import__ = blocked_import
+import backend.bootstrap_ingest
+import backend.bootstrap_shared
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=root,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
 
     def test_backend_main_defaults_to_public_app(self) -> None:
         main_module = importlib.import_module('backend.main')

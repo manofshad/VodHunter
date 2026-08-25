@@ -13,7 +13,7 @@ class TestSearchEmbedderBootstrap:
         vector_store_cls.return_value.ensure_schema_ready.assert_called_once_with()
 
     def test_builds_modal_query_embedder(self) -> None:
-        with patch.object(config, 'MODAL_SEARCH_APP_NAME', 'vodhunter-search-embedder'), patch.object(config, 'MODAL_SEARCH_FUNCTION_NAME', 'embed_search_wav'), patch.object(config, 'MODAL_SEARCH_TIMEOUT_SECONDS', 5.0), patch('backend.config.os.getenv', side_effect=lambda name, default='': {'MODAL_TOKEN_ID': 'id', 'MODAL_TOKEN_SECRET': 'secret'}.get(name, default)), patch('backend.bootstrap_shared.ModalEmbeddingClient', return_value=object()):
+        with patch.object(config, 'MODAL_SEARCH_APP_NAME', 'vodhunter-search-embedder'), patch.object(config, 'MODAL_SEARCH_FUNCTION_NAME', 'embed_search_wav'), patch.object(config, 'MODAL_SEARCH_TIMEOUT_SECONDS', 5.0), patch('backend.config.os.getenv', side_effect=lambda name, default='': {'MODAL_TOKEN_ID': 'id', 'MODAL_TOKEN_SECRET': 'secret'}.get(name, default)), patch('search.modal_embedding_client.ModalEmbeddingClient', return_value=object()):
             query_embedder = bootstrap_shared.build_modal_query_embedder()
         assert isinstance(query_embedder, ModalQueryEmbedder)
 

@@ -1,13 +1,8 @@
+from __future__ import annotations
+
 import os
 
 from backend import config
-from backend.services.remote_clip_downloader import RemoteClipDownloader
-from backend.services.search_manager import SearchManager
-from search.alignment_service import AlignmentConfig, AlignmentService
-from search.modal_embedding_client import ModalEmbeddingClient
-from search.modal_query_embedder import ModalQueryEmbedder
-from search.query_preprocessor import QueryPreprocessor
-from search.search_service import SearchService
 from storage.vector_store import VectorStore
 
 
@@ -39,6 +34,9 @@ def build_store_state() -> dict[str, object]:
 
 
 def build_modal_query_embedder() -> ModalQueryEmbedder:
+    from search.modal_embedding_client import ModalEmbeddingClient
+    from search.modal_query_embedder import ModalQueryEmbedder
+
     config.validate_modal_search_config()
     config.validate_nmfp_config()
     client = ModalEmbeddingClient(
@@ -59,6 +57,12 @@ def build_search_stack(
     max_duration_seconds: int | None,
     upload_temp_dir: str | None = None,
 ) -> dict[str, object]:
+    from backend.services.remote_clip_downloader import RemoteClipDownloader
+    from backend.services.search_manager import SearchManager
+    from search.alignment_service import AlignmentConfig, AlignmentService
+    from search.query_preprocessor import QueryPreprocessor
+    from search.search_service import SearchService
+
     search_service = SearchService(
         store=store,
         preprocessor=QueryPreprocessor(temp_dir=config.TEMP_SEARCH_PREPROCESS_DIR),
