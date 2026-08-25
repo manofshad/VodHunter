@@ -9,5 +9,6 @@ soundfile==0.13.1
 pandas==2.0.3
 python-dotenv>=1.0.1
 psycopg[binary]>=3.2.0
-pgvector>=0.3.0
+# Newer releases require typing extensions that conflict with TensorFlow 2.13.
+pgvector==0.3.6
 yt-dlp>=2026.8.19
