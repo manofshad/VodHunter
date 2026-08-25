@@ -94,7 +94,11 @@ class IngestSession:
                     )
 
                 if len(timestamps) == 0:
-                    continue
+                    raise RuntimeError(
+                        "NMFP produced no fingerprints for "
+                        f"video_id={self.source.video_id} offset_seconds={chunk.offset_seconds:.3f} "
+                        f"duration_seconds={chunk.duration_seconds:.3f}; refusing to advance cursor"
+                    )
 
                 ids = self.store.store_fingerprints(
                     video_id=self.source.video_id,
