@@ -8,6 +8,19 @@ from fastapi.testclient import TestClient
 from backend.apps import admin as admin_app_module
 from backend.apps import public as public_app_module
 
+
+def _route_paths(routes) -> set[str]:
+    paths: set[str] = set()
+    for route in routes:
+        path = getattr(route, 'path', None)
+        if path is not None:
+            paths.add(path)
+        nested_routes = getattr(route, 'routes', None)
+        if nested_routes is not None:
+            paths.update(_route_paths(nested_routes))
+    return paths
+
+
 class StubMonitorManager:
 
     def __init__(self):
@@ -47,8 +60,8 @@ import backend.bootstrap_shared
     def test_public_and_admin_route_boundaries(self) -> None:
         public_app = public_app_module.create_public_app(enable_lifespan=False)
         admin_app = admin_app_module.create_admin_app(enable_lifespan=False)
-        public_paths = {route.path for route in public_app.routes}
-        admin_paths = {route.path for route in admin_app.routes}
+        public_paths = _route_paths(public_app.routes)
+        admin_paths = _route_paths(admin_app.routes)
         assert '/api/health' in public_paths
         assert '/api/search/clip' in public_paths
         assert '/internal/videos/{video_id}/delete-index' in public_paths
