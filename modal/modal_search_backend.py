@@ -31,6 +31,7 @@ image = (
         "tensorflow==2.13.0",
         "essentia==2.1b6.dev1110",
         "numpy==1.24.3",
+        "pandas==2.0.3",
         "PyYAML==6.0.2",
         "scipy==1.11.4",
         "soundfile==0.13.1",
