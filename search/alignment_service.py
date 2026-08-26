@@ -25,6 +25,7 @@ class AlignmentConfig:
     min_support: int = 6
     min_segment_duration_seconds: float = 4.0
     min_density: float = 0.4
+    min_score: float = 0.10
     merge_query_gap_seconds: float = 1.0
     merge_offset_tolerance_seconds: float = 4.0
     max_segments: int = 12
@@ -54,6 +55,9 @@ class AlignmentConfig:
 
         if not math.isfinite(self.min_density) or not 0 < self.min_density <= 1:
             raise ValueError("min_density must be in (0, 1]")
+
+        if not math.isfinite(self.min_score) or not 0 < self.min_score <= 1:
+            raise ValueError("min_score must be in (0, 1]")
 
 
 def _candidate_runs(
@@ -283,7 +287,8 @@ def build_alignment_segments(
         for run in _candidate_runs(candidates, config)
         if (segment := _segment_from_run(run, config)) is not None
     ]
-    return _merge_segments(_deduplicate_segments(proposed, config), config)
+    scored = [segment for segment in proposed if segment.score >= config.min_score]
+    return _merge_segments(_deduplicate_segments(scored, config), config)
 
 
 def unmatched_query_ranges(
@@ -346,7 +351,7 @@ class AlignmentService:
                 found=False,
                 reason=(
                     "No candidate track met the configured support, duration, and "
-                    "density thresholds"
+                    "density thresholds and minimum score"
                     if candidate_list
                     else "No fingerprint candidates"
                 ),

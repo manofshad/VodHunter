@@ -67,6 +67,7 @@ def test_alignment_defaults_match_tuned_experiment() -> None:
     assert config.min_support == 6
     assert config.min_segment_duration_seconds == 4.0
     assert config.min_density == 0.4
+    assert config.min_score == 0.10
     assert config.merge_query_gap_seconds == 1.0
     assert config.merge_offset_tolerance_seconds == 4.0
     assert config.max_segments == 12
@@ -192,6 +193,48 @@ def test_support_duration_density_and_gap_thresholds_reject_weak_tracks() -> Non
     ) == []
 
 
+def test_minimum_score_rejects_structurally_supported_weak_track() -> None:
+    config = AlignmentConfig(min_score=0.10)
+    weak_track = _track(0.0, 9, 100.0, similarity=0.05)
+
+    assert build_alignment_segments(weak_track, config) == []
+
+    result = AlignmentService(config=config).align_candidates(
+        weak_track,
+        query_duration_seconds=4.5,
+    )
+
+    assert not result.found
+    assert "minimum score" in result.reason
+
+
+def test_minimum_score_accepts_exact_boundary() -> None:
+    config = AlignmentConfig(min_score=0.10)
+    boundary_track = _track(0.0, 9, 100.0, similarity=0.10)
+
+    segments = build_alignment_segments(boundary_track, config)
+
+    assert len(segments) == 1
+    assert segments[0].score == pytest.approx(0.10)
+
+
+def test_minimum_score_filters_weak_segments_before_primary_selection() -> None:
+    config = AlignmentConfig(min_score=0.10, max_unmatched_gap_seconds=0.0)
+    strong_track = _track(0.0, 9, 100.0, video_id=1, similarity=0.8)
+    weak_track = _track(5.0, 9, 200.0, video_id=2, similarity=0.05)
+
+    result = AlignmentService(config=config).align_candidates(
+        strong_track + weak_track,
+        query_duration_seconds=9.5,
+    )
+
+    assert result.found
+    assert result.video_id == 1
+    assert len(result.segments) == 1
+    assert result.segments[0].score == pytest.approx(0.8)
+    assert result.unmatched_ranges == [UnmatchedRange(4.5, 9.5)]
+
+
 def test_max_segments_keeps_highest_ranked_tracks_then_orders_by_query() -> None:
     config = AlignmentConfig(
         min_support=6,
@@ -272,6 +315,8 @@ def test_no_candidates_returns_fully_unmatched_duration() -> None:
         ("min_segment_duration_seconds", 0.0),
         ("min_density", 0.0),
         ("min_density", 1.1),
+        ("min_score", 0.0),
+        ("min_score", 1.1),
         ("merge_query_gap_seconds", -0.1),
         ("merge_offset_tolerance_seconds", -0.1),
         ("max_segments", 0),
