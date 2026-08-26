@@ -1083,40 +1083,6 @@ export default function SearchPage() {
                   </div>
                 </div>
 
-                <div className="grid gap-3 rounded-xl bg-gray-800/90 p-3 text-left md:grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)] md:items-end">
-                  <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-300 md:pb-3">
-                    Stream date range
-                  </div>
-                  <label className="grid gap-1 text-xs font-medium text-gray-300">
-                    From
-                    <input
-                      type="date"
-                      value={streamedFrom}
-                      max={streamedTo || undefined}
-                      disabled={submitting}
-                      onChange={(event) => {
-                        setStreamedFrom(event.target.value);
-                        setRequestError(null);
-                      }}
-                      className="h-10 rounded-lg border border-gray-700 bg-gray-900 px-3 text-sm text-gray-100 outline-none disabled:cursor-not-allowed disabled:text-gray-500"
-                    />
-                  </label>
-                  <label className="grid gap-1 text-xs font-medium text-gray-300">
-                    To
-                    <input
-                      type="date"
-                      value={streamedTo}
-                      min={streamedFrom || undefined}
-                      disabled={submitting}
-                      onChange={(event) => {
-                        setStreamedTo(event.target.value);
-                        setRequestError(null);
-                      }}
-                      className="h-10 rounded-lg border border-gray-700 bg-gray-900 px-3 text-sm text-gray-100 outline-none disabled:cursor-not-allowed disabled:text-gray-500"
-                    />
-                  </label>
-                </div>
-
                 <div className="min-h-6 text-left">
                   {streamerError ? (
                     <p id="streamer-error" className="flex items-center gap-2 text-sm font-medium text-white">
