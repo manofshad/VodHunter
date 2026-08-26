@@ -1,8 +1,9 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { useState } from "react";
+import { describe, expect, it, vi } from "vitest";
 
 import { SearchResponse } from "../api/types";
-import { SearchResultCard, formatTimelineTime } from "./SearchPage";
+import { DateRangePicker, SearchResultCard, formatTimelineTime } from "./SearchPage";
 
 function multiSegmentResult(): SearchResponse {
   return {
@@ -95,5 +96,57 @@ describe("SearchResultCard", () => {
 describe("formatTimelineTime", () => {
   it("keeps half-second boundaries", () => {
     expect(formatTimelineTime(21275.5)).toBe("05:54:35.5");
+  });
+});
+
+describe("DateRangePicker", () => {
+  it("updates the field immediately and saves without a duplicate preview", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 26));
+
+    try {
+      function StatefulDateRangePicker() {
+        const [streamedFrom, setStreamedFrom] = useState("");
+        const [streamedTo, setStreamedTo] = useState("");
+
+        return (
+          <DateRangePicker
+            streamedFrom={streamedFrom}
+            streamedTo={streamedTo}
+            disabled={false}
+            onChange={(nextFrom, nextTo) => {
+              setStreamedFrom(nextFrom);
+              setStreamedTo(nextTo);
+            }}
+          />
+        );
+      }
+
+      render(<StatefulDateRangePicker />);
+
+      const trigger = screen.getByRole("button", { name: "Stream date range" });
+      fireEvent.click(trigger);
+      expect(screen.getByRole("dialog", { name: "Choose stream date range" })).toBeTruthy();
+
+      fireEvent.click(screen.getByRole("button", { name: "August 26, 2026" }));
+      expect(trigger.textContent).toContain("08/26/2026 –");
+
+      fireEvent.click(screen.getByRole("button", { name: "August 28, 2026" }));
+      expect(trigger.textContent).toContain("08/26/2026 – 08/28/2026");
+
+      const dialog = screen.getByRole("dialog", { name: "Choose stream date range" });
+      expect(within(dialog).queryByText("08/26/2026 – 08/28/2026")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Clear" })).toBeNull();
+
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      expect(screen.queryByRole("dialog", { name: "Choose stream date range" })).toBeNull();
+
+      fireEvent.click(trigger);
+      fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+      expect(trigger.textContent).toContain("mm/dd/yyyy – mm/dd/yyyy");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

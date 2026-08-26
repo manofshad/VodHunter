@@ -1,5 +1,17 @@
 import { FormEvent, useEffect, useId, useMemo, useRef, useState } from "react";
-import { AlertCircle, Check, ChevronDown, Clipboard, ExternalLink, LoaderCircle, Search, TriangleAlert } from "lucide-react";
+import {
+  AlertCircle,
+  CalendarDays,
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Clipboard,
+  ExternalLink,
+  LoaderCircle,
+  Search,
+  TriangleAlert,
+} from "lucide-react";
 
 import { createSearchJob, getSearchJob, listSearchableStreamers } from "../api/client";
 import { SearchJobResponse, SearchResponse, StreamerListItem } from "../api/types";
@@ -66,6 +78,315 @@ function getResultHref(result: SearchResponse | null): string | null {
   }
 
   return result.video_url_at_timestamp ?? null;
+}
+
+const DATE_RANGE_PLACEHOLDER = "mm/dd/yyyy – mm/dd/yyyy";
+const WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+
+function parseDateInput(value: string): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return null;
+  }
+
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+    return null;
+  }
+
+  return date;
+}
+
+function formatDateInput(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatDateDisplay(value: string): string {
+  const date = parseDateInput(value);
+  if (date === null) {
+    return "";
+  }
+
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${month}/${day}/${date.getFullYear()}`;
+}
+
+function formatDateRangeDisplay(streamedFrom: string, streamedTo: string): string {
+  const from = formatDateDisplay(streamedFrom);
+  const to = formatDateDisplay(streamedTo);
+
+  if (!from && !to) {
+    return DATE_RANGE_PLACEHOLDER;
+  }
+  if (!to) {
+    return `${from} –`;
+  }
+  if (!from) {
+    return `– ${to}`;
+  }
+
+  return `${from} – ${to}`;
+}
+
+function startOfMonth(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function addMonths(date: Date, amount: number): Date {
+  return new Date(date.getFullYear(), date.getMonth() + amount, 1);
+}
+
+function getCalendarDays(month: Date): Date[] {
+  const firstDay = startOfMonth(month);
+  const daysInMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
+  const leadingDays = firstDay.getDay();
+  const totalCells = Math.ceil((leadingDays + daysInMonth) / 7) * 7;
+
+  return Array.from({ length: totalCells }, (_, index) => {
+    return new Date(month.getFullYear(), month.getMonth(), index - leadingDays + 1);
+  });
+}
+
+function isDateInRange(value: string, streamedFrom: string, streamedTo: string): boolean {
+  return Boolean(streamedFrom && streamedTo && value > streamedFrom && value < streamedTo);
+}
+
+interface CalendarMonthProps {
+  month: Date;
+  streamedFrom: string;
+  streamedTo: string;
+  onSelect: (value: string) => void;
+}
+
+function CalendarMonth({ month, streamedFrom, streamedTo, onSelect }: CalendarMonthProps) {
+  const monthLabel = month.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+
+  return (
+    <section aria-label={monthLabel}>
+      <h3 className="mb-3 text-center text-sm font-semibold text-gray-100">{monthLabel}</h3>
+      <div className="grid grid-cols-7 gap-0.5 text-center text-[0.64rem] font-semibold uppercase tracking-wide text-gray-500">
+        {WEEKDAYS.map((weekday) => (
+          <span key={weekday} aria-hidden="true" className="py-0.5">
+            {weekday}
+          </span>
+        ))}
+      </div>
+      <div className="mt-0.5 grid grid-cols-7 gap-0.5 text-sm">
+        {getCalendarDays(month).map((date) => {
+          const value = formatDateInput(date);
+          const isCurrentMonth = date.getMonth() === month.getMonth();
+          const isStart = value === streamedFrom;
+          const isEnd = value === streamedTo;
+          const isSelected = isStart || isEnd;
+          const isInRange = isDateInRange(value, streamedFrom, streamedTo);
+
+          return (
+            <button
+              key={value}
+              type="button"
+              aria-label={date.toLocaleDateString("en-US", {
+                month: "long",
+                day: "numeric",
+                year: "numeric",
+              })}
+              aria-pressed={isSelected}
+              onClick={() => onSelect(value)}
+              className={`flex h-8 items-center justify-center rounded-md transition ${
+                isSelected
+                  ? "bg-[#fb2844] font-semibold text-white"
+                  : isInRange
+                    ? "bg-[#fb2844]/20 text-gray-100"
+                    : isCurrentMonth
+                      ? "text-gray-200 hover:bg-gray-800"
+                      : "text-gray-600 hover:bg-gray-800/60"
+              }`}
+            >
+              {date.getDate()}
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+interface DateRangePickerProps {
+  streamedFrom: string;
+  streamedTo: string;
+  disabled: boolean;
+  onChange: (streamedFrom: string, streamedTo: string) => void;
+}
+
+export function DateRangePicker({ streamedFrom, streamedTo, disabled, onChange }: DateRangePickerProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [draftFrom, setDraftFrom] = useState(streamedFrom);
+  const [draftTo, setDraftTo] = useState(streamedTo);
+  const [visibleMonth, setVisibleMonth] = useState(() =>
+    startOfMonth(parseDateInput(streamedFrom) ?? parseDateInput(streamedTo) ?? new Date()),
+  );
+  const pickerRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    const onPointerDown = (event: MouseEvent) => {
+      if (!pickerRef.current?.contains(event.target as Node)) {
+        setDraftFrom(streamedFrom);
+        setDraftTo(streamedTo);
+        setIsOpen(false);
+      }
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setDraftFrom(streamedFrom);
+        setDraftTo(streamedTo);
+        setIsOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+
+    window.addEventListener("mousedown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      window.removeEventListener("mousedown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [isOpen, streamedFrom, streamedTo]);
+
+  const openPicker = () => {
+    setDraftFrom(streamedFrom);
+    setDraftTo(streamedTo);
+    setVisibleMonth(startOfMonth(parseDateInput(streamedFrom) ?? parseDateInput(streamedTo) ?? new Date()));
+    setIsOpen(true);
+  };
+
+  const updateDraft = (nextFrom: string, nextTo: string) => {
+    setDraftFrom(nextFrom);
+    setDraftTo(nextTo);
+    onChange(nextFrom, nextTo);
+  };
+
+  const selectDate = (value: string) => {
+    if (!draftFrom || draftTo) {
+      updateDraft(value, "");
+      return;
+    }
+
+    if (value < draftFrom) {
+      updateDraft(value, draftFrom);
+      return;
+    }
+
+    updateDraft(draftFrom, value);
+  };
+
+  const closePicker = () => {
+    setDraftFrom(streamedFrom);
+    setDraftTo(streamedTo);
+    setIsOpen(false);
+    triggerRef.current?.focus();
+  };
+
+  const savePicker = () => {
+    setIsOpen(false);
+    triggerRef.current?.focus();
+  };
+
+  const resetPicker = () => {
+    updateDraft("", "");
+  };
+
+  return (
+    <div ref={pickerRef} className="relative min-w-0">
+      <button
+        ref={triggerRef}
+        type="button"
+        disabled={disabled}
+        aria-haspopup="dialog"
+        aria-expanded={isOpen}
+        aria-label="Stream date range"
+        onClick={isOpen ? undefined : openPicker}
+        className="flex h-10 w-full items-center gap-3 rounded-lg border border-gray-700 bg-gray-900 px-3 text-left text-sm text-gray-100 outline-none transition hover:border-gray-500 focus:border-gray-400 disabled:cursor-not-allowed disabled:text-gray-500"
+      >
+        <CalendarDays className="size-4 shrink-0 text-gray-400" aria-hidden="true" />
+        <span className={!streamedFrom && !streamedTo ? "text-gray-500" : "text-gray-100"}>
+          {formatDateRangeDisplay(streamedFrom, streamedTo)}
+        </span>
+      </button>
+
+      {isOpen ? (
+        <div
+          role="dialog"
+          aria-label="Choose stream date range"
+          className="absolute top-[calc(100%+8px)] right-0 z-30 w-[min(100vw-2rem,36rem)] overflow-hidden rounded-xl border border-gray-700 bg-gray-900 shadow-2xl"
+        >
+          <div className="flex items-center justify-between border-b border-gray-700 px-3 py-2">
+            <button
+              type="button"
+              aria-label="Previous month"
+              onClick={() => setVisibleMonth((month) => addMonths(month, -1))}
+              className="flex size-8 items-center justify-center rounded-md text-gray-300 transition hover:bg-gray-800 hover:text-white"
+            >
+              <ChevronLeft className="size-5" />
+            </button>
+            <div className="text-center">
+              <p className="text-sm font-semibold text-white">Choose stream dates</p>
+              <p className="mt-0.5 text-xs text-gray-400">Select a start and end date</p>
+            </div>
+            <button
+              type="button"
+              aria-label="Next month"
+              onClick={() => setVisibleMonth((month) => addMonths(month, 1))}
+              className="flex size-8 items-center justify-center rounded-md text-gray-300 transition hover:bg-gray-800 hover:text-white"
+            >
+              <ChevronRight className="size-5" />
+            </button>
+          </div>
+
+          <div className="grid gap-3 p-3 sm:grid-cols-2">
+            <CalendarMonth
+              month={visibleMonth}
+              streamedFrom={draftFrom}
+              streamedTo={draftTo}
+              onSelect={selectDate}
+            />
+            <CalendarMonth
+              month={addMonths(visibleMonth, 1)}
+              streamedFrom={draftFrom}
+              streamedTo={draftTo}
+              onSelect={selectDate}
+            />
+          </div>
+
+          <div className="flex items-center justify-end gap-3 border-t border-gray-700 px-3 py-2">
+            <button
+              type="button"
+              onClick={resetPicker}
+              className="rounded-lg bg-gray-800 px-3 py-2 text-sm font-semibold text-gray-200 transition hover:bg-gray-700"
+            >
+              Reset
+            </button>
+            <button
+              type="button"
+              onClick={savePicker}
+              className="rounded-lg bg-[#fb2844] px-3 py-2 text-sm font-semibold text-white transition hover:bg-[#f55b70]"
+            >
+              Save
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 const ACTIVE_SEARCH_STORAGE_KEY = "vodhunter-public-active-search";
@@ -369,15 +690,19 @@ export default function SearchPage() {
   const [requestError, setRequestError] = useState<string | null>(null);
   const [streamerError, setStreamerError] = useState<string | null>(null);
   const [isStreamerMenuOpen, setIsStreamerMenuOpen] = useState(false);
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [activeSearchId, setActiveSearchId] = useState<number | null>(null);
   const [activeSearchStage, setActiveSearchStage] = useState<string | null>(null);
   const [lastSubmittedUrl, setLastSubmittedUrl] = useState("");
   const streamerTriggerRef = useRef<HTMLButtonElement | null>(null);
   const streamerMenuRef = useRef<HTMLDivElement | null>(null);
+  const filterPanelRef = useRef<HTMLDivElement | null>(null);
   const streamerMenuId = useId();
+  const filterPanelId = useId();
 
   const hasUrl = tiktokUrl.trim().length > 0;
+  const hasActiveDateRange = Boolean(streamedFrom || streamedTo);
   const searchButtonLabel = useMemo(() => (submitting ? "Searching..." : "Search"), [submitting]);
 
   useEffect(() => {
@@ -460,6 +785,12 @@ export default function SearchPage() {
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [isStreamerMenuOpen]);
+
+  useEffect(() => {
+    if (filterPanelRef.current) {
+      filterPanelRef.current.inert = !isFiltersOpen;
+    }
+  }, [isFiltersOpen]);
 
   useEffect(() => {
     if (activeSearchId === null) {
@@ -592,8 +923,8 @@ export default function SearchPage() {
               <h1 className="mb-12 text-3xl font-bold text-white">Find That Exact Moment</h1>
 
               <form onSubmit={onSubmit} noValidate className="flex flex-col items-stretch gap-3">
-                <div className="flex flex-col items-stretch gap-3 md:flex-row">
-                  <div className="flex-1 rounded-xl bg-gray-800 p-1">
+                <div className="relative rounded-xl bg-gray-800">
+                  <div className="p-1">
                     <div className="flex flex-col items-stretch gap-2 md:flex-row md:items-center">
                       <div className="relative md:w-[180px] md:shrink-0">
                         <button
@@ -693,40 +1024,63 @@ export default function SearchPage() {
                       </button>
                     </div>
                   </div>
-                </div>
 
-                <div className="grid gap-3 rounded-xl bg-gray-800/90 p-3 text-left md:grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)] md:items-end">
-                  <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-300 md:pb-3">
-                    Stream date range
+                  <div className="border-t border-gray-700/80">
+                    <button
+                      type="button"
+                      aria-expanded={isFiltersOpen}
+                      aria-controls={filterPanelId}
+                      onClick={() => setIsFiltersOpen((open) => !open)}
+                      className="flex min-h-9 w-full items-center gap-2 px-3 py-1 text-left text-sm font-medium text-gray-300 transition hover:text-white"
+                    >
+                      <ChevronDown
+                        className={`size-4 text-gray-400 transition-transform ${isFiltersOpen ? "rotate-180" : ""}`}
+                        aria-hidden="true"
+                      />
+                      <span>Filters</span>
+                      {hasActiveDateRange ? (
+                        <span className="rounded-full bg-gray-700 px-2 py-0.5 text-[0.68rem] font-semibold uppercase tracking-wide text-gray-300">
+                          1 active
+                        </span>
+                      ) : null}
+                      {hasActiveDateRange ? (
+                        <span className="ml-auto hidden truncate text-xs font-normal text-gray-400 sm:block">
+                          {formatDateRangeDisplay(streamedFrom, streamedTo)}
+                        </span>
+                      ) : null}
+                    </button>
+
                   </div>
-                  <label className="grid gap-1 text-xs font-medium text-gray-300">
-                    From
-                    <input
-                      type="date"
-                      value={streamedFrom}
-                      max={streamedTo || undefined}
-                      disabled={submitting}
-                      onChange={(event) => {
-                        setStreamedFrom(event.target.value);
-                        setRequestError(null);
-                      }}
-                      className="h-10 rounded-lg border border-gray-700 bg-gray-900 px-3 text-sm text-gray-100 outline-none disabled:cursor-not-allowed disabled:text-gray-500"
-                    />
-                  </label>
-                  <label className="grid gap-1 text-xs font-medium text-gray-300">
-                    To
-                    <input
-                      type="date"
-                      value={streamedTo}
-                      min={streamedFrom || undefined}
-                      disabled={submitting}
-                      onChange={(event) => {
-                        setStreamedTo(event.target.value);
-                        setRequestError(null);
-                      }}
-                      className="h-10 rounded-lg border border-gray-700 bg-gray-900 px-3 text-sm text-gray-100 outline-none disabled:cursor-not-allowed disabled:text-gray-500"
-                    />
-                  </label>
+
+                  <div
+                    ref={filterPanelRef}
+                    id={filterPanelId}
+                    aria-hidden={!isFiltersOpen}
+                    className={`absolute top-[calc(100%+4px)] left-0 z-30 w-full origin-top rounded-xl border border-gray-700 bg-gray-800 p-4 shadow-2xl transition-[opacity,transform,visibility] duration-200 ease-out motion-reduce:transform-none motion-reduce:transition-none ${
+                      isFiltersOpen
+                        ? "visible translate-y-0 scale-100 opacity-100"
+                        : "pointer-events-none invisible -translate-y-2 scale-[0.98] opacity-0"
+                    }`}
+                  >
+                    <div className="flex flex-col gap-2 text-left sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-300">Stream dates</p>
+                        <p className="mt-1 text-xs text-gray-500">Limit matches to VODs streamed during this range.</p>
+                      </div>
+                      <div className="w-full sm:max-w-[28rem]">
+                        <DateRangePicker
+                          streamedFrom={streamedFrom}
+                          streamedTo={streamedTo}
+                          disabled={submitting}
+                          onChange={(nextFrom, nextTo) => {
+                            setStreamedFrom(nextFrom);
+                            setStreamedTo(nextTo);
+                            setRequestError(null);
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="min-h-6 text-left">
