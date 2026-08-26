@@ -59,6 +59,7 @@ class TestSearchManager:
                 search_service=service,
                 upload_temp_dir=tmp,
                 remote_downloader=downloader,
+                duration_probe=lambda _: 1.0,
             )
             upload = UploadFile(filename="query.mp4", file=io.BytesIO(b"video"))
 
@@ -79,6 +80,7 @@ class TestSearchManager:
                 search_service=service,
                 upload_temp_dir=tmp,
                 remote_downloader=downloader,
+                duration_probe=lambda _: 1.0,
             )
             upload = UploadFile(filename="query.mp4", file=io.BytesIO(b"video"))
 
@@ -96,6 +98,7 @@ class TestSearchManager:
                 search_service=service,
                 upload_temp_dir=tmp,
                 remote_downloader=downloader,
+                duration_probe=lambda _: 1.0,
             )
             upload = UploadFile(filename="query.mp4", file=io.BytesIO(b""))
 
@@ -151,7 +154,11 @@ class TestSearchManager:
                 f.write(b"clip")
             service = FakeSearchService()
             downloader = FakeDownloader(downloaded_path=clip_path)
-            manager = SearchManager(search_service=service, remote_downloader=downloader)
+            manager = SearchManager(
+                search_service=service,
+                remote_downloader=downloader,
+                duration_probe=lambda _: 1.0,
+            )
             outcome = manager.search_tiktok_url("https://www.tiktok.com/@user/video/1", "xqc")
             assert downloader.download_calls == ["https://www.tiktok.com/@user/video/1"]
             assert service.searched_paths == [(clip_path, "xqc")]
@@ -170,7 +177,11 @@ class TestSearchManager:
             )
             service = FakeSearchService()
             downloader = FakeDownloader(downloaded_path=clip_path)
-            manager = SearchManager(search_service=service, remote_downloader=downloader)
+            manager = SearchManager(
+                search_service=service,
+                remote_downloader=downloader,
+                duration_probe=lambda _: 1.0,
+            )
             outcome = manager.search_tiktok_url("https://www.tiktok.com/@user/video/1", "xqc", date_range=date_range)
             assert service.date_ranges == [date_range]
             assert outcome.date_range == date_range
@@ -183,7 +194,11 @@ class TestSearchManager:
             service = FakeSearchService()
             service.raise_on_search = True
             downloader = FakeDownloader(downloaded_path=clip_path)
-            manager = SearchManager(search_service=service, remote_downloader=downloader)
+            manager = SearchManager(
+                search_service=service,
+                remote_downloader=downloader,
+                duration_probe=lambda _: 1.0,
+            )
             with pytest.raises(RuntimeError):
                 manager.search_tiktok_url("https://www.tiktok.com/@user/video/1", "xqc")
             assert downloader.cleaned_paths == [clip_path]
@@ -195,7 +210,11 @@ class TestSearchManager:
                 f.write(b"clip")
             service = FakeSearchService()
             downloader = FakeDownloader(downloaded_path=clip_path)
-            manager = SearchManager(search_service=service, remote_downloader=downloader)
+            manager = SearchManager(
+                search_service=service,
+                remote_downloader=downloader,
+                duration_probe=lambda _: 1.0,
+            )
             outcome = manager.search_tiktok_url("https://www.tiktok.com/@user/video/1", "xqc")
             assert downloader.download_calls == ["https://www.tiktok.com/@user/video/1"]
             assert service.searched_paths == [(clip_path, "xqc")]
@@ -247,6 +266,10 @@ class TestSearchManager:
                 f.write(b"clip")
             service = FakeSearchService()
             downloader = FakeDownloader(downloaded_path=clip_path)
-            manager = SearchManager(search_service=service, remote_downloader=downloader)
+            manager = SearchManager(
+                search_service=service,
+                remote_downloader=downloader,
+                duration_probe=lambda _: 1.0,
+            )
             with pytest.raises(SearchInputError):
                 manager.search_tiktok_url("https://www.tiktok.com/@user/video/1", "   ")

@@ -7,7 +7,15 @@ from search.search_service import SearchService
 
 class FakePreprocessor:
 
-    def prepare(self, clip_path: str) -> str:
+    def __init__(self) -> None:
+        self.duration_limits: list[float | None] = []
+
+    def prepare(
+        self,
+        clip_path: str,
+        duration_limit_seconds: float | None = None,
+    ) -> str:
+        self.duration_limits.append(duration_limit_seconds)
         return clip_path
 
     def cleanup(self, path: str) -> None:
@@ -151,3 +159,19 @@ class TestSearchService:
         assert store.last_model_version == "nmfp-model"
         assert store.last_preprocessing_version == "nmfp-preprocessing"
         assert execution.result.query_duration_seconds == 1.0
+
+    def test_passes_query_duration_to_preprocessor(self) -> None:
+        preprocessor = FakePreprocessor()
+        service = SearchService(
+            store=FakeStore(),
+            preprocessor=preprocessor,
+            query_embedder=FakeQueryEmbedder(
+                embeddings=np.array([[0.1, 0.2]], dtype=np.float32),
+                timestamps=np.array([0.0], dtype=np.float32),
+            ),
+            alignment=FakeAlignment(AlignmentResult(found=False, reason="no match")),
+        )
+
+        service.search_file("clip.mp4", "xqc", query_duration_seconds=133.166667)
+
+        assert preprocessor.duration_limits == [133.166667]
