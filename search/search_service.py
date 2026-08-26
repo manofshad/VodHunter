@@ -109,7 +109,13 @@ class SearchService:
             if on_stage_change is not None:
                 on_stage_change("preprocessing")
             started_at = time.perf_counter()
-            prepared_wav = self.preprocessor.prepare(clip_path)
+            if query_duration_seconds is None:
+                prepared_wav = self.preprocessor.prepare(clip_path)
+            else:
+                prepared_wav = self.preprocessor.prepare(
+                    clip_path,
+                    duration_limit_seconds=query_duration_seconds,
+                )
             metadata.preprocess_duration_ms = _duration_ms(time.perf_counter() - started_at)
 
             if on_stage_change is not None:

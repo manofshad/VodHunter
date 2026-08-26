@@ -143,8 +143,6 @@ class SearchManager:
                 self.remote_downloader.cleanup(downloaded_path)
 
     def _validate_duration(self, path: str, on_stage_change: Callable[[str], None] | None = None) -> float | None:
-        if self.max_duration_seconds is None:
-            return None
         if on_stage_change is not None:
             on_stage_change("probing")
         started_at = time.perf_counter()
@@ -159,7 +157,10 @@ class SearchManager:
             os.path.basename(path),
         )
 
-        if duration_seconds > self.max_duration_seconds:
+        if (
+            self.max_duration_seconds is not None
+            and duration_seconds > self.max_duration_seconds
+        ):
             raise InputDurationExceededError(
                 duration_seconds=duration_seconds,
                 max_duration_seconds=self.max_duration_seconds,

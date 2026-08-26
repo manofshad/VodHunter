@@ -1,4 +1,5 @@
 from pathlib import Path
+import math
 import shutil
 import subprocess
 import uuid
@@ -9,16 +10,30 @@ class QueryPreprocessor:
         self.temp_dir = Path(temp_dir)
         self.temp_dir.mkdir(parents=True, exist_ok=True)
 
-    def prepare(self, clip_path: str) -> str:
+    def prepare(
+        self,
+        clip_path: str,
+        duration_limit_seconds: float | None = None,
+    ) -> str:
         src = Path(clip_path)
         if not src.exists():
             raise FileNotFoundError(f"Query clip not found: {clip_path}")
+
+        if duration_limit_seconds is not None:
+            duration_limit_seconds = float(duration_limit_seconds)
+            if not math.isfinite(duration_limit_seconds) or duration_limit_seconds <= 0:
+                raise ValueError("duration_limit_seconds must be a positive finite number")
 
         output_path = self.temp_dir / f"query_{uuid.uuid4().hex}.wav"
         cmd = [
             "ffmpeg",
             "-i",
             str(src),
+        ]
+        if duration_limit_seconds is not None:
+            cmd.extend(["-t", f"{duration_limit_seconds:.6f}"])
+        cmd.extend([
+            "-vn",
             "-ar",
             "8000",
             "-ac",
@@ -29,7 +44,7 @@ class QueryPreprocessor:
             str(output_path),
             "-loglevel",
             "error",
-        ]
+        ])
 
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0 or not output_path.exists():
