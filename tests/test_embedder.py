@@ -15,6 +15,10 @@ class FakeFingerprinter:
         self.calls: list[dict[str, object]] = []
         self.is_loaded = True
 
+    def load(self) -> int:
+        self.is_loaded = True
+        return 37
+
     def extract_wav(
         self,
         audio_path,
@@ -56,6 +60,14 @@ def test_embedder_exposes_pinned_nmfp_contract() -> None:
     assert embedder.model_version == NMFP_MODEL_VERSION
     assert embedder.preprocessing_version == NMFP_PREPROCESSING_VERSION
     assert embedder.embedding_dim == 128
+    assert embedder.is_loaded
+
+
+def test_load_preloads_and_warms_fingerprinter() -> None:
+    fingerprinter = FakeFingerprinter()
+    embedder = Embedder(fingerprinter=fingerprinter)
+
+    assert embedder.load() == 37
     assert embedder.is_loaded
 
 

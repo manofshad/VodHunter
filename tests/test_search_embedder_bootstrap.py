@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import Mock, patch
 from backend import bootstrap_ingest, bootstrap_shared, config
-from search.modal_query_embedder import ModalQueryEmbedder
+from search.local_query_embedder import LocalQueryEmbedder
 
 class TestSearchEmbedderBootstrap:
 
@@ -12,15 +12,32 @@ class TestSearchEmbedderBootstrap:
         assert state == {'store': store}
         vector_store_cls.return_value.ensure_schema_ready.assert_called_once_with()
 
-    def test_builds_modal_query_embedder(self) -> None:
-        with patch.object(config, 'MODAL_SEARCH_APP_NAME', 'vodhunter-search-embedder'), patch.object(config, 'MODAL_SEARCH_FUNCTION_NAME', 'embed_search_wav'), patch.object(config, 'MODAL_SEARCH_TIMEOUT_SECONDS', 5.0), patch('backend.config.os.getenv', side_effect=lambda name, default='': {'MODAL_TOKEN_ID': 'id', 'MODAL_TOKEN_SECRET': 'secret'}.get(name, default)), patch('search.modal_embedding_client.ModalEmbeddingClient', return_value=object()):
-            query_embedder = bootstrap_shared.build_modal_query_embedder()
-        assert isinstance(query_embedder, ModalQueryEmbedder)
+    def test_builds_and_preloads_local_query_embedder(self) -> None:
+        embedder = Mock(
+            embedding_dim=128,
+            model_version=config.NMFP_MODEL_VERSION,
+            preprocessing_version=config.NMFP_PREPROCESSING_VERSION,
+            is_loaded=True,
+        )
+        embedder.load.return_value = 41
+        with patch.object(config, 'VECTOR_DIM', 128):
+            query_embedder = bootstrap_shared.build_local_query_embedder(embedder=embedder)
+        try:
+            assert isinstance(query_embedder, LocalQueryEmbedder)
+            assert query_embedder.embedder is embedder
+            embedder.load.assert_called_once_with()
+        finally:
+            query_embedder.close()
 
-    def test_modal_config_requires_function_name(self) -> None:
-        with patch.object(config, 'MODAL_SEARCH_APP_NAME', 'vodhunter-search-embedder'), patch.object(config, 'MODAL_SEARCH_FUNCTION_NAME', ''), patch('backend.config.os.getenv', side_effect=lambda name, default='': {'MODAL_TOKEN_ID': 'id', 'MODAL_TOKEN_SECRET': 'secret'}.get(name, default)):
-            with pytest.raises(ValueError):
-                config.validate_modal_search_config()
+    def test_local_query_embedder_rejects_index_dimension_mismatch(self) -> None:
+        embedder = Mock(
+            embedding_dim=64,
+            model_version=config.NMFP_MODEL_VERSION,
+            preprocessing_version=config.NMFP_PREPROCESSING_VERSION,
+        )
+        with patch.object(config, 'VECTOR_DIM', 128):
+            with pytest.raises(ValueError, match='embedding dimension'):
+                bootstrap_shared.build_local_query_embedder(embedder=embedder)
 
     def test_nmfp_config_rejects_model_or_preprocessing_index_mismatch(self) -> None:
         with patch.object(config, 'NMFP_MODEL_VERSION', 'different-model'):

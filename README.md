@@ -20,14 +20,15 @@ flowchart LR
     IngestNMFP --> Vectors["Postgres + pgvector(128)"]
 
     Query["TikTok / uploaded clip"] --> Normalize["ffmpeg normalization"]
-    Normalize --> Modal["persistent NMFP Modal worker"]
-    Modal --> Candidates["top-k neighbors per fingerprint"]
+    Normalize --> Queue["single-consumer local NMFP queue"]
+    Queue --> LocalNMFP["preloaded backend NMFP model"]
+    LocalNMFP --> Candidates["top-k neighbors per fingerprint"]
     Vectors --> Candidates
     Candidates --> Align["video + stable-offset track alignment"]
     Align --> Result["primary timestamp + segments + unmatched ranges"]
 ```
 
-Ingestion resolves VOD media with `yt-dlp`, extracts overlapping audio chunks, fingerprints them locally, and stores the timestamped vectors with the model and preprocessing versions. Search normalizes the query, obtains timestamped fingerprints from a persistent Modal container, retrieves the top 10 candidates for every query fingerprint, and aligns candidates by both video ID and stable `VOD time - query time` offset.
+Ingestion resolves VOD media with `yt-dlp`, extracts overlapping audio chunks, fingerprints them locally, and stores the timestamped vectors with the model and preprocessing versions. The API preloads the same pinned NMFP model during startup. Search normalizes each query and submits only fingerprint extraction to a single-consumer local queue; downloads, FFmpeg normalization, vector retrieval, and alignment remain independently concurrent. The resulting timestamped fingerprints retrieve the top 10 candidates for every query fingerprint and are aligned by both video ID and stable `VOD time - query time` offset.
 
 The public endpoint is asynchronous: `POST /api/search/clip` creates a job and `GET /api/search/clip/{search_id}` returns its state and durable result. The admin endpoint uses the same search pipeline synchronously and also accepts direct file uploads. A successful result retains the legacy top-level timestamp/URL while adding `segments` and `unmatched_ranges`.
 
@@ -55,11 +56,11 @@ Treat these as tuned defaults, not guarantees. Evaluate changes against represen
 
 ## Setup and operations
 
-Copy `.env.example` to an ignored `.env`, fill secrets locally, and keep the pinned NMFP values unchanged. Production API and NMFP worker dependencies are intentionally separated; see the requirements files for each runtime.
+Copy `.env.example` to an ignored `.env`, fill secrets locally, and keep the pinned NMFP values unchanged. The production API uses Python 3.11 and installs the TensorFlow/Essentia NMFP runtime from the backend requirements files. The pinned upstream repository and checkpoint must be present before startup; the public Docker image bakes them in and verifies their immutable identities.
 
 The production schema migration is destructive to incompatible fingerprint data by design. The old production database no longer exists, so rollout assumes a fresh database or a complete rebuild rather than a zero-downtime vector conversion. Apply migrations and run the guarded first backfill as described in [NMFP production operations](docs/nmfp-production-operations.md). That guide also covers resumability, version checks, metrics, and rollback boundaries.
 
-No deployment, Modal publish, or external database creation is performed by repository commands unless an operator explicitly runs the relevant external tooling.
+No application deployment or external database creation is performed by repository commands unless an operator explicitly runs the relevant external tooling.
 
 ## Latency measurements
 

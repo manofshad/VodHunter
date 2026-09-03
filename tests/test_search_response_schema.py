@@ -51,7 +51,12 @@ def test_search_response_maps_multi_video_segments_and_primary_compatibility() -
         ],
     )
 
-    response = SearchResponse.from_result(result).model_dump()
+    response_model = SearchResponse.from_result(result)
+    response = (
+        response_model.model_dump()
+        if hasattr(response_model, "model_dump")
+        else response_model.dict()
+    )
 
     assert response["video_id"] == 7
     assert response["timestamp_seconds"] == 100

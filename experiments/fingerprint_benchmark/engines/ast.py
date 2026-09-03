@@ -5,14 +5,20 @@ import shutil
 import tempfile
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from ..alignment import temporal_vector_alignment
 from ..audio import extract_audio_clip, normalize_audio, probe_duration
 from ..models import QueryRecord, SearchResult
-from .ast_embedder import ASTEmbedder, DEFAULT_AST_MODEL_NAME
 from .base import BenchmarkEngine
+
+if TYPE_CHECKING:
+    from .ast_embedder import ASTEmbedder
+
+
+DEFAULT_AST_MODEL_NAME = "MIT/ast-finetuned-audioset-10-10-0.4593"
 
 
 class ASTEngine(BenchmarkEngine):
@@ -24,6 +30,8 @@ class ASTEngine(BenchmarkEngine):
 
     def _get_embedder(self) -> ASTEmbedder:
         if self._embedder is None:
+            from .ast_embedder import ASTEmbedder
+
             self._embedder = ASTEmbedder(model_name=DEFAULT_AST_MODEL_NAME)
         return self._embedder
 

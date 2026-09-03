@@ -115,6 +115,15 @@ class UnmatchedRangeResponse(BaseModel):
         return cls(query_start=value.query_start, query_end=value.query_end)
 
 
+if hasattr(SearchResponse, "model_rebuild"):
+    SearchResponse.model_rebuild()
+else:  # Pydantic 1, pinned by the TensorFlow 2.13 API runtime.
+    SearchResponse.update_forward_refs(
+        SearchSegmentResponse=SearchSegmentResponse,
+        UnmatchedRangeResponse=UnmatchedRangeResponse,
+    )
+
+
 class StreamerListItem(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     profile_image_url: str | None = None

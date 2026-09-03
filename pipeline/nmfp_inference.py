@@ -152,11 +152,18 @@ class _UpstreamNMFPBackend:
             reduce_retracing=True,
         )
 
-        # Build/restore all deferred variables during the measured cold-start phase.
+        # Build/restore all deferred variables during the measured cold-start
+        # phase. Calling a second batch shape forces TensorFlow to create its
+        # relaxed-shape graph now instead of retracing on the first real clip.
         warm_audio = np.zeros(NMFP_SAMPLE_RATE, dtype=np.float32)
         warm_mel = self.preprocess(warm_audio)
         warm_embedding = self.infer(warm_mel, batch_size=1)
         self._validate_embeddings(warm_embedding)
+        relaxed_warm_embedding = self.infer(
+            np.repeat(warm_mel, repeats=2, axis=0),
+            batch_size=2,
+        )
+        self._validate_embeddings(relaxed_warm_embedding)
 
     @staticmethod
     def _validate_config(config: dict[str, Any]) -> None:
@@ -250,11 +257,20 @@ class NMFPFingerprinter:
         self._backend_factory = backend_factory or _UpstreamNMFPBackend
         self._backend: _InferenceBackend | None = None
         self._load_lock = Lock()
-        self._inference_lock = Lock()
+        # The upstream mel-spectrogram layer and TensorFlow model are both
+        # process-persistent objects. Treat feature extraction plus inference
+        # as one critical section so callers can safely share one model.
+        self._extraction_lock = Lock()
 
     @property
     def is_loaded(self) -> bool:
         return self._backend is not None
+
+    def load(self) -> int:
+        """Load, restore, and warm the pinned model, returning startup milliseconds."""
+
+        _backend, _cold_start, load_ms = self._ensure_loaded()
+        return load_ms
 
     def _ensure_loaded(self) -> tuple[_InferenceBackend, bool, int]:
         if self._backend is not None:
@@ -329,23 +345,24 @@ class NMFPFingerprinter:
         total_started_at = time.perf_counter()
         backend, cold_start, load_ms = self._ensure_loaded()
 
-        preprocess_started_at = time.perf_counter()
         audio, sample_rate = reader()
         audio = np.asarray(audio, dtype=np.float32)
         if audio.ndim != 1:
             raise ValueError("NMFP input must be mono audio")
         if int(sample_rate) != NMFP_SAMPLE_RATE:
             raise ValueError(f"Expected {NMFP_SAMPLE_RATE}Hz NMFP audio, got {sample_rate}")
-        mel_segments = backend.preprocess(audio)
-        preprocess_ms = _duration_ms(time.perf_counter() - preprocess_started_at)
 
-        inference_started_at = time.perf_counter()
-        with self._inference_lock:
+        with self._extraction_lock:
+            preprocess_started_at = time.perf_counter()
+            mel_segments = backend.preprocess(audio)
+            preprocess_ms = _duration_ms(time.perf_counter() - preprocess_started_at)
+
+            inference_started_at = time.perf_counter()
             embeddings = np.asarray(
                 backend.infer(mel_segments, self.batch_size),
                 dtype=np.float32,
             )
-        inference_ms = _duration_ms(time.perf_counter() - inference_started_at)
+            inference_ms = _duration_ms(time.perf_counter() - inference_started_at)
         self._validate_output(embeddings)
 
         timestamps = (

@@ -40,10 +40,11 @@ def _read_attr(source: object | None, *names: str) -> Any:
 def _embedding_observation(query_embedder: QueryEmbedder) -> dict[str, Any]:
     """Normalize local and Modal NMFP timing/version observations."""
 
+    local_result = getattr(query_embedder, "last_result", None)
     response = getattr(query_embedder, "last_response", None)
     nested_embedder = getattr(query_embedder, "embedder", None)
     extraction = getattr(nested_embedder, "last_result", None)
-    source = response or extraction
+    source = local_result or response or extraction
     metrics = getattr(source, "metrics", source)
 
     model_version = _read_attr(source, "model_version") or _read_attr(

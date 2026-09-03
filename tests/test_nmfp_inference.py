@@ -22,6 +22,21 @@ def test_released_nmfp_triplet_config_name_is_pinned():
     assert NMFP_MODEL_CONFIG_NAME == "nmfp-triplet"
 
 
+def test_load_preloads_once_and_returns_startup_duration() -> None:
+    calls = []
+
+    def factory(repository_path, model_config_path):
+        calls.append((repository_path, model_config_path))
+        return FakeBackend()
+
+    fingerprinter = NMFPFingerprinter(backend_factory=factory)
+
+    assert fingerprinter.load() >= 0
+    assert fingerprinter.load() == 0
+    assert fingerprinter.is_loaded
+    assert len(calls) == 1
+
+
 class FakeBackend:
     def __init__(self, embedding_dim: int = NMFP_EMBEDDING_DIM):
         self.embedding_dim = embedding_dim
