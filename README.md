@@ -58,6 +58,8 @@ Treat these as tuned defaults, not guarantees. Evaluate changes against represen
 
 Copy `.env.example` to an ignored `.env`, fill secrets locally, and keep the pinned NMFP values unchanged. The production API uses Python 3.11 and installs the TensorFlow/Essentia NMFP runtime from the backend requirements files. The pinned upstream repository and checkpoint must be present before startup; the public Docker image bakes them in and verifies their immutable identities.
 
+For the self-hosted VPS stack, see [VPS deployment](docs/vps-deployment.md). It provides PostgreSQL/pgvector, the public API, the polling worker, the public site, and Caddy HTTPS configuration without deploying the admin API or EventSub.
+
 The production schema migration is destructive to incompatible fingerprint data by design. The old production database no longer exists, so rollout assumes a fresh database or a complete rebuild rather than a zero-downtime vector conversion. Apply migrations and run the guarded first backfill as described in [NMFP production operations](docs/nmfp-production-operations.md). That guide also covers resumability, version checks, metrics, and rollback boundaries.
 
 No application deployment or external database creation is performed by repository commands unless an operator explicitly runs the relevant external tooling.

@@ -1,0 +1,8 @@
+{
+    # Caddy obtains and renews certificates automatically for these hostnames.
+}
+
+vodhunter.dev, www.vodhunter.dev {
+    encode gzip
+    reverse_proxy web-public:80
+}
