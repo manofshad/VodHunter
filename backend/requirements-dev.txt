@@ -1,4 +1,4 @@
 -r requirements.txt
--r ../experiments/fingerprint_benchmark/requirements-ast.txt
 pytest>=8.0.0
-httpx>=0.27.0
+# Starlette 0.27's TestClient still passes the legacy ASGI app argument.
+httpx==0.27.2

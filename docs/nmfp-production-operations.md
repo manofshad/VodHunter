@@ -1,6 +1,6 @@
 # NMFP production operations
 
-This runbook describes a fresh NMFP index build. It does not authorize or perform an external database creation, Modal deployment, application deployment, or production data change.
+This runbook describes a fresh NMFP index build and the local query-inference runtime. It does not authorize or perform an external database creation, application deployment, or production data change.
 
 ## Release gates
 
@@ -11,7 +11,7 @@ Before shipping:
    - preprocessing `nmfp-8khz-mono-1s-hop0.5-mel-v1`
    - `vector(128)`, 8 kHz mono, 1-second windows, 0.5-second hop
 2. Use a newly created database or approve destructive rebuilding of a non-production index. There is no in-place conversion from incompatible legacy fingerprints.
-3. Test the Modal artifact and persistent-container behavior in an approved non-production environment. Do not publish it merely by following this runbook.
+3. Build the API image and verify that its pinned NMFP source, checkpoint, startup preload, and single-consumer query queue work in an approved non-production environment.
 
 The product owner confirmed that the licensing decision for the AGPLv3 upstream code and separately distributed checkpoint is resolved for this migration. Packaging must still preserve applicable third-party notices and terms.
 
@@ -160,7 +160,7 @@ Production emits and persists the following independently:
 | Field | Meaning |
 |---|---|
 | `preprocess_duration_ms` | query audio normalization wall time |
-| `embed_duration_ms` | query fingerprint request wall time, including remote-call overhead |
+| `embed_duration_ms` | local query fingerprint wall time, including queue wait |
 | `model_cold_start` | whether this extraction loaded the NMFP model |
 | `model_startup_duration_ms` | model construction/checkpoint load on a cold worker; zero on a warm worker |
 | `fingerprint_preprocessing_duration_ms` | NMFP feature preprocessing inside the worker |
@@ -190,12 +190,12 @@ python3 -m pytest
 
 Recommended rollout order:
 
-1. Build and smoke-test the pinned worker without publishing production traffic.
+1. Build and smoke-test the API with its preloaded pinned model without publishing production traffic.
 2. Create or select an explicitly approved empty non-production database.
 3. Apply migrations and verify index metadata/cursor counts.
 4. Run the guarded first backfill and inspect version/dimension counts.
 5. Exercise cold and warm searches, edited multi-VOD queries, isolated-candidate rejection, and unmatched ranges.
 6. Load-test vector retrieval and inspect HNSW recall/latency with production-like data.
-7. Obtain explicit approval before any production database creation, Modal deployment, application deployment, or traffic cutover.
+7. Obtain explicit approval before any production database creation, application deployment, or traffic cutover.
 
 Because incompatible fingerprints are deliberately deleted, rollback of application code does not restore the previous index. Recovery means selecting a compatible database backup or rebuilding the desired fingerprint identity from source VODs.

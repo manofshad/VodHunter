@@ -45,6 +45,7 @@ def create_admin_app(enable_lifespan: bool = True) -> FastAPI:
                 store=common_state["store"],
                 max_duration_seconds=config.SEARCH_MAX_DURATION_SECONDS_ADMIN,
                 upload_temp_dir=config.TEMP_SEARCH_UPLOAD_DIR,
+                embedder=ingest_state["embedder"],
             )
             monitor_state = bootstrap_admin.build_monitor_stack(
                 store=common_state["store"],
@@ -58,6 +59,7 @@ def create_admin_app(enable_lifespan: bool = True) -> FastAPI:
                 yield
             finally:
                 app.state.monitor_manager.stop()
+                app.state.query_embedder.close()
 
         app = FastAPI(title="VodHunter Admin API", lifespan=lifespan)
     else:

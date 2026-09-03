@@ -3,6 +3,7 @@ import importlib
 from pathlib import Path
 import subprocess
 import sys
+from types import SimpleNamespace
 from unittest.mock import patch
 from fastapi.testclient import TestClient
 from backend.apps import admin as admin_app_module
@@ -32,6 +33,15 @@ class StubMonitorManager:
 
     def stop(self) -> None:
         self.stop_calls += 1
+
+
+class StubQueryEmbedder:
+
+    def __init__(self):
+        self.close_calls = 0
+
+    def close(self) -> None:
+        self.close_calls += 1
 
 class TestApiAppSplit:
 
@@ -99,9 +109,31 @@ import backend.bootstrap_shared
             assert client.get('/api/live/sessions').status_code == 404
             assert client.post('/api/twitch/eventsub', content='{}').status_code == 404
 
+    def test_health_reports_loaded_local_nmfp_identity(self) -> None:
+        app = public_app_module.create_public_app(enable_lifespan=False)
+        app.state.query_embedder = SimpleNamespace(
+            is_loaded=True,
+            embedding_dim=128,
+            model_version='nmfp-model',
+            preprocessing_version='nmfp-preprocessing',
+        )
+        with TestClient(app) as client:
+            response = client.get('/api/health')
+
+        assert response.status_code == 200
+        assert response.json() == {
+            'ok': True,
+            'nmfp_loaded': True,
+            'embedding_dim': 128,
+            'model_version': 'nmfp-model',
+            'preprocessing_version': 'nmfp-preprocessing',
+            'artifact_identity': response.json()['artifact_identity'],
+        }
+
     def test_public_lifespan_initializes_search_only(self) -> None:
         app = public_app_module.create_public_app(enable_lifespan=True)
-        with patch('backend.bootstrap_shared.prepare_runtime_dirs') as prepare_dirs, patch('backend.bootstrap_shared.build_store_state', return_value={'store': object()}), patch('backend.bootstrap_shared.build_search_stack', return_value={'search_service': object(), 'search_manager': object()}):
+        query_embedder = StubQueryEmbedder()
+        with patch('backend.bootstrap_shared.prepare_runtime_dirs') as prepare_dirs, patch('backend.bootstrap_shared.build_store_state', return_value={'store': object()}), patch('backend.bootstrap_shared.build_search_stack', return_value={'query_embedder': query_embedder, 'search_service': object(), 'search_manager': object()}):
 
             async def run_lifespan() -> None:
                 async with app.router.lifespan_context(app):
@@ -111,6 +143,7 @@ import backend.bootstrap_shared
                     assert not hasattr(app.state, 'monitor_manager')
             asyncio.run(run_lifespan())
             prepare_dirs.assert_called_once()
+            assert query_embedder.close_calls == 1
 
     def test_public_import_does_not_require_admin_bootstrap(self) -> None:
         sys.modules.pop('backend.apps.public', None)
@@ -125,7 +158,9 @@ import backend.bootstrap_shared
     def test_admin_lifespan_stops_monitor_manager(self) -> None:
         app = admin_app_module.create_admin_app(enable_lifespan=True)
         monitor = StubMonitorManager()
-        with patch('backend.bootstrap_shared.prepare_admin_runtime_dirs') as prepare_dirs, patch('backend.bootstrap_shared.build_store_state', return_value={'store': object()}), patch('backend.bootstrap_ingest.build_ingest_state', return_value={'embedder': object()}), patch('backend.bootstrap_shared.build_search_stack', return_value={'search_service': object(), 'search_manager': object()}), patch('backend.bootstrap_admin.build_monitor_stack', return_value={'monitor_manager': monitor, 'eventsub_handler': object(), 'session_query': object()}):
+        query_embedder = StubQueryEmbedder()
+        ingest_embedder = object()
+        with patch('backend.bootstrap_shared.prepare_admin_runtime_dirs') as prepare_dirs, patch('backend.bootstrap_shared.build_store_state', return_value={'store': object()}), patch('backend.bootstrap_ingest.build_ingest_state', return_value={'embedder': ingest_embedder}), patch('backend.bootstrap_shared.build_search_stack', return_value={'query_embedder': query_embedder, 'search_service': object(), 'search_manager': object()}) as build_search_stack, patch('backend.bootstrap_admin.build_monitor_stack', return_value={'monitor_manager': monitor, 'eventsub_handler': object(), 'session_query': object()}):
 
             async def run_lifespan() -> None:
                 async with app.router.lifespan_context(app):
@@ -136,3 +171,5 @@ import backend.bootstrap_shared
             asyncio.run(run_lifespan())
             prepare_dirs.assert_called_once()
             assert monitor.stop_calls == 1
+            assert query_embedder.close_calls == 1
+            assert build_search_stack.call_args.kwargs['embedder'] is ingest_embedder

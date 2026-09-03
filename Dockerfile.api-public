@@ -2,16 +2,33 @@ FROM python:3.11-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+ENV TF_CPP_MIN_LOG_LEVEL=2
+ENV CUDA_VISIBLE_DEVICES=""
+ENV NMFP_REPOSITORY_PATH=/opt/neural-music-fp
+ENV NMFP_MODEL_CONFIG_PATH=/opt/neural-music-fp/pretrained_models/nmfp-triplet/config.yaml
 
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg yt-dlp \
+    && apt-get install -y --no-install-recommends ffmpeg libsndfile1 git curl unzip \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements-api-public.txt ./backend/requirements-api-public.txt
+COPY backend/requirements-nmfp.txt ./backend/requirements-nmfp.txt
 
 RUN pip install --no-cache-dir -r backend/requirements-api-public.txt
+
+ARG NMFP_CODE_COMMIT=15c6f3bcdf6a6da1daddfe47a1ffa5a0d22deadc
+ARG NMFP_MODEL_URL=https://zenodo.org/api/records/15719945/files/nmfp-triplet.zip/content
+ARG NMFP_MODEL_ARCHIVE_MD5=ee8a3358fc5e5cdd09d6d2245d395021
+
+RUN git clone https://github.com/raraz15/neural-music-fp.git "$NMFP_REPOSITORY_PATH" \
+    && git -C "$NMFP_REPOSITORY_PATH" checkout --detach "$NMFP_CODE_COMMIT" \
+    && curl -L --fail --silent --show-error -o /tmp/nmfp-triplet.zip "$NMFP_MODEL_URL" \
+    && echo "$NMFP_MODEL_ARCHIVE_MD5  /tmp/nmfp-triplet.zip" | md5sum -c - \
+    && mkdir -p "$NMFP_REPOSITORY_PATH/pretrained_models" \
+    && unzip -q /tmp/nmfp-triplet.zip -d "$NMFP_REPOSITORY_PATH/pretrained_models" \
+    && rm /tmp/nmfp-triplet.zip
 
 COPY backend ./backend
 COPY search ./search

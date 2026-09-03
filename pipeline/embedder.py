@@ -28,6 +28,11 @@ class Embedder:
     def is_loaded(self) -> bool:
         return self.fingerprinter.is_loaded
 
+    def load(self) -> int:
+        """Load and warm the pinned NMFP model before serving work."""
+
+        return self.fingerprinter.load()
+
     def extract(
         self,
         audio_path: str | Path,

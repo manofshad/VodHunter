@@ -60,8 +60,11 @@ def create_public_app(enable_lifespan: bool = True) -> FastAPI:
             }.items():
                 setattr(app.state, key, value)
 
-            yield
-            search_job_executor.shutdown(wait=False)
+            try:
+                yield
+            finally:
+                search_job_executor.shutdown(wait=True, cancel_futures=True)
+                search_state["query_embedder"].close()
 
         app = FastAPI(title="VodHunter Public API", lifespan=lifespan)
     else:

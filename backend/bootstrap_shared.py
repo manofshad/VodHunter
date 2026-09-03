@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import os
+import logging
 
 from backend import config
 from storage.vector_store import VectorStore
+
+
+logger = logging.getLogger("uvicorn.error")
 
 
 def prepare_runtime_dirs() -> None:
@@ -52,10 +56,41 @@ def build_modal_query_embedder() -> ModalQueryEmbedder:
     )
 
 
+def build_local_query_embedder(embedder=None):
+    from pipeline.embedder import Embedder
+    from pipeline.nmfp_inference import model_artifact_identity
+    from search.local_query_embedder import LocalQueryEmbedder
+
+    config.validate_nmfp_config()
+    local_embedder = embedder or Embedder()
+    if local_embedder.embedding_dim != config.VECTOR_DIM:
+        raise ValueError(
+            f"Local NMFP embedding dimension {local_embedder.embedding_dim} "
+            f"does not match VECTOR_DIM {config.VECTOR_DIM}"
+        )
+    if local_embedder.model_version != config.NMFP_MODEL_VERSION:
+        raise ValueError("Local NMFP model version does not match the production index")
+    if local_embedder.preprocessing_version != config.NMFP_PREPROCESSING_VERSION:
+        raise ValueError("Local NMFP preprocessing version does not match the production index")
+
+    startup_ms = local_embedder.load()
+    logger.info(
+        "timing event=nmfp_local_startup model_startup_ms=%d model_version=%s "
+        "preprocessing_version=%s embedding_dim=%d artifact_identity=%s",
+        startup_ms,
+        local_embedder.model_version,
+        local_embedder.preprocessing_version,
+        local_embedder.embedding_dim,
+        model_artifact_identity(),
+    )
+    return LocalQueryEmbedder(local_embedder)
+
+
 def build_search_stack(
     store: VectorStore,
     max_duration_seconds: int | None,
     upload_temp_dir: str | None = None,
+    embedder=None,
 ) -> dict[str, object]:
     from backend.services.remote_clip_downloader import RemoteClipDownloader
     from backend.services.search_manager import SearchManager
@@ -63,10 +98,11 @@ def build_search_stack(
     from search.query_preprocessor import QueryPreprocessor
     from search.search_service import SearchService
 
+    query_embedder = build_local_query_embedder(embedder=embedder)
     search_service = SearchService(
         store=store,
         preprocessor=QueryPreprocessor(temp_dir=config.TEMP_SEARCH_PREPROCESS_DIR),
-        query_embedder=build_modal_query_embedder(),
+        query_embedder=query_embedder,
         alignment=AlignmentService(
             config=AlignmentConfig(
                 top_k=config.SEARCH_TOP_K,
@@ -77,6 +113,7 @@ def build_search_stack(
                 min_support=config.CUT_MIN_SUPPORT,
                 min_segment_duration_seconds=config.CUT_MIN_SEGMENT_DURATION_SECONDS,
                 min_density=config.CUT_MIN_DENSITY,
+                min_score=config.CUT_MIN_SCORE,
                 merge_query_gap_seconds=config.CUT_MERGE_QUERY_GAP_SECONDS,
                 merge_offset_tolerance_seconds=config.CUT_MERGE_OFFSET_TOLERANCE_SECONDS,
                 max_segments=config.CUT_MAX_SEGMENTS,
@@ -97,6 +134,7 @@ def build_search_stack(
     )
 
     return {
+        "query_embedder": query_embedder,
         "search_service": search_service,
         "search_manager": search_manager,
     }
