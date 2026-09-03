@@ -36,6 +36,9 @@ COPY pipeline ./pipeline
 COPY storage ./storage
 COPY sources ./sources
 COPY services ./services
+COPY runners ./runners
+COPY alembic ./alembic
+COPY alembic.ini ./alembic.ini
 
 RUN mkdir -p data/temp_search_downloads data/temp_search
 
