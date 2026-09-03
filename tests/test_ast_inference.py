@@ -1,4 +1,9 @@
 import numpy as np
+import pytest
+
+pytest.importorskip("torch")
+pytest.importorskip("transformers")
+
 from experiments.fingerprint_benchmark.engines.ast_embedder import compute_ast_embeddings
 
 class FakeTensor:
