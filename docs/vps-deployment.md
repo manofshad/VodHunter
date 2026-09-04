@@ -10,9 +10,9 @@ The production stack is defined in `compose.production.yaml`. It runs:
 - Caddy for HTTPS at `vodhunter.dev` and `www.vodhunter.dev`
 
 The admin API and Twitch EventSub are not deployed in this first rollout. The
-worker uses Helix polling and defaults to a two-day scan window. The retention
-service is initially configured for 30 days while the rollout is verified;
-raise `VOD_RETENTION_DAYS` to 60 afterward.
+worker uses Helix polling and defaults to a 30-day scan window. The retention
+service is configured for the same 30-day window, so the worker can catch up
+the full retained history without leaving a one-day boundary gap.
 
 ## First deployment
 

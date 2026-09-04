@@ -60,9 +60,10 @@ Copy `.env.example` to an ignored `.env`, fill secrets locally, and keep the pin
 
 For the self-hosted VPS stack, see [VPS deployment](docs/vps-deployment.md). It provides PostgreSQL/pgvector, the public API, the polling worker, the public site, and Caddy HTTPS configuration without deploying the admin API or EventSub.
 
-The stack also includes a separate daily VOD retention service. It uses the
-configurable `VOD_RETENTION_DAYS` setting (temporarily 30 during rollout) and
-does not change the worker's `HYBRID_INGEST_DAYS` setting.
+The stack also includes a separate daily VOD retention service. Both the
+retention setting (`VOD_RETENTION_DAYS`) and the worker's independent
+`HYBRID_INGEST_DAYS` setting default to 30 days, keeping ingestion aligned with
+the retained search history.
 
 The production schema migration is destructive to incompatible fingerprint data by design. The old production database no longer exists, so rollout assumes a fresh database or a complete rebuild rather than a zero-downtime vector conversion. Apply migrations and run the guarded first backfill as described in [NMFP production operations](docs/nmfp-production-operations.md). That guide also covers resumability, version checks, metrics, and rollback boundaries.
 

@@ -63,7 +63,7 @@ services:
         "--streamer",
         "${TWITCH_STREAMER:-jasontheween}",
         "--days",
-        "${HYBRID_INGEST_DAYS:-2}"
+        "${HYBRID_INGEST_DAYS:-30}"
       ]
     volumes:
       - runtime_data:/app/data
