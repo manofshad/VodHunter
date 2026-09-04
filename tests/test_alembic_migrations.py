@@ -147,6 +147,23 @@ class TestAlembicMigrations:
         assert any(('CREATE INDEX IF NOT EXISTS idx_videos_creator_streamed_at' in sql for sql in fake_op.executed))
         assert any(('WHERE streamed_at IS NOT NULL' in sql for sql in fake_op.executed))
 
+    def test_vod_retention_revision_adds_retention_index_and_nulling_fk(self) -> None:
+        revision = self._load_module(
+            'alembic/versions/20260903_0011_add_vod_retention.py',
+            'vodhunter_alembic_revision_vod_retention',
+        )
+        fake_op = FakeOp()
+        with patch.object(revision, 'op', fake_op):
+            revision.upgrade()
+
+        combined_sql = '\n'.join(fake_op.executed)
+        assert revision.down_revision == '20260824_0010'
+        assert 'CREATE INDEX IF NOT EXISTS idx_videos_streamed_at' in combined_sql
+        assert 'ON videos(streamed_at)' in combined_sql
+        assert 'WHERE streamed_at IS NOT NULL' in combined_sql
+        assert 'DROP CONSTRAINT IF EXISTS search_requests_matched_video_id_fkey' in combined_sql
+        assert 'ON DELETE SET NULL' in combined_sql
+
     def test_nmfp_revision_rebuilds_vectors_and_adds_durable_results(self) -> None:
         revision = self._load_module(
             'alembic/versions/20260824_0010_nmfp_production_schema.py',
