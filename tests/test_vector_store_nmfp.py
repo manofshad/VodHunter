@@ -137,6 +137,7 @@ def test_query_fingerprint_candidates_batches_rows_and_retains_alignment_evidenc
     assert "JOIN videos AS v" in query
     assert "fe.model_version = %s" in query
     assert "fe.preprocessing_version = %s" in query
+    assert "v.status IN ('indexing', 'searchable')" in query
     assert "ORDER BY fe.embedding <=> query_row.embedding, fe.fingerprint_id" not in query
     assert "ORDER BY fe.embedding <=> query_row.embedding" in query
     assert "v.streamed_at >= %s" in query

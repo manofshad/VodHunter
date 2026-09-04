@@ -821,7 +821,7 @@ class VectorStore:
             "v.creator_id = %s",
             "fe.model_version = %s",
             "fe.preprocessing_version = %s",
-            "v.status = 'searchable'",
+            "v.status IN ('indexing', 'searchable')",
         ]
         params.extend(
             [
