@@ -7,6 +7,7 @@ DATA_DIR = ROOT_DIR / "data"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 VECTOR_DIM = int(os.getenv("VECTOR_DIM", "128"))
 HNSW_EF_SEARCH = int(os.getenv("HNSW_EF_SEARCH", "40"))
+VOD_RETENTION_DAYS = int(os.getenv("VOD_RETENTION_DAYS", "30"))
 TEMP_LIVE_DIR = str(DATA_DIR / "temp_live_chunks")
 TEMP_BACKFILL_DIR = str(DATA_DIR / "temp_backfill_chunks")
 TEMP_SEARCH_UPLOAD_DIR = str(DATA_DIR / "temp_search_uploads")
@@ -75,6 +76,13 @@ def validate_storage_config() -> None:
         raise ValueError("DATABASE_URL is required")
     if VECTOR_DIM != 128:
         raise ValueError("VECTOR_DIM must be 128 for the pinned NMFP-triplet model")
+
+
+def validate_vod_retention_config() -> None:
+    if not DATABASE_URL:
+        raise ValueError("DATABASE_URL is required")
+    if VOD_RETENTION_DAYS < 1:
+        raise ValueError("VOD_RETENTION_DAYS must be at least 1")
 
 
 def validate_nmfp_config() -> None:
