@@ -10,7 +10,11 @@ from backend.routers.search_logging import (
 )
 from backend.search_date_range import parse_search_date_range
 from backend.schemas import ErrorResponse, SearchResponse, StreamerListItem
-from backend.services.remote_clip_downloader import DownloadError, InvalidTikTokUrlError
+from backend.services.remote_clip_downloader import (
+    DownloadError,
+    InvalidTikTokUrlError,
+    validate_tiktok_url,
+)
 from backend.services.search_manager import InputDurationExceededError, SearchInputError
 from search.models import SearchRequestLog
 
@@ -121,6 +125,36 @@ def search_clip(
             ),
         )
         raise
+
+    if has_url:
+        try:
+            assert tiktok_url is not None
+            tiktok_url = validate_tiktok_url(tiktok_url)
+        except InvalidTikTokUrlError as exc:
+            persist_search_log(
+                request,
+                SearchRequestLog(
+                    source_app="admin",
+                    route=SEARCH_ROUTE,
+                    input_type=input_type,
+                    streamer=normalized_streamer,
+                    creator_id=creator_id,
+                    success=False,
+                    http_status=400,
+                    error_code="INVALID_TIKTOK_URL",
+                    error_message=str(exc),
+                    clip_filename=file.filename if file is not None else None,
+                    download_source="tiktok",
+                    download_host=extract_download_host(tiktok_url),
+                    streamed_from=date_range.streamed_from if date_range is not None else None,
+                    streamed_to=date_range.streamed_to if date_range is not None else None,
+                ),
+            )
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "INVALID_TIKTOK_URL", "message": str(exc)},
+            ) from exc
+
     search_manager = request.app.state.search_manager
 
     try:

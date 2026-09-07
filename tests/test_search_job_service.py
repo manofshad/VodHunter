@@ -1,8 +1,10 @@
 from concurrent.futures import Future
 from datetime import datetime, timezone
 
+import pytest
+
 from backend.services.search_jobs import SearchJobService
-from backend.services.remote_clip_downloader import DownloadError
+from backend.services.remote_clip_downloader import DownloadError, InvalidTikTokUrlError
 from search.models import SearchDateRange, SearchExecutionMetadata, SearchRequestOutcome, SearchResult
 
 
@@ -116,6 +118,20 @@ def test_search_job_service_forwards_date_range() -> None:
 
     assert store.created_jobs == [("https://www.tiktok.com/@u/video/1", "jason", 2, date_range)]
     assert manager.date_ranges == [date_range]
+
+
+def test_search_job_service_rejects_invalid_url_before_persisting_job() -> None:
+    store = StubStore()
+    service = SearchJobService(store=store, search_manager=StubSearchManager(), executor=InlineExecutor())
+
+    with pytest.raises(InvalidTikTokUrlError):
+        service.create_public_search_job(
+            tiktok_url="https://www.tiktok.com/@jasontheween",
+            streamer="jason",
+            creator_id=2,
+        )
+
+    assert store.created_jobs == []
 
 
 def test_search_job_service_fails_job_for_handled_error() -> None:

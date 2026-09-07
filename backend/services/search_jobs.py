@@ -3,7 +3,7 @@ from __future__ import annotations
 from concurrent.futures import Executor
 import logging
 
-from backend.services.remote_clip_downloader import DownloadError, InvalidTikTokUrlError
+from backend.services.remote_clip_downloader import DownloadError, InvalidTikTokUrlError, validate_tiktok_url
 from backend.services.search_manager import InputDurationExceededError, SearchInputError
 from search.models import SearchDateRange, SearchJobRecord
 
@@ -25,13 +25,14 @@ class SearchJobService:
         creator_id: int | None,
         date_range: SearchDateRange | None = None,
     ) -> int:
+        normalized_tiktok_url = validate_tiktok_url(tiktok_url)
         search_id = self.store.create_public_search_job(
-            tiktok_url=tiktok_url,
+            tiktok_url=normalized_tiktok_url,
             streamer=streamer,
             creator_id=creator_id,
             date_range=date_range,
         )
-        self.executor.submit(self._run_public_search_job, search_id, tiktok_url, streamer, date_range)
+        self.executor.submit(self._run_public_search_job, search_id, normalized_tiktok_url, streamer, date_range)
         return search_id
 
     def get_public_search_job(self, search_id: int) -> SearchJobRecord | None:

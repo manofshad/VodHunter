@@ -160,6 +160,33 @@ def test_public_search_endpoint_accepts_tiktok_url_only() -> None:
     assert len(app.state.store.logged_requests) == 0
 
 
+def test_public_search_endpoint_accepts_tiktok_short_share_url() -> None:
+    app, client = build_client(create_public_app)
+
+    with client:
+        response = client.post(
+            "/api/search/clip",
+            data={"tiktok_url": "https://www.tiktok.com/t/ZP8ctwC2V/", "streamer": "jason"},
+        )
+
+    assert response.status_code == 202
+    assert app.state.search_job_service.created_jobs[0]["tiktok_url"] == "https://www.tiktok.com/t/ZP8ctwC2V/"
+
+
+def test_public_search_endpoint_rejects_profile_url_before_queueing() -> None:
+    app, client = build_client(create_public_app)
+
+    with client:
+        response = client.post(
+            "/api/search/clip",
+            data={"tiktok_url": "https://www.tiktok.com/@jasontheween", "streamer": "jason"},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "INVALID_TIKTOK_URL"
+    assert app.state.search_job_service.created_jobs == []
+
+
 def test_public_search_endpoint_rejects_file_upload() -> None:
     app, client = build_client(create_public_app)
 
@@ -365,6 +392,21 @@ def test_admin_search_endpoint_accepts_tiktok_url() -> None:
     assert app.state.store.logged_requests[0].source_app == "admin"
     assert app.state.store.logged_requests[0].download_source == "tiktok"
     assert app.state.store.logged_requests[0].creator_id == 2
+
+
+def test_admin_search_endpoint_rejects_profile_url_before_downloading() -> None:
+    app, client = build_client(create_admin_app)
+
+    with client:
+        response = client.post(
+            "/api/search/clip",
+            data={"tiktok_url": "https://www.tiktok.com/@jasontheween", "streamer": "jason"},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "INVALID_TIKTOK_URL"
+    assert app.state.search_manager.url_calls == 0
+    assert app.state.store.logged_requests[0].error_code == "INVALID_TIKTOK_URL"
 
 
 def test_admin_search_endpoint_accepts_date_range_for_tiktok_url() -> None:

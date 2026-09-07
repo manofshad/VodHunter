@@ -3,7 +3,7 @@ import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { SearchResponse } from "../api/types";
-import { DateRangePicker, SearchResultCard, formatTimelineTime } from "./SearchPage";
+import { DateRangePicker, SearchResultCard, formatTimelineTime, isSupportedTikTokUrl } from "./SearchPage";
 
 function multiSegmentResult(): SearchResponse {
   return {
@@ -96,6 +96,29 @@ describe("SearchResultCard", () => {
 describe("formatTimelineTime", () => {
   it("keeps half-second boundaries", () => {
     expect(formatTimelineTime(21275.5)).toBe("05:54:35.5");
+  });
+});
+
+describe("isSupportedTikTokUrl", () => {
+  it.each([
+    "https://www.tiktok.com/@demo/video/1234567890",
+    "https://www.tiktok.com/share/video/1234567890",
+    "https://www.tiktok.com/embed/1234567890",
+    "https://www.tiktok.com/t/ZP8ctwC2V/",
+    "https://vm.tiktok.com/ZTR45GpSF/",
+    "https://vt.tiktok.com/ZSe4FqkKd",
+  ])("accepts supported video link %s", (url) => {
+    expect(isSupportedTikTokUrl(url)).toBe(true);
+  });
+
+  it.each([
+    "https://www.tiktok.com/@demo",
+    "https://www.tiktok.com/@demo/live",
+    "https://www.tiktok.com/music/song-123",
+    "https://www.tiktok.com/@demo/photo/1234567890",
+    "https://example.com/@demo/video/1234567890",
+  ])("rejects non-video link %s", (url) => {
+    expect(isSupportedTikTokUrl(url)).toBe(false);
   });
 });
 
