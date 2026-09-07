@@ -128,6 +128,7 @@ def build_search_stack(
         remote_downloader=RemoteClipDownloader(
             temp_dir=config.TEMP_SEARCH_DOWNLOAD_DIR,
             timeout_seconds=config.TIKTOK_DOWNLOAD_TIMEOUT_SECONDS,
+            resolve_timeout_seconds=config.TIKTOK_LINK_RESOLVE_TIMEOUT_SECONDS,
             max_file_mb=config.TIKTOK_MAX_FILE_MB,
         ),
         max_duration_seconds=max_duration_seconds,

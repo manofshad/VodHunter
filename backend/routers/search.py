@@ -10,6 +10,7 @@ from backend.schemas import (
     SearchResponse,
     StreamerListItem,
 )
+from backend.services.remote_clip_downloader import InvalidTikTokUrlError, validate_tiktok_url
 
 router = APIRouter(prefix="/api", tags=["search"])
 
@@ -37,11 +38,22 @@ def create_search_clip_job(
             },
         )
 
+    try:
+        normalized_tiktok_url = validate_tiktok_url(str(tiktok_url))
+    except InvalidTikTokUrlError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "INVALID_TIKTOK_URL",
+                "message": str(exc),
+            },
+        ) from exc
+
     normalized_streamer = _normalize_and_validate_streamer(request, streamer)
     creator_id = _resolve_creator_id(request, normalized_streamer)
     date_range = parse_search_date_range(streamed_from, streamed_to)
     search_id = request.app.state.search_job_service.create_public_search_job(
-        tiktok_url=str(tiktok_url).strip(),
+        tiktok_url=normalized_tiktok_url,
         streamer=normalized_streamer,
         creator_id=creator_id,
         date_range=date_range,

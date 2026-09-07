@@ -72,6 +72,42 @@ export function formatTimelineTime(value: number): string {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${seconds}`;
 }
 
+const DIRECT_TIKTOK_HOSTS = new Set(["tiktok.com", "www.tiktok.com", "www.tiktokv.com"]);
+const SHORT_TIKTOK_HOSTS = new Set(["tiktok.com", "www.tiktok.com", "vm.tiktok.com", "vt.tiktok.com"]);
+const DIRECT_VIDEO_PATHS = [
+  /^\/@(?:[A-Za-z0-9_.-]+)?\/video\/[0-9]+\/?$/,
+  /^\/share\/video\/[0-9]+\/?$/,
+  /^\/embed\/[0-9]+\/?$/,
+];
+
+export function isSupportedTikTokUrl(rawUrl: string): boolean {
+  const url = rawUrl.trim();
+  if (!url) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return false;
+    }
+    if (parsed.username || parsed.password || parsed.port) {
+      return false;
+    }
+
+    const isDirectVideo = DIRECT_TIKTOK_HOSTS.has(host) && DIRECT_VIDEO_PATHS.some((pattern) => pattern.test(parsed.pathname));
+    const isShortShare =
+      (host === "tiktok.com" || host === "www.tiktok.com") && /^\/t\/[A-Za-z0-9_]+\/?$/.test(parsed.pathname);
+    const isVmShare =
+      (host === "vm.tiktok.com" || host === "vt.tiktok.com") && /^\/[A-Za-z0-9_]+\/?$/.test(parsed.pathname);
+
+    return isDirectVideo || (SHORT_TIKTOK_HOSTS.has(host) && (isShortShare || isVmShare));
+  } catch {
+    return false;
+  }
+}
+
 function getResultHref(result: SearchResponse | null): string | null {
   if (!result?.found) {
     return null;
@@ -858,13 +894,18 @@ export default function SearchPage() {
       return;
     }
 
+    const submittedUrl = tiktokUrl.trim();
+    if (!isSupportedTikTokUrl(submittedUrl)) {
+      setRequestError("Paste a TikTok video link, not a profile or other TikTok page.");
+      return;
+    }
+
     if (!streamer.trim()) {
       setStreamerError("Select a streamer to run the search.");
       streamerTriggerRef.current?.focus();
       return;
     }
 
-    const submittedUrl = tiktokUrl.trim();
     const submittedStreamedFrom = streamedFrom.trim();
     const submittedStreamedTo = streamedTo.trim();
 
