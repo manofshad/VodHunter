@@ -1,4 +1,4 @@
-from search.models import SearchResult, SearchSegment, UnmatchedRange
+from search.models import SearchResult, SearchSegment, SearchSource, UnmatchedRange
 
 
 def test_search_result_round_trips_nested_cut_results() -> None:
@@ -8,6 +8,32 @@ def test_search_result_round_trips_nested_cut_results() -> None:
         video_id=42,
         timestamp_seconds=110,
         score=0.82,
+        sources=[
+            SearchSource(
+                video_id=42,
+                video_url="https://example.test/video",
+                video_url_at_timestamp="https://example.test/video?t=1m50s",
+                title="Example stream",
+                streamer="jason",
+                segments=[
+                    SearchSegment(
+                        query_start=10.0,
+                        query_end=15.0,
+                        video_id=42,
+                        vod_start=110.0,
+                        vod_end=115.0,
+                        score=0.82,
+                        ranking_score=8.2,
+                        offset_seconds=100.0,
+                        mean_similarity=0.91,
+                        density=1.0,
+                        supporting_fingerprints=10,
+                        top_rank_fingerprints=8,
+                        video_url_at_timestamp="https://example.test/video?t=1m50s",
+                    )
+                ],
+            )
+        ],
         segments=[
             SearchSegment(
                 query_start=10.0,
@@ -34,6 +60,8 @@ def test_search_result_round_trips_nested_cut_results() -> None:
 
     assert restored == result
     assert isinstance(restored.segments[0], SearchSegment)
+    assert restored.sources[0].title == "Example stream"
+    assert isinstance(restored.sources[0].segments[0], SearchSegment)
     assert isinstance(restored.unmatched_ranges[0], UnmatchedRange)
     assert serialized["segments"][0]["ranking_score"] == 8.2
 

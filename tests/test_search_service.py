@@ -87,8 +87,84 @@ class TestSearchService:
         assert result.video_url_at_timestamp == 'https://www.twitch.tv/videos/2699020769?t=22m48s'
         assert result.thumbnail_url == 'https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg'
         assert result.profile_image_url == 'https://cdn/xqc.png'
+        assert len(result.sources) == 1
+        assert result.sources[0].title == 'Sample title'
+        assert result.sources[0].video_url_at_timestamp == result.video_url_at_timestamp
+        assert result.sources[0].segments[0].video_url_at_timestamp == result.video_url_at_timestamp
         assert execution.metadata.found_match is True
         assert execution.metadata.matched_video_id == 777
+
+    def test_groups_segments_by_vod_and_uses_each_vods_strongest_segment(self) -> None:
+        store = FakeStore()
+        first_vod_early = SearchSegment(
+            0.0,
+            4.0,
+            777,
+            100.0,
+            104.0,
+            0.7,
+            4.0,
+            100.0,
+            0.8,
+            1.0,
+            8,
+            6,
+        )
+        first_vod_strong = SearchSegment(
+            5.0,
+            12.0,
+            777,
+            200.0,
+            207.0,
+            0.8,
+            9.0,
+            195.0,
+            0.9,
+            1.0,
+            14,
+            12,
+        )
+        second_vod_segment = SearchSegment(
+            15.0,
+            21.0,
+            888,
+            500.0,
+            506.0,
+            0.75,
+            8.0,
+            485.0,
+            0.85,
+            1.0,
+            12,
+            9,
+        )
+        alignment = AlignmentResult(
+            found=True,
+            video_id=777,
+            timestamp_seconds=200,
+            score=0.8,
+            reason='ok',
+            segments=[first_vod_early, first_vod_strong, second_vod_segment],
+            query_duration_seconds=21.0,
+        )
+        service = SearchService(
+            store=store,
+            preprocessor=FakePreprocessor(),
+            query_embedder=FakeQueryEmbedder(
+                embeddings=np.array([[0.1, 0.2]], dtype=np.float32),
+                timestamps=np.array([0.0], dtype=np.float32),
+            ),
+            alignment=FakeAlignment(alignment),
+        )
+
+        result = service.search_file('clip.mp4', 'xqc').result
+
+        assert [source.video_id for source in result.sources] == [777, 888]
+        assert result.sources[0].title == 'Sample title'
+        assert result.sources[0].video_url_at_timestamp == 'https://www.twitch.tv/videos/2699020769?t=3m20s'
+        assert [segment.vod_start for segment in result.sources[0].segments] == [100.0, 200.0]
+        assert result.sources[1].title == 'Second VOD'
+        assert result.sources[1].video_url_at_timestamp == 'https://www.twitch.tv/videos/888?t=8m20s'
 
     def test_not_found_result_has_no_timestamp_url(self) -> None:
         service = SearchService(store=FakeStore(), preprocessor=FakePreprocessor(), query_embedder=FakeQueryEmbedder(embeddings=np.array([[0.1, 0.2]], dtype=np.float32), timestamps=np.array([0.0], dtype=np.float32)), alignment=FakeAlignment(AlignmentResult(found=False, reason='No aligned match found')))
