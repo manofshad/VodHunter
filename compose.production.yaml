@@ -106,4 +106,10 @@ services:
 
 volumes:
   postgres_data:
+    # Keep the existing production database when Coolify deploys this stack.
+    name: vodhunter_postgres_data
+    external: true
   runtime_data:
+    # Keep the existing shared runtime volume when Coolify deploys this stack.
+    name: vodhunter_runtime_data
+    external: true

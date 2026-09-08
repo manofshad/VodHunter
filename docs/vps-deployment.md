@@ -26,6 +26,9 @@ domains to the service. The `web-public` Nginx configuration continues to route
 
 Populate the production environment variables in Coolify before the first
 deployment. Do not commit the production `.env` file or secrets to GitHub.
+The `postgres_data` and `runtime_data` volumes are deliberately external and
+must already exist on the production server; this prevents Coolify from
+silently creating an empty database volume during the migration.
 
 The `migrate` service runs `alembic upgrade head` after PostgreSQL is healthy.
 The API, worker, and retention service do not start unless that migration
