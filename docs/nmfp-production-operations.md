@@ -127,11 +127,35 @@ Expected searchable rows have only the pinned model/preprocessing pair and dimen
 
 Simple clients may continue to use `timestamp_seconds` and `video_url_at_timestamp`. Cut-aware clients should iterate `segments` and display `unmatched_ranges`. Tracks are scoped by both `video_id` and offset, so one edited query may map to multiple VODs.
 
+User-facing clients can use `sources` to group segments by VOD. Each source contains the VOD metadata and its matched segments; `video_url_at_timestamp` points to that source's strongest matched moment. The numeric `video_id` is an internal identifier and should not be presented as a VOD label.
+
 ```json
 {
   "found": true,
   "timestamp_seconds": 20970,
   "video_url_at_timestamp": "https://www.twitch.tv/videos/123?t=5h49m30s",
+  "sources": [
+    {
+      "video_id": 123,
+      "video_url": "https://www.twitch.tv/videos/123",
+      "video_url_at_timestamp": "https://www.twitch.tv/videos/123?t=5h49m30s",
+      "thumbnail_url": "https://cdn.example/thumb.jpg",
+      "title": "Example stream",
+      "streamer": "example_streamer",
+      "profile_image_url": "https://cdn.example/avatar.jpg",
+      "segments": [
+        {
+          "query_start": 7.5,
+          "query_end": 11.5,
+          "video_id": 123,
+          "vod_start": 20970.0,
+          "vod_end": 20974.0,
+          "video_url_at_timestamp": "https://www.twitch.tv/videos/123?t=5h49m30s",
+          "score": 0.82
+        }
+      ]
+    }
+  ],
   "segments": [
     {
       "query_start": 7.5,

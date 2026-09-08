@@ -1,5 +1,5 @@
 from backend.schemas import SearchResponse
-from search.models import SearchResult, SearchSegment, UnmatchedRange
+from search.models import SearchResult, SearchSegment, SearchSource, UnmatchedRange
 
 
 def test_search_response_maps_multi_video_segments_and_primary_compatibility() -> None:
@@ -12,6 +12,28 @@ def test_search_response_maps_multi_video_segments_and_primary_compatibility() -
         timestamp_seconds=100,
         score=0.91,
         reason="Accepted 2 supported segments",
+        sources=[
+            SearchSource(
+                video_id=7,
+                video_url="https://www.twitch.tv/videos/7",
+                video_url_at_timestamp="https://www.twitch.tv/videos/7?t=1m40s",
+                thumbnail_url="https://cdn.example/7.jpg",
+                title="First stream",
+                streamer="jason",
+                profile_image_url="https://cdn.example/jason.jpg",
+                segments=[],
+            ),
+            SearchSource(
+                video_id=8,
+                video_url="https://www.twitch.tv/videos/8",
+                video_url_at_timestamp="https://www.twitch.tv/videos/8?t=8m20s",
+                thumbnail_url="https://cdn.example/8.jpg",
+                title="Second stream",
+                streamer="jason",
+                profile_image_url="https://cdn.example/jason.jpg",
+                segments=[],
+            ),
+        ],
         query_duration_seconds=16.0,
         segments=[
             SearchSegment(
@@ -62,6 +84,8 @@ def test_search_response_maps_multi_video_segments_and_primary_compatibility() -
     assert response["timestamp_seconds"] == 100
     assert response["video_url_at_timestamp"] == "https://www.twitch.tv/videos/7?t=1m40s"
     assert response["score"] == 0.91
+    assert [source["title"] for source in response["sources"]] == ["First stream", "Second stream"]
+    assert response["sources"][1]["video_url_at_timestamp"] == "https://www.twitch.tv/videos/8?t=8m20s"
     assert response["segments"] == [
         {
             "query_start": 0.0,

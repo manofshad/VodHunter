@@ -74,6 +74,29 @@ class UnmatchedRange:
 
 
 @dataclass
+class SearchSource:
+    """One source VOD and the matched query segments it contains."""
+
+    video_id: int
+    video_url: str | None = None
+    video_url_at_timestamp: str | None = None
+    thumbnail_url: str | None = None
+    title: str | None = None
+    streamer: str | None = None
+    profile_image_url: str | None = None
+    segments: list[SearchSegment] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "SearchSource":
+        fields = dict(value)
+        fields["segments"] = [
+            item if isinstance(item, SearchSegment) else SearchSegment.from_dict(item)
+            for item in fields.get("segments") or []
+        ]
+        return cls(**fields)
+
+
+@dataclass
 class SearchResult:
     found: bool
     streamer: str | None = None
@@ -89,6 +112,7 @@ class SearchResult:
     segments: list[SearchSegment] = field(default_factory=list)
     unmatched_ranges: list[UnmatchedRange] = field(default_factory=list)
     query_duration_seconds: float | None = None
+    sources: list[SearchSource] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -103,6 +127,10 @@ class SearchResult:
         fields["unmatched_ranges"] = [
             item if isinstance(item, UnmatchedRange) else UnmatchedRange.from_dict(item)
             for item in fields.get("unmatched_ranges") or []
+        ]
+        fields["sources"] = [
+            item if isinstance(item, SearchSource) else SearchSource.from_dict(item)
+            for item in fields.get("sources") or []
         ]
         return cls(**fields)
 

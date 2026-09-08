@@ -13,6 +13,17 @@ export interface UnmatchedRange {
   query_end: number;
 }
 
+export interface SearchSource {
+  video_id: number;
+  video_url: string | null;
+  video_url_at_timestamp: string | null;
+  thumbnail_url: string | null;
+  title: string | null;
+  streamer: string | null;
+  profile_image_url: string | null;
+  segments: SearchSegment[];
+}
+
 export interface SearchResponse {
   found: boolean;
   streamer: string | null;
@@ -25,6 +36,7 @@ export interface SearchResponse {
   timestamp_seconds: number | null;
   score: number | null;
   reason: string | null;
+  sources: SearchSource[];
   segments: SearchSegment[];
   unmatched_ranges: UnmatchedRange[];
   query_duration_seconds: number | null;

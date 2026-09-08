@@ -13,6 +13,8 @@ from search.models import (
     SearchExecutionMetadata,
     SearchExecutionResult,
     SearchResult,
+    SearchSegment,
+    SearchSource,
     UnmatchedRange,
 )
 from search.query_embedder import QueryEmbedder
@@ -245,6 +247,72 @@ class SearchService:
                     )
                 segments.append(replace(segment, video_url_at_timestamp=timestamp_url))
 
+            segments_by_video_id: dict[int, list[SearchSegment]] = {}
+            for segment in segments:
+                segments_by_video_id.setdefault(segment.video_id, []).append(segment)
+
+            source_entries: list[tuple[bool, SearchSegment, SearchSource]] = []
+            for source_video_id, source_segments in segments_by_video_id.items():
+                source_row = video_rows.get(source_video_id)
+                representative = max(
+                    source_segments,
+                    key=lambda segment: (
+                        segment.ranking_score,
+                        segment.duration_seconds,
+                        segment.supporting_fingerprints,
+                    ),
+                )
+                if source_row is None:
+                    source_entries.append(
+                        (
+                            source_video_id == alignment.video_id,
+                            representative,
+                            SearchSource(
+                                video_id=source_video_id,
+                                video_url_at_timestamp=representative.video_url_at_timestamp,
+                                streamer=normalized_streamer,
+                                segments=source_segments,
+                            ),
+                        )
+                    )
+                    continue
+
+                (
+                    source_id,
+                    source_url,
+                    source_title,
+                    source_streamer,
+                    source_thumbnail,
+                    source_profile_image,
+                ) = source_row
+                source_entries.append(
+                    (
+                        source_id == alignment.video_id,
+                        representative,
+                        SearchSource(
+                            video_id=source_id,
+                            video_url=source_url,
+                            video_url_at_timestamp=representative.video_url_at_timestamp,
+                            thumbnail_url=source_thumbnail,
+                            title=source_title,
+                            streamer=source_streamer,
+                            profile_image_url=source_profile_image,
+                            segments=source_segments,
+                        ),
+                    )
+                )
+
+            source_entries.sort(
+                key=lambda entry: (
+                    entry[0],
+                    entry[1].ranking_score,
+                    entry[1].duration_seconds,
+                    entry[1].supporting_fingerprints,
+                ),
+                reverse=True,
+            )
+            sources = [entry[2] for entry in source_entries]
+
             video_id, video_url, title, streamer_name, thumbnail_url, profile_image_url = primary_row
             primary_timestamp = int(alignment.timestamp_seconds or 0)
             result = SearchResult(
@@ -261,6 +329,7 @@ class SearchService:
                 timestamp_seconds=primary_timestamp,
                 score=alignment.score,
                 reason=alignment.reason,
+                sources=sources,
                 segments=segments,
                 unmatched_ranges=alignment.unmatched_ranges,
                 query_duration_seconds=resolved_duration,
