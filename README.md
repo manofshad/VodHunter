@@ -58,7 +58,7 @@ Treat these as tuned defaults, not guarantees. Evaluate changes against represen
 
 Copy `.env.example` to an ignored `.env`, fill secrets locally, and keep the pinned NMFP values unchanged. The production API uses Python 3.11 and installs the TensorFlow/Essentia NMFP runtime from the backend requirements files. The pinned upstream repository and checkpoint must be present before startup; the public Docker image bakes them in and verifies their immutable identities.
 
-For the self-hosted VPS stack, see [VPS deployment](docs/vps-deployment.md). It provides PostgreSQL/pgvector, the public API, the polling worker, the public site, and Caddy HTTPS configuration without deploying the admin API or EventSub.
+For the self-hosted VPS stack, see [VPS deployment](docs/vps-deployment.md). It provides PostgreSQL/pgvector, the public API, the polling worker, and the public site. Production HTTPS and public routing are supplied by the hosting platform without deploying the admin API or EventSub.
 
 The stack also includes a separate daily VOD retention service. Both the
 retention setting (`VOD_RETENTION_DAYS`) and the worker's independent

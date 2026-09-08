@@ -7,7 +7,7 @@ The production stack is defined in `compose.production.yaml`. It runs:
 - the hybrid Twitch polling worker for the configured streamer
 - a daily local VOD retention service
 - the public React site
-- Caddy for HTTPS at `vodhunter.dev` and `www.vodhunter.dev`
+- a Coolify-managed Traefik proxy for HTTPS at `vodhunter.dev` and `www.vodhunter.dev`
 
 The admin API and Twitch EventSub are not deployed in this first rollout. The
 worker uses Helix polling and defaults to a 30-day scan window. The retention
@@ -16,16 +16,16 @@ the full retained history without leaving a one-day boundary gap.
 
 ## First deployment
 
-Run these commands from the repository root on the VPS:
+The production stack is deployed from this repository by self-hosted Coolify.
+Create a Git-based Docker Compose application for `compose.production.yaml`,
+select the `main` branch, and assign both
+`https://vodhunter.dev` and `https://www.vodhunter.dev` to the `web-public`
+service on port 80. Coolify's Traefik proxy terminates HTTPS and routes those
+domains to the service. The `web-public` Nginx configuration continues to route
+`/api/` requests to the internal `api:8000` service.
 
-```bash
-cp deploy/.env.example .env
-chmod 600 .env
-# Edit .env and fill the Twitch credentials and database password.
-docker compose -f compose.production.yaml up -d --build
-docker compose -f compose.production.yaml ps
-docker compose -f compose.production.yaml logs -f worker
-```
+Populate the production environment variables in Coolify before the first
+deployment. Do not commit the production `.env` file or secrets to GitHub.
 
 The `migrate` service runs `alembic upgrade head` after PostgreSQL is healthy.
 The API, worker, and retention service do not start unless that migration
@@ -63,9 +63,7 @@ The worker should report `mode=watch` when `jasontheween` is offline and
 
 ## Updates
 
-After a change is merged into `main`:
-
-```bash
-git pull --ff-only
-docker compose -f compose.production.yaml up -d --build
-```
+Coolify is configured to auto-deploy the `main` branch after changes are
+merged. Review the deployment logs and health checks after each deployment.
+Manual redeploys remain available from the Coolify dashboard when an operator
+needs to replay a deployment.
