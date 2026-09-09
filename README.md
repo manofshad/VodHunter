@@ -1,6 +1,6 @@
 # VodHunter
 
-[vodhunter.dev](https://vodhunter.dev/) searches short-form audio against Twitch VODs. The production search path uses NMFP neural audio fingerprints and can map an edited query to multiple, possibly non-contiguous VOD ranges.
+[vodhunter.com](https://vodhunter.com/) searches short-form audio against Twitch VODs. The production search path uses NMFP neural audio fingerprints and can map an edited query to multiple, possibly non-contiguous VOD ranges.
 
 ## Production architecture
 

@@ -92,6 +92,11 @@ services:
         VITE_API_BASE: /api
     environment:
       PUBLIC_API_UPSTREAM: http://api:8000
+    labels:
+      - 'traefik.http.middlewares.vodhunter-canonical-redirect.redirectregex.regex=^https?://(www\.vodhunter\.dev|vodhunter\.dev|www\.vodhunter\.com)(.*)$'
+      - 'traefik.http.middlewares.vodhunter-canonical-redirect.redirectregex.replacement=https://vodhunter.com$${2}'
+      - 'traefik.http.middlewares.vodhunter-canonical-redirect.redirectregex.permanent=true'
+      - 'coolify.traefik.middlewares=vodhunter-canonical-redirect'
     expose:
       - "80"
     healthcheck:

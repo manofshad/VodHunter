@@ -7,7 +7,7 @@ The production stack is defined in `compose.production.yaml`. It runs:
 - the hybrid Twitch polling worker for the configured streamer
 - a daily local VOD retention service
 - the public React site
-- a Coolify-managed Traefik proxy for HTTPS at `vodhunter.dev` and `www.vodhunter.dev`
+- a Coolify-managed Traefik proxy for HTTPS at `vodhunter.com` and `www.vodhunter.com`
 
 The admin API and Twitch EventSub are not deployed in this first rollout. The
 worker uses Helix polling and defaults to a 30-day scan window. The retention
@@ -19,7 +19,7 @@ the full retained history without leaving a one-day boundary gap.
 The production stack is deployed from this repository by self-hosted Coolify.
 Create a Git-based Docker Compose application for `compose.production.yaml`,
 select the `main` branch, and assign both
-`https://vodhunter.dev` and `https://www.vodhunter.dev` to the `web-public`
+`https://vodhunter.com` and `https://www.vodhunter.com` to the `web-public`
 service on port 80. Coolify's Traefik proxy terminates HTTPS and routes those
 domains to the service. The `web-public` Nginx configuration continues to route
 `/api/` requests to the internal `api:8000` service.
@@ -56,7 +56,7 @@ docker compose -f compose.production.yaml up -d --force-recreate vod-retention
 ## Checks
 
 ```bash
-curl --fail https://vodhunter.dev/api/health
+curl --fail https://vodhunter.com/api/health
 docker compose -f compose.production.yaml logs --tail=100 api worker
 ```
 
