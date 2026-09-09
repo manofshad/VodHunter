@@ -211,11 +211,13 @@ describe("isSupportedTikTokUrl", () => {
 });
 
 describe("DateRangePicker", () => {
-  it("updates the field immediately and saves without a duplicate preview", () => {
+  it("keeps custom dates as a draft until Apply and collapses to a date-range pill", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 7, 26));
 
     try {
+      const changes = vi.fn();
+
       function StatefulDateRangePicker() {
         const [streamedFrom, setStreamedFrom] = useState("");
         const [streamedTo, setStreamedTo] = useState("");
@@ -226,6 +228,7 @@ describe("DateRangePicker", () => {
             streamedTo={streamedTo}
             disabled={false}
             onChange={(nextFrom, nextTo) => {
+              changes(nextFrom, nextTo);
               setStreamedFrom(nextFrom);
               setStreamedTo(nextTo);
             }}
@@ -235,27 +238,63 @@ describe("DateRangePicker", () => {
 
       render(<StatefulDateRangePicker />);
 
-      const trigger = screen.getByRole("button", { name: "Stream date range" });
-      fireEvent.click(trigger);
-      expect(screen.getByRole("dialog", { name: "Choose stream date range" })).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "Custom" }));
+      const customRange = screen.getByRole("region", { name: "Custom stream date range" });
+      const apply = within(customRange).getByRole("button", { name: "Apply" });
+      expect(apply.hasAttribute("disabled")).toBe(true);
+      expect(screen.queryByText(/your search uses the range immediately/i)).toBeNull();
 
       fireEvent.click(screen.getByRole("button", { name: "August 26, 2026" }));
-      expect(trigger.textContent).toContain("08/26/2026 –");
+      expect(changes).not.toHaveBeenCalled();
+      expect(within(customRange).getByText("08/26/2026 –")).toBeTruthy();
+      expect(apply.hasAttribute("disabled")).toBe(true);
 
       fireEvent.click(screen.getByRole("button", { name: "August 28, 2026" }));
-      expect(trigger.textContent).toContain("08/26/2026 – 08/28/2026");
+      expect(changes).not.toHaveBeenCalled();
+      expect(within(customRange).getByText("08/26/2026 – 08/28/2026")).toBeTruthy();
+      expect(apply.hasAttribute("disabled")).toBe(false);
 
-      const dialog = screen.getByRole("dialog", { name: "Choose stream date range" });
-      expect(within(dialog).queryByText("08/26/2026 – 08/28/2026")).toBeNull();
-      expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
-      expect(screen.queryByRole("button", { name: "Clear" })).toBeNull();
+      fireEvent.click(apply);
+      expect(changes).toHaveBeenLastCalledWith("2026-08-26", "2026-08-28");
+      expect(screen.queryByRole("region", { name: "Custom stream date range" })).toBeNull();
 
-      fireEvent.click(screen.getByRole("button", { name: "Save" }));
-      expect(screen.queryByRole("dialog", { name: "Choose stream date range" })).toBeNull();
+      const appliedRange = screen.getByRole("button", { name: "Aug 26–28" });
+      expect(appliedRange.getAttribute("aria-pressed")).toBe("true");
+      fireEvent.click(appliedRange);
+      const reopenedRange = screen.getByRole("region", { name: "Custom stream date range" });
 
-      fireEvent.click(trigger);
-      fireEvent.click(screen.getByRole("button", { name: "Reset" }));
-      expect(trigger.textContent).toContain("mm/dd/yyyy – mm/dd/yyyy");
+      fireEvent.click(screen.getByRole("button", { name: "Clear dates" }));
+      expect(within(reopenedRange).getByText("mm/dd/yyyy – mm/dd/yyyy")).toBeTruthy();
+      expect(within(reopenedRange).getByRole("button", { name: "Apply" }).hasAttribute("disabled")).toBe(true);
+      expect(changes).toHaveBeenLastCalledWith("2026-08-26", "2026-08-28");
+
+      fireEvent.click(within(reopenedRange).getByRole("button", { name: "Cancel" }));
+      expect(screen.queryByRole("region", { name: "Custom stream date range" })).toBeNull();
+      expect(screen.getByRole("button", { name: "Aug 26–28" })).toBeTruthy();
+
+      fireEvent.click(screen.getByRole("button", { name: "Aug 26–28" }));
+      fireEvent.click(screen.getByRole("button", { name: "Any time" }));
+      expect(changes).toHaveBeenLastCalledWith("", "");
+      expect(screen.queryByRole("region", { name: "Custom stream date range" })).toBeNull();
+      expect(screen.getByRole("button", { name: "Any time" }).getAttribute("aria-pressed")).toBe("true");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("applies relative date presets immediately", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 26));
+
+    try {
+      const onChange = vi.fn();
+      render(<DateRangePicker streamedFrom="" streamedTo="" disabled={false} onChange={onChange} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Past 7 days" }));
+      expect(onChange).toHaveBeenLastCalledWith("2026-08-20", "2026-08-26");
+
+      fireEvent.click(screen.getByRole("button", { name: "Past 30 days" }));
+      expect(onChange).toHaveBeenLastCalledWith("2026-07-28", "2026-08-26");
     } finally {
       vi.useRealTimers();
     }
