@@ -1,5 +1,5 @@
 import glob
-import json
+import http.client
 import logging
 import os
 import re
@@ -8,7 +8,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from typing import Literal
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urljoin, urlparse, urlunparse
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -18,6 +18,10 @@ class InvalidTikTokUrlError(Exception):
 
 
 class DownloadError(Exception):
+    pass
+
+
+class _TransientTikTokResolveError(Exception):
     pass
 
 
@@ -48,8 +52,25 @@ _DIRECT_VIDEO_PATHS = (
     re.compile(r"/share/video/[0-9]+/?"),
     re.compile(r"/embed/[0-9]+/?"),
 )
+_CANONICAL_VIDEO_PATH = re.compile(
+    r"/@(?P<username>[A-Za-z0-9_.-]+)/video/(?P<video_id>[0-9]+)/?"
+)
 _TIKTOK_SHARE_PATH = re.compile(r"/t/[A-Za-z0-9_]+/?")
 _TIKTOK_VM_SHARE_PATH = re.compile(r"/[A-Za-z0-9_]+/?")
+_TIKTOK_REDIRECT_STATUSES = {301, 302, 303, 307, 308}
+_TIKTOK_TRANSIENT_STATUS_CODES = {408, 429, *range(500, 600)}
+_TIKTOK_RESOLVER_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/131.0.0.0 Safari/537.36"
+)
+_SHORT_LINK_TARGET_ERROR = "TikTok short link must resolve to a single TikTok video"
+_TRANSIENT_RESOLVE_EXCEPTIONS = (
+    _TransientTikTokResolveError,
+    http.client.HTTPException,
+    OSError,
+    TimeoutError,
+)
 
 
 def _invalid_path_error() -> InvalidTikTokUrlError:
@@ -119,79 +140,141 @@ class RemoteClipDownloader:
         timeout_seconds: int = 90,
         max_file_mb: int | None = None,
         resolve_timeout_seconds: int = 20,
+        resolve_attempts: int = 3,
+        max_resolve_redirects: int = 3,
+        resolve_retry_delay_seconds: float = 0.25,
     ):
         self.temp_dir = temp_dir
         self.timeout_seconds = int(timeout_seconds)
         self.max_file_mb = max_file_mb
-        self.resolve_timeout_seconds = int(resolve_timeout_seconds)
+        self.resolve_timeout_seconds = float(resolve_timeout_seconds)
+        self.resolve_attempts = max(1, int(resolve_attempts))
+        self.max_resolve_redirects = max(1, int(max_resolve_redirects))
+        self.resolve_retry_delay_seconds = max(0.0, float(resolve_retry_delay_seconds))
         os.makedirs(self.temp_dir, exist_ok=True)
 
     def validate_tiktok_url(self, raw_url: str) -> str:
         return validate_tiktok_url(raw_url)
 
-    def _validate_short_link_target(self, url: str) -> None:
-        cmd = [
-            "yt-dlp",
-            "--no-playlist",
-            "--no-progress",
-            "--no-warnings",
-            "--skip-download",
-            "--dump-single-json",
-            url,
-        ]
+    def _request_tiktok_redirect(self, url: str) -> tuple[int, str | None]:
+        parsed = urlparse(url)
+        connection_type = (
+            http.client.HTTPSConnection
+            if parsed.scheme.lower() == "https"
+            else http.client.HTTPConnection
+        )
+        connection = connection_type(parsed.hostname, timeout=self.resolve_timeout_seconds)
+        response = None
+
+        request_target = parsed.path or "/"
+        if parsed.query:
+            request_target = f"{request_target}?{parsed.query}"
 
         try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=self.resolve_timeout_seconds,
+            connection.request(
+                "GET",
+                request_target,
+                headers={
+                    "Accept": "text/html,*/*",
+                    "Accept-Encoding": "identity",
+                    "Connection": "close",
+                    "User-Agent": _TIKTOK_RESOLVER_USER_AGENT,
+                },
             )
-        except subprocess.TimeoutExpired as exc:
-            raise DownloadError("yt-dlp timed out while resolving TikTok link") from exc
+            response = connection.getresponse()
+            return response.status, response.getheader("Location")
+        finally:
+            if response is not None:
+                response.close()
+            connection.close()
 
-        if result.returncode != 0:
-            message = (result.stderr or result.stdout or "yt-dlp failed to resolve TikTok link").strip()
-            raise DownloadError(message)
+    def _resolve_short_tiktok_url_once(self, url: str) -> tuple[str, int]:
+        current_url = url
+        visited_urls = {current_url}
 
-        try:
-            info = json.loads(result.stdout)
-        except (TypeError, json.JSONDecodeError) as exc:
-            raise DownloadError("yt-dlp returned invalid TikTok link metadata") from exc
+        for redirect_count in range(1, self.max_resolve_redirects + 1):
+            status, location = self._request_tiktok_redirect(current_url)
 
-        if not isinstance(info, dict):
-            raise DownloadError("yt-dlp returned invalid TikTok link metadata")
-
-        extractor = str(info.get("extractor_key") or info.get("extractor") or "").lower()
-        video_id = str(info.get("id") or "")
-        if (
-            info.get("_type") in {"playlist", "multi_video"}
-            or "entries" in info
-            or not extractor.startswith("tiktok")
-            or not video_id.isdigit()
-        ):
-            raise InvalidTikTokUrlError(
-                "TikTok URL must resolve to a single video; profile and playlist links are not supported"
-            )
-
-        resolved_url = info.get("webpage_url")
-        if resolved_url and resolved_url != url:
-            try:
-                resolved = parse_tiktok_url(str(resolved_url))
-            except InvalidTikTokUrlError as exc:
-                raise InvalidTikTokUrlError(
-                    "TikTok URL must resolve to a single video; profile and playlist links are not supported"
-                ) from exc
-            if resolved.kind != "direct":
-                raise InvalidTikTokUrlError(
-                    "TikTok URL must resolve to a single video; profile and playlist links are not supported"
+            if status in _TIKTOK_TRANSIENT_STATUS_CODES:
+                raise _TransientTikTokResolveError(
+                    f"TikTok short-link resolver returned HTTP {status}"
                 )
+            if status not in _TIKTOK_REDIRECT_STATUSES:
+                raise InvalidTikTokUrlError(_SHORT_LINK_TARGET_ERROR)
+            if not location:
+                raise InvalidTikTokUrlError(
+                    "TikTok short link returned a redirect without a destination"
+                )
+
+            candidate_url = urljoin(current_url, location)
+            try:
+                candidate = parse_tiktok_url(candidate_url)
+            except InvalidTikTokUrlError as exc:
+                raise InvalidTikTokUrlError(_SHORT_LINK_TARGET_ERROR) from exc
+
+            candidate_parts = urlparse(candidate.url)
+            canonical_match = _CANONICAL_VIDEO_PATH.fullmatch(candidate_parts.path)
+            if (
+                candidate_parts.scheme.lower() == "https"
+                and candidate_parts.hostname == "www.tiktok.com"
+                and canonical_match is not None
+            ):
+                return candidate.url, redirect_count
+
+            if candidate.kind != "short":
+                raise InvalidTikTokUrlError(_SHORT_LINK_TARGET_ERROR)
+            if candidate_parts.scheme.lower() != "https":
+                raise InvalidTikTokUrlError(_SHORT_LINK_TARGET_ERROR)
+            if candidate.url in visited_urls:
+                raise InvalidTikTokUrlError("TikTok short link redirect loop detected")
+
+            visited_urls.add(candidate.url)
+            current_url = candidate.url
+
+        raise InvalidTikTokUrlError("TikTok short link redirected too many times")
+
+    def _resolve_short_tiktok_url(self, url: str) -> str:
+        started_at = time.perf_counter()
+
+        for attempt in range(1, self.resolve_attempts + 1):
+            try:
+                resolved_url, redirect_count = self._resolve_short_tiktok_url_once(url)
+                logger.info(
+                    "timing event=tiktok_short_resolve seconds=%.2f attempts=%d redirects=%d",
+                    time.perf_counter() - started_at,
+                    attempt,
+                    redirect_count,
+                )
+                return resolved_url
+            except _TRANSIENT_RESOLVE_EXCEPTIONS as exc:
+                if attempt >= self.resolve_attempts:
+                    logger.warning(
+                        "tiktok_short_resolve_failed attempts=%d error_type=%s",
+                        attempt,
+                        type(exc).__name__,
+                        exc_info=True,
+                    )
+                    raise DownloadError(
+                        "TikTok short link could not be resolved right now. Please try again."
+                    ) from exc
+
+                delay = self.resolve_retry_delay_seconds * (2 ** (attempt - 1))
+                logger.warning(
+                    "tiktok_short_resolve_retry attempt=%d/%d error_type=%s delay_seconds=%.2f",
+                    attempt,
+                    self.resolve_attempts,
+                    type(exc).__name__,
+                    delay,
+                )
+                time.sleep(delay)
+
+        raise AssertionError("TikTok short-link resolver completed without a result")
 
     def download_tiktok(self, raw_url: str) -> DownloadResult:
         parsed_url = parse_tiktok_url(raw_url)
         url = parsed_url.url
         if parsed_url.kind == "short":
-            self._validate_short_link_target(url)
+            url = self._resolve_short_tiktok_url(url)
 
         token = uuid.uuid4().hex
         output_template = os.path.join(self.temp_dir, f"tiktok_{token}.%(ext)s")
@@ -199,10 +282,12 @@ class RemoteClipDownloader:
 
         cmd = [
             "yt-dlp",
+            "--ignore-config",
             "--no-playlist",
             "--no-progress",
             "-o",
             output_template,
+            "--",
             url,
         ]
 
