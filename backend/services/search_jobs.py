@@ -6,14 +6,15 @@ import logging
 from backend.services.remote_clip_downloader import DownloadError, InvalidTikTokUrlError, validate_tiktok_url
 from backend.services.search_manager import InputDurationExceededError, SearchInputError
 from search.models import SearchDateRange, SearchJobRecord
+from storage.search_job_repository import SearchJobRepository
 
 
 logger = logging.getLogger("uvicorn.error")
 
 
 class SearchJobService:
-    def __init__(self, store, search_manager, executor: Executor):
-        self.store = store
+    def __init__(self, jobs: SearchJobRepository, search_manager, executor: Executor):
+        self.jobs = jobs
         self.search_manager = search_manager
         self.executor = executor
 
@@ -26,7 +27,7 @@ class SearchJobService:
         date_range: SearchDateRange | None = None,
     ) -> int:
         normalized_tiktok_url = validate_tiktok_url(tiktok_url)
-        search_id = self.store.create_public_search_job(
+        search_id = self.jobs.create_public_search_job(
             tiktok_url=normalized_tiktok_url,
             streamer=streamer,
             creator_id=creator_id,
@@ -36,13 +37,10 @@ class SearchJobService:
         return search_id
 
     def get_public_search_job(self, search_id: int) -> SearchJobRecord | None:
-        return self.store.get_public_search_job(search_id)
+        return self.jobs.get_public_search_job(search_id)
 
     def fail_incomplete_public_search_jobs(self) -> None:
-        fail_incomplete_jobs = getattr(self.store, "fail_incomplete_public_search_jobs", None)
-        if not callable(fail_incomplete_jobs):
-            return
-        fail_incomplete_jobs(
+        self.jobs.fail_incomplete_public_search_jobs(
             error_code="WORKER_RESTARTED",
             error_message="The server restarted before this search completed. Please run the search again.",
         )
@@ -55,7 +53,7 @@ class SearchJobService:
         date_range: SearchDateRange | None,
     ) -> None:
         try:
-            self.store.update_search_job_status(
+            self.jobs.update_search_job_status(
                 search_id,
                 status="running",
                 stage="validating",
@@ -65,12 +63,12 @@ class SearchJobService:
                 tiktok_url,
                 streamer,
                 date_range=date_range,
-                on_stage_change=lambda stage: self.store.update_search_job_status(search_id, stage=stage),
+                on_stage_change=lambda stage: self.jobs.update_search_job_status(search_id, stage=stage),
             )
-            self.store.update_search_job_status(search_id, stage="finalizing")
-            self.store.complete_search_job(search_id, outcome)
+            self.jobs.update_search_job_status(search_id, stage="finalizing")
+            self.jobs.complete_search_job(search_id, outcome)
         except InputDurationExceededError as exc:
-            self.store.fail_search_job(
+            self.jobs.fail_search_job(
                 search_id,
                 error_code="INPUT_DURATION_EXCEEDED",
                 error_message=str(exc),
@@ -78,28 +76,28 @@ class SearchJobService:
                 input_duration_seconds=exc.duration_seconds,
             )
         except SearchInputError as exc:
-            self.store.fail_search_job(
+            self.jobs.fail_search_job(
                 search_id,
                 error_code="INVALID_SEARCH_INPUT",
                 error_message=str(exc),
                 http_status=400,
             )
         except InvalidTikTokUrlError as exc:
-            self.store.fail_search_job(
+            self.jobs.fail_search_job(
                 search_id,
                 error_code="INVALID_TIKTOK_URL",
                 error_message=str(exc),
                 http_status=400,
             )
         except DownloadError as exc:
-            self.store.fail_search_job(
+            self.jobs.fail_search_job(
                 search_id,
                 error_code="DOWNLOAD_ERROR",
                 error_message=str(exc),
                 http_status=400,
             )
         except RuntimeError as exc:
-            self.store.fail_search_job(
+            self.jobs.fail_search_job(
                 search_id,
                 error_code="PROCESSING_ERROR",
                 error_message=str(exc),
@@ -107,7 +105,7 @@ class SearchJobService:
             )
         except Exception:
             logger.exception("Unexpected public search job failure search_id=%s", search_id)
-            self.store.fail_search_job(
+            self.jobs.fail_search_job(
                 search_id,
                 error_code="PROCESSING_ERROR",
                 error_message="Unexpected error while processing search",

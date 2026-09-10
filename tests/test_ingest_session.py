@@ -48,7 +48,7 @@ class TestIngestSession:
     def test_append_vectors_receives_creator_id(self) -> None:
         source = FakeSource()
         store = FakeStore()
-        session = IngestSession(source=source, embedder=FakeEmbedder(), store=store, poll_interval=0.0)
+        session = IngestSession(source=source, embedder=FakeEmbedder(), fingerprints=store, poll_interval=0.0)
         session.run()
         assert source.started
         assert source.stopped
@@ -84,7 +84,7 @@ class TestIngestSession:
         session = IngestSession(
             source=source,
             embedder=MismatchedEmbedder(),
-            store=store,
+            fingerprints=store,
             poll_interval=0.0,
         )
 
@@ -120,7 +120,7 @@ class TestIngestSession:
         session = IngestSession(
             source=source,
             embedder=EmptyEmbedder(),
-            store=store,
+            fingerprints=store,
             poll_interval=0.0,
         )
 

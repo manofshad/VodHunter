@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from dataclasses import dataclass
 
 from pipeline.nmfp_inference import (
     NMFP_EMBEDDING_DIM,
@@ -9,23 +10,27 @@ from pipeline.nmfp_inference import (
     NMFP_PREPROCESSING_VERSION,
     model_artifact_identity,
 )
-from storage.vector_store import VectorStore
+from storage.repositories import Repositories, build_repositories as _build_repositories
 
 
 logger = logging.getLogger("uvicorn.error")
 
 
-def build_store_state(database_url: str | None = None) -> dict[str, object]:
-    store = VectorStore(
+@dataclass(frozen=True, slots=True)
+class SearchStack:
+    query_embedder: object
+    search_service: object
+    search_manager: object
+
+
+def build_repositories(database_url: str | None = None) -> Repositories:
+    return _build_repositories(
         database_url=(
             database_url
             if database_url is not None
             else os.getenv("DATABASE_URL", "").strip()
-        ),
+        )
     )
-    store.ensure_schema_ready()
-
-    return {"store": store}
 
 
 def build_local_query_embedder():
@@ -57,7 +62,7 @@ def build_local_query_embedder():
 
 
 def build_search_stack(
-    store: VectorStore,
+    repositories: Repositories,
     max_duration_seconds: int | None,
     *,
     download_temp_dir: str,
@@ -72,7 +77,8 @@ def build_search_stack(
     query_embedder = build_local_query_embedder()
     alignment_config = AlignmentConfig()
     search_service = SearchService(
-        store=store,
+        videos=repositories.videos,
+        fingerprints=repositories.fingerprints,
         preprocessor=QueryPreprocessor(temp_dir=preprocess_temp_dir),
         query_embedder=query_embedder,
         alignment=AlignmentService(config=alignment_config),
@@ -87,8 +93,8 @@ def build_search_stack(
         max_duration_seconds=max_duration_seconds,
     )
 
-    return {
-        "query_embedder": query_embedder,
-        "search_service": search_service,
-        "search_manager": search_manager,
-    }
+    return SearchStack(
+        query_embedder=query_embedder,
+        search_service=search_service,
+        search_manager=search_manager,
+    )

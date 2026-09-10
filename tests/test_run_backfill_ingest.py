@@ -87,16 +87,30 @@ class FakeStore:
     def get_vod_ingest_state(self, vod_platform_id: str):
         return self.vod_state.get(vod_platform_id)
 
+    def get(self, vod_platform_id: str):
+        return self.get_vod_ingest_state(vod_platform_id)
+
     def delete_vod_ingest_state(self, vod_platform_id: str) -> None:
         self.deleted_vod_state_ids.append(vod_platform_id)
         self.vod_state.pop(vod_platform_id, None)
 
+    def delete(self, vod_platform_id: str) -> None:
+        self.delete_vod_ingest_state(vod_platform_id)
+
+
+class FakeRepositories:
+    def __init__(self, store: FakeStore):
+        self.videos = store
+        self.ingest_states = store
+        self.fingerprints = store
+
 class FakeSource:
 
-    def __init__(self, streamer, vod_metadata, store, chunk_seconds, temp_dir, progress_callback=None, creator_metadata=None):
+    def __init__(self, streamer, vod_metadata, videos, ingest_states, chunk_seconds, temp_dir, progress_callback=None, creator_metadata=None):
         self.streamer = streamer
         self.vod_metadata = vod_metadata
-        self.store = store
+        self.videos = videos
+        self.ingest_states = ingest_states
         self.chunk_seconds = chunk_seconds
         self.temp_dir = temp_dir
         self.progress_callback = progress_callback
@@ -104,7 +118,7 @@ class FakeSource:
 
 class FakeSession:
 
-    def __init__(self, source, embedder, store, poll_interval):
+    def __init__(self, source, embedder, fingerprints, poll_interval):
         self.source = source
 
     def run(self) -> None:
@@ -114,7 +128,7 @@ class FakeSession:
 class TestRunBackfillIngest:
 
     def _build_state(self, store: FakeStore):
-        return {'store': store}
+        return FakeRepositories(store)
 
     def test_skips_processed_resumes_partial_and_continues_on_failure(self) -> None:
         store = FakeStore()
@@ -142,7 +156,7 @@ class TestRunBackfillIngest:
             seen_vods.append(kwargs['vod_metadata']['id'])
             seen_creator_metadata.append(kwargs.get('creator_metadata'))
             return FakeSource(**kwargs)
-        result = run_backfill_ingest('Alice', 7, monitor=monitor, build_store=lambda: self._build_state(store), build_ingest=lambda: {'embedder': object()}, source_factory=source_factory, session_factory=FakeSession, out=logs.append)
+        result = run_backfill_ingest('Alice', 7, monitor=monitor, build_storage=lambda: self._build_state(store), build_ingest=lambda: {'embedder': object()}, source_factory=source_factory, session_factory=FakeSession, out=logs.append)
         assert seen_vods == ['resume', 'fail']
         assert seen_creator_metadata == [
             {
@@ -209,7 +223,7 @@ class TestRunBackfillIngest:
             'alice',
             7,
             monitor=monitor,
-            build_store=lambda: self._build_state(store),
+            build_storage=lambda: self._build_state(store),
             build_ingest=lambda: {'embedder': object()},
             source_factory=source_factory,
             session_factory=FakeSession,
@@ -258,7 +272,7 @@ class TestRunBackfillIngest:
             'alice',
             7,
             monitor=monitor,
-            build_store=lambda: self._build_state(store),
+            build_storage=lambda: self._build_state(store),
             build_ingest=lambda: {'embedder': object()},
             source_factory=source_factory,
             session_factory=FakeSession,
@@ -310,7 +324,7 @@ class TestRunBackfillIngest:
                 7,
                 fresh_nmfp_reindex=True,
                 monitor=monitor,
-                build_store=lambda: self._build_state(store),
+                build_storage=lambda: self._build_state(store),
                 build_ingest=lambda: build_ingest_calls.append(True) or {'embedder': object()},
                 source_factory=FakeSource,
                 session_factory=FakeSession,
@@ -349,7 +363,7 @@ class TestRunBackfillIngest:
             7,
             fresh_nmfp_reindex=True,
             monitor=monitor,
-            build_store=lambda: self._build_state(store),
+            build_storage=lambda: self._build_state(store),
             build_ingest=lambda: {'embedder': object()},
             source_factory=FakeSource,
             session_factory=FakeSession,
@@ -378,7 +392,7 @@ class TestRunBackfillIngest:
             7,
             fresh_nmfp_reindex=True,
             monitor=monitor,
-            build_store=lambda: self._build_state(store),
+            build_storage=lambda: self._build_state(store),
             build_ingest=lambda: {'embedder': object()},
             source_factory=FakeSource,
             session_factory=FakeSession,

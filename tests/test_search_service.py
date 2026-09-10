@@ -101,7 +101,7 @@ class TestSearchService:
     def test_found_result_includes_timestamp_url(self) -> None:
         store = FakeStore()
         segment = SearchSegment(0.0, 0.5, 777, 1368.0, 1368.5, 0.9, 1.0, 1368.0, 0.9, 1.0, 1, 1)
-        service = SearchService(store=store, preprocessor=FakePreprocessor(), query_embedder=FakeQueryEmbedder(embeddings=np.array([[0.1, 0.2]], dtype=np.float32), timestamps=np.array([0.0], dtype=np.float32)), alignment=FakeAlignment(AlignmentResult(found=True, video_id=777, timestamp_seconds=1368, score=0.9, reason='ok', segments=[segment], query_duration_seconds=0.5)))
+        service = SearchService(videos=store, fingerprints=store, preprocessor=FakePreprocessor(), query_embedder=FakeQueryEmbedder(embeddings=np.array([[0.1, 0.2]], dtype=np.float32), timestamps=np.array([0.0], dtype=np.float32)), alignment=FakeAlignment(AlignmentResult(found=True, video_id=777, timestamp_seconds=1368, score=0.9, reason='ok', segments=[segment], query_duration_seconds=0.5)))
         execution = service.search_file('clip.mp4', 'xQc')
         result = execution.result
         assert result.found
@@ -172,7 +172,8 @@ class TestSearchService:
             query_duration_seconds=21.0,
         )
         service = SearchService(
-            store=store,
+            videos=store,
+            fingerprints=store,
             preprocessor=FakePreprocessor(),
             query_embedder=FakeQueryEmbedder(
                 embeddings=np.array([[0.1, 0.2]], dtype=np.float32),
@@ -191,7 +192,7 @@ class TestSearchService:
         assert result.sources[1].video_url_at_timestamp == 'https://www.twitch.tv/videos/888?t=8m20s'
 
     def test_not_found_result_has_no_timestamp_url(self) -> None:
-        service = SearchService(store=FakeStore(), preprocessor=FakePreprocessor(), query_embedder=FakeQueryEmbedder(embeddings=np.array([[0.1, 0.2]], dtype=np.float32), timestamps=np.array([0.0], dtype=np.float32)), alignment=FakeAlignment(AlignmentResult(found=False, reason='No aligned match found')))
+        service = SearchService(videos=FakeStore(), fingerprints=FakeStore(), preprocessor=FakePreprocessor(), query_embedder=FakeQueryEmbedder(embeddings=np.array([[0.1, 0.2]], dtype=np.float32), timestamps=np.array([0.0], dtype=np.float32)), alignment=FakeAlignment(AlignmentResult(found=False, reason='No aligned match found')))
         execution = service.search_file('clip.mp4', 'xqc')
         result = execution.result
         assert not result.found
@@ -207,7 +208,7 @@ class TestSearchService:
                 self.last_streamer = name
                 return None
         store = MissingStore()
-        service = SearchService(store=store, preprocessor=FakePreprocessor(), query_embedder=FakeQueryEmbedder(embeddings=np.array([[0.1, 0.2]], dtype=np.float32), timestamps=np.array([0.0], dtype=np.float32)), alignment=FakeAlignment(AlignmentResult(found=False, reason='No aligned match found')))
+        service = SearchService(videos=store, fingerprints=store, preprocessor=FakePreprocessor(), query_embedder=FakeQueryEmbedder(embeddings=np.array([[0.1, 0.2]], dtype=np.float32), timestamps=np.array([0.0], dtype=np.float32)), alignment=FakeAlignment(AlignmentResult(found=False, reason='No aligned match found')))
         execution = service.search_file('clip.mp4', 'xqc')
         result = execution.result
         assert not result.found
@@ -220,7 +221,7 @@ class TestSearchService:
             streamed_from=datetime(2026, 4, 1, tzinfo=timezone.utc),
             streamed_to=datetime(2026, 4, 8, tzinfo=timezone.utc),
         )
-        service = SearchService(store=store, preprocessor=FakePreprocessor(), query_embedder=FakeQueryEmbedder(embeddings=np.array([[0.1, 0.2]], dtype=np.float32), timestamps=np.array([0.0], dtype=np.float32)), alignment=FakeAlignment(AlignmentResult(found=False, reason='No aligned match found')))
+        service = SearchService(videos=store, fingerprints=store, preprocessor=FakePreprocessor(), query_embedder=FakeQueryEmbedder(embeddings=np.array([[0.1, 0.2]], dtype=np.float32), timestamps=np.array([0.0], dtype=np.float32)), alignment=FakeAlignment(AlignmentResult(found=False, reason='No aligned match found')))
         service.search_file('clip.mp4', 'xqc', date_range=date_range)
         assert store.last_date_range == date_range
 
@@ -247,7 +248,8 @@ class TestSearchService:
             ),
         )
         service = SearchService(
-            store=store,
+            videos=store,
+            fingerprints=store,
             preprocessor=FakePreprocessor(),
             query_embedder=embedder,
             alignment=FakeAlignment(AlignmentResult(found=False, reason="no supported track")),
@@ -269,7 +271,8 @@ class TestSearchService:
     def test_passes_query_duration_to_preprocessor(self) -> None:
         preprocessor = FakePreprocessor()
         service = SearchService(
-            store=FakeStore(),
+            videos=FakeStore(),
+            fingerprints=FakeStore(),
             preprocessor=preprocessor,
             query_embedder=FakeQueryEmbedder(
                 embeddings=np.array([[0.1, 0.2]], dtype=np.float32),

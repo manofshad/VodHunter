@@ -6,12 +6,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.apps.public import create_public_app
-from storage.vector_store import (
+from storage.errors import (
     InvalidVideoStateTransitionError,
-    VectorStore,
     VideoNotFoundError,
     VideoOwnerMismatchError,
 )
+from storage.database import PostgresDatabase
+from storage.video_repository import VideoRepository
 
 
 class StubInternalVideoStore:
@@ -45,7 +46,7 @@ def _build_client(
         enable_lifespan=False,
         internal_api_key=internal_api_key,
     )
-    app.state.store = store
+    app.state.videos = store
     return app, TestClient(app)
 
 
@@ -267,10 +268,15 @@ class FakeConnection:
         return None
 
 
+def build_video_repository(cursor: FakeCursor) -> VideoRepository:
+    database = PostgresDatabase.__new__(PostgresDatabase)
+    database.connect = lambda: FakeConnection(cursor)
+    return VideoRepository(database)
+
+
 def test_delete_video_index_purges_related_rows_before_marking_deleted() -> None:
     cursor = FakeCursor(fetchone_results=[(99, "searchable")])
-    store = VectorStore.__new__(VectorStore)
-    store._connect = lambda: FakeConnection(cursor)
+    store = build_video_repository(cursor)
 
     result = store.delete_video_index(55, actor_creator_id=99)
 
@@ -292,8 +298,7 @@ def test_delete_video_index_purges_related_rows_before_marking_deleted() -> None
 
 def test_delete_video_index_is_idempotent_when_locked_row_is_already_deleted() -> None:
     cursor = FakeCursor(fetchone_results=[(99, "deleted")])
-    store = VectorStore.__new__(VectorStore)
-    store._connect = lambda: FakeConnection(cursor)
+    store = build_video_repository(cursor)
 
     result = store.delete_video_index(55, actor_creator_id=99)
 
@@ -304,8 +309,7 @@ def test_delete_video_index_is_idempotent_when_locked_row_is_already_deleted() -
 
 def test_delete_video_index_rejects_owner_mismatch_from_locked_row() -> None:
     cursor = FakeCursor(fetchone_results=[(42, "searchable")])
-    store = VectorStore.__new__(VectorStore)
-    store._connect = lambda: FakeConnection(cursor)
+    store = build_video_repository(cursor)
 
     with pytest.raises(VideoOwnerMismatchError):
         store.delete_video_index(55, actor_creator_id=99)
@@ -316,8 +320,7 @@ def test_delete_video_index_rejects_owner_mismatch_from_locked_row() -> None:
 
 def test_request_video_reindex_clears_ingest_state_before_marking_requested() -> None:
     cursor = FakeCursor(fetchone_results=[(99, "deleted")])
-    store = VectorStore.__new__(VectorStore)
-    store._connect = lambda: FakeConnection(cursor)
+    store = build_video_repository(cursor)
 
     result = store.request_video_reindex(56, actor_creator_id=99)
 
@@ -334,8 +337,7 @@ def test_request_video_reindex_clears_ingest_state_before_marking_requested() ->
 
 def test_request_video_reindex_rejects_invalid_transition_from_locked_row() -> None:
     cursor = FakeCursor(fetchone_results=[(99, "searchable")])
-    store = VectorStore.__new__(VectorStore)
-    store._connect = lambda: FakeConnection(cursor)
+    store = build_video_repository(cursor)
 
     with pytest.raises(InvalidVideoStateTransitionError) as exc_info:
         store.request_video_reindex(56, actor_creator_id=99)

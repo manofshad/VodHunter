@@ -14,12 +14,14 @@ from search.models import (
     SearchSegment,
     UnmatchedRange,
 )
-from storage.vector_store import (
+from storage.database import PostgresDatabase
+from storage.fingerprint_repository import (
     DEFAULT_NMFP_MODEL_VERSION,
     DEFAULT_NMFP_PREPROCESSING_VERSION,
     NMFP_VECTOR_DIM,
-    VectorStore,
 )
+from storage.search_job_repository import SearchJobRepository
+from storage.video_repository import VideoRepository
 
 
 class FakeCursor:
@@ -58,19 +60,32 @@ class FakeConnection:
         return None
 
 
-def build_store(cursor: FakeCursor) -> VectorStore:
-    store = VectorStore.__new__(VectorStore)
-    store.vector_dim = NMFP_VECTOR_DIM
-    store.hnsw_ef_search = 40
-    store.model_version = DEFAULT_NMFP_MODEL_VERSION
-    store.preprocessing_version = DEFAULT_NMFP_PREPROCESSING_VERSION
-    store._connect = lambda: FakeConnection(cursor)
-    return store
+def build_database(cursor: FakeCursor) -> PostgresDatabase:
+    database = PostgresDatabase.__new__(PostgresDatabase)
+    database.vector_dim = NMFP_VECTOR_DIM
+    database.hnsw_ef_search = 40
+    database.model_version = DEFAULT_NMFP_MODEL_VERSION
+    database.preprocessing_version = DEFAULT_NMFP_PREPROCESSING_VERSION
+    database.connect = lambda: FakeConnection(cursor)
+    return database
+
+
+def build_fingerprint_repository(cursor: FakeCursor):
+    from storage.fingerprint_repository import FingerprintRepository
+
+    repository = FingerprintRepository.__new__(FingerprintRepository)
+    repository.database = build_database(cursor)
+    return repository
+
+
+def build_search_job_repository(cursor: FakeCursor):
+    database = build_database(cursor)
+    return SearchJobRepository(database, VideoRepository(database))
 
 
 def test_append_vectors_persists_exact_nmfp_versions() -> None:
     cursor = FakeCursor()
-    store = build_store(cursor)
+    store = build_fingerprint_repository(cursor)
 
     store.append_vectors(
         np.ones((1, NMFP_VECTOR_DIM), dtype=np.float32),
@@ -86,7 +101,7 @@ def test_append_vectors_persists_exact_nmfp_versions() -> None:
 
 
 def test_append_vectors_rejects_non_nmfp_width() -> None:
-    store = build_store(FakeCursor())
+    store = build_fingerprint_repository(FakeCursor())
 
     with pytest.raises(ValueError, match=r"shape \(n, 128\)"):
         store.append_vectors(np.ones((1, 768), dtype=np.float32), [17], creator_id=9)
@@ -100,7 +115,7 @@ def test_query_fingerprint_candidates_batches_rows_and_retains_alignment_evidenc
             (1, 0.5, 103, 7, 100.5, 0.93, 0),
         ]
     )
-    store = build_store(cursor)
+    store = build_fingerprint_repository(cursor)
     date_range = SearchDateRange(
         streamed_from=datetime(2026, 4, 1, tzinfo=timezone.utc),
         streamed_to=datetime(2026, 4, 8, tzinfo=timezone.utc),
@@ -189,9 +204,9 @@ class SchemaCursor(FakeCursor):
 
 def test_schema_readiness_verifies_nmfp_width_and_versions() -> None:
     cursor = SchemaCursor()
-    store = build_store(cursor)
+    database = build_database(cursor)
 
-    store.ensure_schema_ready()
+    database.ensure_schema_ready()
 
     assert any("SELECT format_type" in query for query, _ in cursor.executed)
     assert any("FROM fingerprint_index_metadata" in query for query, _ in cursor.executed)
@@ -205,15 +220,15 @@ def test_schema_readiness_verifies_nmfp_width_and_versions() -> None:
     ],
 )
 def test_schema_readiness_rejects_incompatible_index(cursor: SchemaCursor, message: str) -> None:
-    store = build_store(cursor)
+    database = build_database(cursor)
 
     with pytest.raises(RuntimeError, match=message):
-        store.ensure_schema_ready()
+        database.ensure_schema_ready()
 
 
 def test_complete_search_job_persists_lossless_result_payload_and_metrics() -> None:
     cursor = FakeCursor()
-    store = build_store(cursor)
+    store = build_search_job_repository(cursor)
     metadata = SearchExecutionMetadata(
         preprocess_duration_ms=11,
         embed_duration_ms=22,
@@ -351,7 +366,7 @@ def test_get_public_search_job_restores_nested_multi_segment_payload() -> None:
             payload,
         )
     )
-    store = build_store(cursor)
+    store = build_search_job_repository(cursor)
 
     job = store.get_public_search_job(55)
 
