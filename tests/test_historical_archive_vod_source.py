@@ -1,6 +1,8 @@
 import os
 import subprocess
 import tempfile
+from dataclasses import replace
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 from sources.historical_archive_vod_source import (
@@ -8,6 +10,7 @@ from sources.historical_archive_vod_source import (
     parse_hls_media_playlist,
     select_hls_chunk,
 )
+from storage.records import VodIngestStateRecord, VideoRecord, VideoStatus
 
 class FakeStore:
 
@@ -15,8 +18,8 @@ class FakeStore:
         self._creator_id = 0
         self._video_id = 0
         self.creators: dict[str, tuple[int, str, str, str | None]] = {}
-        self.videos_by_url: dict[str, tuple[int, int, str, str, str | None, bool]] = {}
-        self.vod_state: dict[str, dict] = {}
+        self.videos_by_url: dict[str, VideoRecord] = {}
+        self.vod_state: dict[str, VodIngestStateRecord] = {}
         self.video_status_by_id: dict[int, str | None] = {}
 
     def create_or_get_creator(self, name: str, url: str, profile_image_url: str | None = None) -> int:
@@ -33,25 +36,54 @@ class FakeStore:
 
     def create_video(self, creator_id: int, url: str, title: str, processed: bool, thumbnail_url: str | None=None, streamed_at=None, status: str | None = None) -> int:
         self._video_id += 1
-        resolved_status = status if status is not None else ('searchable' if bool(processed) else 'indexing')
-        row = (self._video_id, int(creator_id), url, title, thumbnail_url, bool(processed), streamed_at)
+        resolved_status = VideoStatus(status) if status is not None else (
+            VideoStatus.SEARCHABLE if bool(processed) else VideoStatus.INDEXING
+        )
+        row = VideoRecord(
+            id=self._video_id,
+            creator_id=int(creator_id),
+            url=url,
+            title=title,
+            thumbnail_url=thumbnail_url,
+            status=resolved_status,
+            processed=resolved_status != VideoStatus.INDEXING,
+            streamed_at=streamed_at,
+        )
         self.videos_by_url[url] = row
-        self.video_status_by_id[self._video_id] = resolved_status
+        self.video_status_by_id[self._video_id] = resolved_status.value
         return self._video_id
 
     def update_video_metadata(self, video_id: int, *, title: str | None=None, thumbnail_url: str | None=None, processed: bool | None=None, streamed_at=None, status: str | None = None) -> None:
         for url, row in list(self.videos_by_url.items()):
-            if int(row[0]) != int(video_id):
+            if row.id != int(video_id):
                 continue
-            self.videos_by_url[url] = (row[0], row[1], row[2], title if title is not None else row[3], thumbnail_url if thumbnail_url is not None else row[4], bool(processed) if processed is not None else row[5], streamed_at if streamed_at is not None else row[6])
             if status is not None:
-                self.video_status_by_id[int(video_id)] = status
+                resolved_status = VideoStatus(status)
+                resolved_processed = resolved_status != VideoStatus.INDEXING
+            else:
+                resolved_status = row.status
+                resolved_processed = bool(processed) if processed is not None else row.processed
+            self.videos_by_url[url] = replace(
+                row,
+                title=title if title is not None else row.title,
+                thumbnail_url=thumbnail_url if thumbnail_url is not None else row.thumbnail_url,
+                processed=resolved_processed,
+                status=resolved_status,
+                streamed_at=streamed_at if streamed_at is not None else row.streamed_at,
+            )
+            if status is not None:
+                self.video_status_by_id[int(video_id)] = resolved_status.value
             return
 
     def mark_video_processed(self, video_id: int, processed: bool=True) -> None:
         for url, row in list(self.videos_by_url.items()):
-            if int(row[0]) == int(video_id):
-                self.videos_by_url[url] = (row[0], row[1], row[2], row[3], row[4], bool(processed), row[6])
+            if row.id == int(video_id):
+                self.videos_by_url[url] = replace(
+                    row,
+                    processed=bool(processed),
+                    status=VideoStatus.SEARCHABLE if processed else VideoStatus.INDEXING,
+                )
+                self.video_status_by_id[int(video_id)] = "searchable" if processed else "indexing"
                 return
 
     def get_video_status(self, video_id: int):
@@ -61,15 +93,26 @@ class FakeStore:
         self.video_status_by_id[int(video_id)] = status
         processed = status != 'indexing'
         for url, row in list(self.videos_by_url.items()):
-            if int(row[0]) == int(video_id):
-                self.videos_by_url[url] = (row[0], row[1], row[2], row[3], row[4], processed, row[6])
+            if row.id == int(video_id):
+                self.videos_by_url[url] = replace(
+                    row,
+                    processed=processed,
+                    status=VideoStatus(status),
+                )
                 return
 
     def get_vod_ingest_state(self, vod_platform_id: str):
         return self.vod_state.get(vod_platform_id)
 
     def upsert_vod_ingest_state(self, vod_platform_id: str, video_id: int, streamer: str, last_ingested_seconds: int, last_seen_duration_seconds: int) -> None:
-        self.vod_state[vod_platform_id] = {'vod_platform_id': vod_platform_id, 'video_id': int(video_id), 'streamer': streamer, 'last_ingested_seconds': int(last_ingested_seconds), 'last_seen_duration_seconds': int(last_seen_duration_seconds), 'updated_at': 'now'}
+        self.vod_state[vod_platform_id] = VodIngestStateRecord(
+            vod_platform_id=vod_platform_id,
+            video_id=int(video_id),
+            streamer=streamer,
+            last_ingested_seconds=int(last_ingested_seconds),
+            last_seen_duration_seconds=int(last_seen_duration_seconds),
+            updated_at=datetime.now(timezone.utc),
+        )
 
     def delete_vod_ingest_state(self, vod_platform_id: str) -> None:
         self.vod_state.pop(vod_platform_id, None)
@@ -194,7 +237,7 @@ segment-2.ts
             assert chunk.offset_seconds == 119.5
             assert chunk.duration_seconds == 60.5
             assert extraction_calls == [(119.5, 60.5)]
-            assert store.vod_state['vod-1']['last_ingested_seconds'] == 120
+            assert store.vod_state['vod-1'].last_ingested_seconds == 120
             source.next_chunk()
             assert source.ingest_cursor_seconds == 180
             assert source.is_finished
@@ -218,7 +261,7 @@ segment-2.ts
             row = store.get_video_by_url('https://www.twitch.tv/videos/vod-1')
             assert row is not None
             assert row is not None
-            assert row[5]
+            assert row.processed
             assert store.get_video_status(source.video_id) == 'searchable'
             assert 'vod-1' not in store.vod_state
             assert source.is_finished
@@ -257,7 +300,7 @@ segment-2.ts
 
             assert source.ingest_cursor_seconds == 0
             assert store.get_video_status(video_id) == 'indexing'
-            assert store.vod_state['vod-1']['last_ingested_seconds'] == 0
+            assert store.vod_state['vod-1'].last_ingested_seconds == 0
 
     def test_stop_does_not_commit_pending_progress(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -283,8 +326,8 @@ segment-2.ts
             chunk = source.next_chunk()
 
             assert chunk is not None
-            assert store.vod_state['vod-1']['last_ingested_seconds'] == 0
+            assert store.vod_state['vod-1'].last_ingested_seconds == 0
 
             source.stop()
 
-            assert store.vod_state['vod-1']['last_ingested_seconds'] == 0
+            assert store.vod_state['vod-1'].last_ingested_seconds == 0

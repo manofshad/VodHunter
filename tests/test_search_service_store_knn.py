@@ -1,6 +1,7 @@
 import numpy as np
 from search.models import AlignmentResult, FingerprintCandidate, SearchDateRange, SearchSegment
 from search.search_service import SearchService
+from storage.records import VideoRecord, VideoStatus
 
 class FakePreprocessor:
 
@@ -51,7 +52,18 @@ class FakeStoreWithKnn:
         return [FingerprintCandidate(0, 0.0, 10, 777, 120.0, 0.99, 0)]
 
     def get_video_with_creator(self, video_id: int):
-        return (777, 'https://www.twitch.tv/videos/2699020769', 'Sample title', 'xqc', None, 'https://cdn/xqc.png')
+        return VideoRecord(
+            id=777,
+            creator_id=42,
+            url='https://www.twitch.tv/videos/2699020769',
+            title='Sample title',
+            thumbnail_url=None,
+            status=VideoStatus.SEARCHABLE,
+            processed=True,
+            streamed_at=None,
+            creator_name='xqc',
+            creator_profile_image_url='https://cdn/xqc.png',
+        )
 
 class TestSearchServiceStoreKnn:
 

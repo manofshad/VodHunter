@@ -1,10 +1,12 @@
 import pytest
+from datetime import datetime, timezone
 
 from runners.run_backfill_ingest import (
     FreshNMFPReindexPreconditionError,
     main,
     run_backfill_ingest,
 )
+from storage.records import VodIngestStateRecord, VideoRecord, VideoStatus
 
 
 class FakeMonitor:
@@ -29,10 +31,52 @@ class FakeMonitor:
 class FakeStore:
 
     def __init__(self):
-        self.videos_by_url: dict[str, tuple[int, int, str, str, str | None, bool]] = {}
-        self.vod_state: dict[str, dict] = {}
+        self.videos_by_url: dict[str, VideoRecord] = {}
+        self.vod_state: dict[str, VodIngestStateRecord] = {}
         self.video_status_by_id: dict[int, str | None] = {}
         self.deleted_vod_state_ids: list[str] = []
+
+    def set_video(
+        self,
+        *,
+        video_id: int,
+        creator_id: int,
+        url: str,
+        title: str,
+        thumbnail_url: str | None = None,
+        processed: bool,
+        status: str | None,
+        streamed_at: datetime | None = None,
+    ) -> None:
+        self.videos_by_url[url] = VideoRecord(
+            id=video_id,
+            creator_id=creator_id,
+            url=url,
+            title=title,
+            thumbnail_url=thumbnail_url,
+            status=VideoStatus(status) if status is not None else None,
+            processed=processed,
+            streamed_at=streamed_at,
+        )
+        self.video_status_by_id[video_id] = status
+
+    def set_state(
+        self,
+        *,
+        vod_platform_id: str,
+        video_id: int,
+        streamer: str,
+        last_ingested_seconds: int,
+        last_seen_duration_seconds: int,
+    ) -> None:
+        self.vod_state[vod_platform_id] = VodIngestStateRecord(
+            vod_platform_id=vod_platform_id,
+            video_id=video_id,
+            streamer=streamer,
+            last_ingested_seconds=last_ingested_seconds,
+            last_seen_duration_seconds=last_seen_duration_seconds,
+            updated_at=datetime.now(timezone.utc),
+        )
 
     def get_video_by_url(self, url: str):
         return self.videos_by_url.get(url)
@@ -74,8 +118,21 @@ class TestRunBackfillIngest:
 
     def test_skips_processed_resumes_partial_and_continues_on_failure(self) -> None:
         store = FakeStore()
-        store.videos_by_url['https://www.twitch.tv/videos/processed'] = (1, 1, 'https://www.twitch.tv/videos/processed', 'Processed', None, True, None)
-        store.vod_state['resume'] = {'vod_platform_id': 'resume', 'video_id': 2, 'streamer': 'alice', 'last_ingested_seconds': 60, 'last_seen_duration_seconds': 120, 'updated_at': 'now'}
+        store.set_video(
+            video_id=1,
+            creator_id=1,
+            url='https://www.twitch.tv/videos/processed',
+            title='Processed',
+            processed=True,
+            status=None,
+        )
+        store.set_state(
+            vod_platform_id='resume',
+            video_id=2,
+            streamer='alice',
+            last_ingested_seconds=60,
+            last_seen_duration_seconds=120,
+        )
         monitor = FakeMonitor([{'id': 'resume', 'url': 'https://www.twitch.tv/videos/resume'}, {'id': 'processed', 'url': 'https://www.twitch.tv/videos/processed'}, {'id': 'fail', 'url': 'https://www.twitch.tv/videos/fail', 'should_fail': True}])
         logs: list[str] = []
         seen_vods: list[str] = []
@@ -112,34 +169,29 @@ class TestRunBackfillIngest:
 
     def test_skips_deleted_and_restarts_reindex_requested_vod(self) -> None:
         store = FakeStore()
-        store.videos_by_url['https://www.twitch.tv/videos/deleted'] = (
-            1,
-            1,
-            'https://www.twitch.tv/videos/deleted',
-            'Deleted',
-            None,
-            True,
-            None,
+        store.set_video(
+            video_id=1,
+            creator_id=1,
+            url='https://www.twitch.tv/videos/deleted',
+            title='Deleted',
+            processed=True,
+            status='deleted',
         )
-        store.video_status_by_id[1] = 'deleted'
-        store.videos_by_url['https://www.twitch.tv/videos/reindex'] = (
-            2,
-            1,
-            'https://www.twitch.tv/videos/reindex',
-            'Needs reindex',
-            None,
-            True,
-            None,
+        store.set_video(
+            video_id=2,
+            creator_id=1,
+            url='https://www.twitch.tv/videos/reindex',
+            title='Needs reindex',
+            processed=True,
+            status='reindex_requested',
         )
-        store.video_status_by_id[2] = 'reindex_requested'
-        store.vod_state['reindex'] = {
-            'vod_platform_id': 'reindex',
-            'video_id': 2,
-            'streamer': 'alice',
-            'last_ingested_seconds': 90,
-            'last_seen_duration_seconds': 180,
-            'updated_at': 'now',
-        }
+        store.set_state(
+            vod_platform_id='reindex',
+            video_id=2,
+            streamer='alice',
+            last_ingested_seconds=90,
+            last_seen_duration_seconds=180,
+        )
         monitor = FakeMonitor(
             [
                 {'id': 'deleted', 'url': 'https://www.twitch.tv/videos/deleted'},
@@ -175,24 +227,21 @@ class TestRunBackfillIngest:
 
     def test_resumes_indexing_vod_when_state_exists(self) -> None:
         store = FakeStore()
-        store.videos_by_url['https://www.twitch.tv/videos/resume-indexing'] = (
-            3,
-            1,
-            'https://www.twitch.tv/videos/resume-indexing',
-            'Resume indexing',
-            None,
-            False,
-            None,
+        store.set_video(
+            video_id=3,
+            creator_id=1,
+            url='https://www.twitch.tv/videos/resume-indexing',
+            title='Resume indexing',
+            processed=False,
+            status='indexing',
         )
-        store.video_status_by_id[3] = 'indexing'
-        store.vod_state['resume-indexing'] = {
-            'vod_platform_id': 'resume-indexing',
-            'video_id': 3,
-            'streamer': 'alice',
-            'last_ingested_seconds': 30,
-            'last_seen_duration_seconds': 180,
-            'updated_at': 'now',
-        }
+        store.set_state(
+            vod_platform_id='resume-indexing',
+            video_id=3,
+            streamer='alice',
+            last_ingested_seconds=30,
+            last_seen_duration_seconds=180,
+        )
         monitor = FakeMonitor(
             [
                 {'id': 'resume-indexing', 'url': 'https://www.twitch.tv/videos/resume-indexing'},
@@ -224,34 +273,29 @@ class TestRunBackfillIngest:
 
     def test_fresh_nmfp_reindex_rejects_searchable_or_resumable_rows_before_model_build(self) -> None:
         store = FakeStore()
-        store.videos_by_url['https://www.twitch.tv/videos/searchable'] = (
-            4,
-            1,
-            'https://www.twitch.tv/videos/searchable',
-            'Legacy searchable',
-            None,
-            True,
-            None,
+        store.set_video(
+            video_id=4,
+            creator_id=1,
+            url='https://www.twitch.tv/videos/searchable',
+            title='Legacy searchable',
+            processed=True,
+            status='searchable',
         )
-        store.video_status_by_id[4] = 'searchable'
-        store.videos_by_url['https://www.twitch.tv/videos/indexing'] = (
-            5,
-            1,
-            'https://www.twitch.tv/videos/indexing',
-            'Ambiguous partial index',
-            None,
-            False,
-            None,
+        store.set_video(
+            video_id=5,
+            creator_id=1,
+            url='https://www.twitch.tv/videos/indexing',
+            title='Ambiguous partial index',
+            processed=False,
+            status='indexing',
         )
-        store.video_status_by_id[5] = 'indexing'
-        store.vod_state['indexing'] = {
-            'vod_platform_id': 'indexing',
-            'video_id': 5,
-            'streamer': 'alice',
-            'last_ingested_seconds': 60,
-            'last_seen_duration_seconds': 180,
-            'updated_at': 'now',
-        }
+        store.set_state(
+            vod_platform_id='indexing',
+            video_id=5,
+            streamer='alice',
+            last_ingested_seconds=60,
+            last_seen_duration_seconds=180,
+        )
         monitor = FakeMonitor(
             [
                 {'id': 'searchable', 'url': 'https://www.twitch.tv/videos/searchable'},
@@ -280,24 +324,21 @@ class TestRunBackfillIngest:
 
     def test_fresh_nmfp_reindex_accepts_migration_marked_rows_and_never_resumes_cursor(self) -> None:
         store = FakeStore()
-        store.videos_by_url['https://www.twitch.tv/videos/reindex'] = (
-            6,
-            1,
-            'https://www.twitch.tv/videos/reindex',
-            'Prepared reindex',
-            None,
-            True,
-            None,
+        store.set_video(
+            video_id=6,
+            creator_id=1,
+            url='https://www.twitch.tv/videos/reindex',
+            title='Prepared reindex',
+            processed=True,
+            status='reindex_requested',
         )
-        store.video_status_by_id[6] = 'reindex_requested'
-        store.vod_state['reindex'] = {
-            'vod_platform_id': 'reindex',
-            'video_id': 6,
-            'streamer': 'alice',
-            'last_ingested_seconds': 90,
-            'last_seen_duration_seconds': 180,
-            'updated_at': 'now',
-        }
+        store.set_state(
+            vod_platform_id='reindex',
+            video_id=6,
+            streamer='alice',
+            last_ingested_seconds=90,
+            last_seen_duration_seconds=180,
+        )
         monitor = FakeMonitor(
             [{'id': 'reindex', 'url': 'https://www.twitch.tv/videos/reindex'}]
         )
