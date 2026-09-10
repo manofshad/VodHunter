@@ -69,7 +69,7 @@ class TestSearchServiceStoreKnn:
 
     def test_uses_store_knn_path_when_available(self) -> None:
         store = FakeStoreWithKnn()
-        service = SearchService(store=store, preprocessor=FakePreprocessor(), query_embedder=FakeQueryEmbedder(), alignment=FakeAlignment(), top_k=10)
+        service = SearchService(videos=store, fingerprints=store, preprocessor=FakePreprocessor(), query_embedder=FakeQueryEmbedder(), alignment=FakeAlignment(), top_k=10)
         execution = service.search_file('clip.mp4', 'xQc')
         result = execution.result
         assert result.found

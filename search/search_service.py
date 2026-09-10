@@ -3,12 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 import logging
 import time
-from typing import Callable
+from typing import Callable, Protocol
 
 import numpy as np
 
 from search.alignment_service import AlignmentService
 from search.models import (
+    FingerprintCandidate,
     SearchDateRange,
     SearchExecutionMetadata,
     SearchExecutionResult,
@@ -20,7 +21,29 @@ from search.models import (
 from search.query_embedder import QueryEmbedder
 from search.query_preprocessor import QueryPreprocessor
 from search.twitch_time import build_twitch_timestamp_url
-from storage.vector_store import VectorStore
+from storage.records import VideoRecord
+
+
+class _VideoReader(Protocol):
+    def get_creator_id_by_name(self, name: str) -> int | None: ...
+
+    def get_video_with_creator(self, video_id: int) -> VideoRecord | None: ...
+
+
+class _FingerprintReader(Protocol):
+    model_version: str
+    preprocessing_version: str
+
+    def query_fingerprint_candidates(
+        self,
+        query_embeddings: np.ndarray,
+        query_timestamps: np.ndarray,
+        top_k: int,
+        creator_id: int,
+        model_version: str | None = None,
+        preprocessing_version: str | None = None,
+        date_range: SearchDateRange | None = None,
+    ) -> list[FingerprintCandidate]: ...
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -76,13 +99,15 @@ def _whole_query_unmatched(query_duration_seconds: float) -> list[UnmatchedRange
 class SearchService:
     def __init__(
         self,
-        store: VectorStore,
+        videos: _VideoReader,
+        fingerprints: _FingerprintReader,
         preprocessor: QueryPreprocessor,
         query_embedder: QueryEmbedder,
         alignment: AlignmentService,
         top_k: int = 10,
     ):
-        self.store = store
+        self.videos = videos
+        self.fingerprints = fingerprints
         self.preprocessor = preprocessor
         self.query_embedder = query_embedder
         self.alignment = alignment
@@ -134,11 +159,11 @@ class SearchService:
             metadata.fingerprint_duration_ms = observation["fingerprint_duration_ms"]
             metadata.model_cold_start = observation["cold_start"]
             metadata.model_version = observation["model_version"] or getattr(
-                self.store, "model_version", None
+                self.fingerprints, "model_version", None
             )
             metadata.preprocessing_version = observation[
                 "preprocessing_version"
-            ] or getattr(self.store, "preprocessing_version", None)
+            ] or getattr(self.fingerprints, "preprocessing_version", None)
 
             resolved_duration = query_duration_seconds
             if resolved_duration is None:
@@ -158,7 +183,7 @@ class SearchService:
 
             if on_stage_change is not None:
                 on_stage_change("retrieving")
-            creator_id = self.store.get_creator_id_by_name(normalized_streamer)
+            creator_id = self.videos.get_creator_id_by_name(normalized_streamer)
             if creator_id is None:
                 return self._finish_not_found(
                     normalized_streamer,
@@ -178,7 +203,7 @@ class SearchService:
                 top_k,
             )
             started_at = time.perf_counter()
-            candidates = self.store.query_fingerprint_candidates(
+            candidates = self.fingerprints.query_fingerprint_candidates(
                 query_embeddings=query_embeddings,
                 query_timestamps=query_timestamps,
                 top_k=top_k,
@@ -214,7 +239,7 @@ class SearchService:
             if on_stage_change is not None:
                 on_stage_change("finalizing")
             video_rows = {
-                video_id: self.store.get_video_with_creator(video_id)
+                video_id: self.videos.get_video_with_creator(video_id)
                 for video_id in {segment.video_id for segment in alignment.segments}
             }
             primary_row = video_rows.get(alignment.video_id)

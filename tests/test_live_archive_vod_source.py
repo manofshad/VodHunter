@@ -155,7 +155,8 @@ class FakeStore:
             return
 
     def get_video_status(self, video_id: int):
-        return self.video_status_by_id.get(int(video_id))
+        value = self.video_status_by_id.get(int(video_id))
+        return VideoStatus(value) if value is not None else None
 
     def update_video_status(self, video_id: int, status: str) -> None:
         self.video_status_by_id[int(video_id)] = status
@@ -185,6 +186,20 @@ class FakeStore:
     def delete_vod_ingest_state(self, vod_platform_id: str) -> None:
         self.vod_state.pop(vod_platform_id, None)
 
+
+class FakeIngestStates:
+    def __init__(self, store: FakeStore):
+        self.store = store
+
+    def get(self, vod_platform_id: str):
+        return self.store.get_vod_ingest_state(vod_platform_id)
+
+    def upsert(self, **kwargs) -> None:
+        self.store.upsert_vod_ingest_state(**kwargs)
+
+    def delete(self, vod_platform_id: str) -> None:
+        self.store.delete_vod_ingest_state(vod_platform_id)
+
 class TestLiveArchiveVODSource:
 
     def _make_source(
@@ -196,7 +211,7 @@ class TestLiveArchiveVODSource:
     ) -> LiveArchiveVODSource:
         store = FakeStore()
         monitor = FakeMonitor(live_sequence=live_sequence, vod_sequence=vod_sequence)
-        source = LiveArchiveVODSource(streamer='alice', store=store, twitch_monitor=monitor, chunk_seconds=60, lag_seconds=120, poll_seconds=0.0, finalize_checks=2, temp_dir=f'{tmp}/chunks')
+        source = LiveArchiveVODSource(streamer='alice', videos=store, ingest_states=FakeIngestStates(store), twitch_monitor=monitor, chunk_seconds=60, lag_seconds=120, poll_seconds=0.0, finalize_checks=2, temp_dir=f'{tmp}/chunks')
 
         def fake_extract_chunk(start_seconds: int, duration_seconds: int) -> str:
             out = os.path.join(source.temp_dir, f'chunk_{start_seconds}_{duration_seconds}.wav')
@@ -211,9 +226,9 @@ class TestLiveArchiveVODSource:
         with tempfile.TemporaryDirectory() as tmp:
             source = self._make_source(tmp, live_sequence=[True, True, True])
             source.start()
-            assert source.store.creators['https://twitch.tv/alice'][3] == 'https://static-cdn.jtvnw.net/jtv_user_pictures/alice.png'
+            assert source.videos.creators['https://twitch.tv/alice'][3] == 'https://static-cdn.jtvnw.net/jtv_user_pictures/alice.png'
             assert source.video_id is not None
-            assert source.store.get_video_status(source.video_id) == 'indexing'
+            assert source.videos.get_video_status(source.video_id) == 'indexing'
             chunk1 = source.next_chunk()
             assert chunk1 is not None
             assert chunk1.offset_seconds == 0.0
@@ -246,18 +261,18 @@ class TestLiveArchiveVODSource:
             assert source.is_finished
             assert source.video_id is not None
             assert source.video_id is not None
-            row = source.store.get_video_by_url('https://www.twitch.tv/videos/vod-1')
+            row = source.videos.get_video_by_url('https://www.twitch.tv/videos/vod-1')
             assert row is not None
             assert row is not None
             assert row.thumbnail_url == 'https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg'
             assert row.processed
-            assert source.store.get_video_status(source.video_id) == 'searchable'
+            assert source.videos.get_video_status(source.video_id) == 'searchable'
 
     def test_existing_video_metadata_is_refreshed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             source = self._make_source(tmp, live_sequence=[True])
-            existing_creator_id = source.store.create_or_get_creator('alice', 'https://twitch.tv/alice')
-            source.store.create_video(
+            existing_creator_id = source.videos.create_or_get_creator('alice', 'https://twitch.tv/alice')
+            source.videos.create_video(
                 creator_id=existing_creator_id,
                 url='https://www.twitch.tv/videos/vod-1',
                 title='Old title',
@@ -266,13 +281,13 @@ class TestLiveArchiveVODSource:
                 status='indexing',
             )
             source.start()
-            row = source.store.get_video_by_url('https://www.twitch.tv/videos/vod-1')
+            row = source.videos.get_video_by_url('https://www.twitch.tv/videos/vod-1')
             assert row is not None
             assert row is not None
             assert row.title == 'Live stream'
             assert row.thumbnail_url == 'https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg'
             assert not row.processed
-            assert source.store.metadata_updates == [
+            assert source.videos.metadata_updates == [
                 {
                     'video_id': source.video_id,
                     'title': None,
@@ -292,8 +307,8 @@ class TestLiveArchiveVODSource:
     def test_deleted_existing_video_is_not_claimed_for_live_ingest(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             source = self._make_source(tmp, live_sequence=[True, False, False])
-            existing_creator_id = source.store.create_or_get_creator('alice', 'https://twitch.tv/alice')
-            video_id = source.store.create_video(
+            existing_creator_id = source.videos.create_or_get_creator('alice', 'https://twitch.tv/alice')
+            video_id = source.videos.create_video(
                 creator_id=existing_creator_id,
                 url='https://www.twitch.tv/videos/vod-1',
                 title='Deleted title',
@@ -304,14 +319,14 @@ class TestLiveArchiveVODSource:
             source.start()
 
             assert source.video_id is None
-            assert source.store.get_video_status(video_id) == 'deleted'
-            assert source.store.metadata_updates == []
+            assert source.videos.get_video_status(video_id) == 'deleted'
+            assert source.videos.metadata_updates == []
 
     def test_searchable_existing_video_is_not_reclaimed_for_live_ingest(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             source = self._make_source(tmp, live_sequence=[True, False, False])
-            existing_creator_id = source.store.create_or_get_creator('alice', 'https://twitch.tv/alice')
-            video_id = source.store.create_video(
+            existing_creator_id = source.videos.create_or_get_creator('alice', 'https://twitch.tv/alice')
+            video_id = source.videos.create_video(
                 creator_id=existing_creator_id,
                 url='https://www.twitch.tv/videos/vod-1',
                 title='Searchable title',
@@ -323,8 +338,8 @@ class TestLiveArchiveVODSource:
 
             assert source.video_id is None
             assert source.is_finished
-            assert source.store.get_video_status(video_id) == 'searchable'
-            assert source.store.metadata_updates == []
+            assert source.videos.get_video_status(video_id) == 'searchable'
+            assert source.videos.metadata_updates == []
 
     def test_inflight_searchable_status_stops_live_ingest_without_finalize(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -332,14 +347,14 @@ class TestLiveArchiveVODSource:
             source.start()
 
             assert source.video_id is not None
-            source.store.update_video_status(source.video_id, 'searchable')
+            source.videos.update_video_status(source.video_id, 'searchable')
 
             chunk = source.next_chunk()
 
             assert chunk is None
             assert source.video_id is None
             assert source.is_finished
-            assert source.store.metadata_updates == []
+            assert source.videos.metadata_updates == []
 
     def test_switching_to_new_vod_resets_duration_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -410,8 +425,8 @@ class TestLiveArchiveVODSource:
             ]
             source.start()
             source.next_chunk()
-            assert source.store.creators['https://twitch.tv/alice'][3] == 'https://static-cdn.jtvnw.net/jtv_user_pictures/alice-new.png'
-            assert source.store.creator_metadata_updates == [
+            assert source.videos.creators['https://twitch.tv/alice'][3] == 'https://static-cdn.jtvnw.net/jtv_user_pictures/alice-new.png'
+            assert source.videos.creator_metadata_updates == [
                 {
                     'creator_id': 1,
                     'name': None,
@@ -442,16 +457,16 @@ class TestLiveArchiveVODSource:
                 ],
             )
             source.start()
-            row = source.store.get_video_by_url('https://www.twitch.tv/videos/vod-1')
+            row = source.videos.get_video_by_url('https://www.twitch.tv/videos/vod-1')
             assert row is not None
             assert row.thumbnail_url is None
 
             source.next_chunk()
 
-            row = source.store.get_video_by_url('https://www.twitch.tv/videos/vod-1')
+            row = source.videos.get_video_by_url('https://www.twitch.tv/videos/vod-1')
             assert row is not None
             assert row.thumbnail_url == 'https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg'
-            assert source.store.metadata_updates == [
+            assert source.videos.metadata_updates == [
                 {
                     'video_id': source.video_id,
                     'title': 'Live stream',
@@ -494,7 +509,7 @@ class TestLiveArchiveVODSource:
             source.next_chunk()
             source.next_chunk()
 
-            assert source.store.metadata_updates == []
+            assert source.videos.metadata_updates == []
 
     def test_refresh_updates_title_once_when_same_vod_title_changes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -529,10 +544,10 @@ class TestLiveArchiveVODSource:
             source.next_chunk()
             source.next_chunk()
 
-            row = source.store.get_video_by_url('https://www.twitch.tv/videos/vod-1')
+            row = source.videos.get_video_by_url('https://www.twitch.tv/videos/vod-1')
             assert row is not None
             assert row.title == 'Updated live title'
-            assert source.store.metadata_updates == [
+            assert source.videos.metadata_updates == [
                 {
                     'video_id': source.video_id,
                     'title': 'Updated live title',
@@ -549,8 +564,8 @@ class TestLiveArchiveVODSource:
             chunk = source.next_chunk()
 
             assert chunk is not None
-            assert source.store.vod_state['vod-1'].last_ingested_seconds == 0
+            assert source.videos.vod_state['vod-1'].last_ingested_seconds == 0
 
             source.stop()
 
-            assert source.store.vod_state['vod-1'].last_ingested_seconds == 0
+            assert source.videos.vod_state['vod-1'].last_ingested_seconds == 0

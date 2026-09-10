@@ -25,7 +25,7 @@ def _normalize_and_validate_streamer(request: Request, streamer: str | None) -> 
             },
         )
 
-    searchable_streamers = request.app.state.store.list_searchable_streamers()
+    searchable_streamers = request.app.state.videos.list_searchable_streamers()
     searchable_streamer_names = {item.name.strip().lower() for item in searchable_streamers}
     if normalized_streamer not in searchable_streamer_names:
         raise HTTPException(
@@ -43,7 +43,7 @@ def _resolve_creator_id(request: Request, streamer: str | None) -> int | None:
     normalized_streamer = (streamer or "").strip().lower()
     if not normalized_streamer:
         return None
-    return request.app.state.store.get_creator_id_by_name(normalized_streamer)
+    return request.app.state.videos.get_creator_id_by_name(normalized_streamer)
 
 
 @router.post(
@@ -124,7 +124,7 @@ def get_search_clip_job(request: Request, search_id: int) -> SearchJobResponse:
 
 @router.get("/search/streamers", response_model=list[StreamerListItem])
 def list_searchable_streamers(request: Request) -> list[StreamerListItem]:
-    streamers = request.app.state.store.list_searchable_streamers()
+    streamers = request.app.state.videos.list_searchable_streamers()
     return [
         StreamerListItem(
             name=item.name,

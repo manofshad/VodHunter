@@ -9,15 +9,17 @@ from pipeline.nmfp_inference import NMFP_HOP_SECONDS, NMFP_SAMPLE_RATE
 from sources.audio_chunk import AudioChunk
 from sources.audio_source import AudioSource
 from services.twitch_monitor import TwitchMonitor
+from storage.ingest_state_repository import IngestStateRepository
 from storage.records import VideoStatus
-from storage.vector_store import VectorStore
+from storage.video_repository import VideoRepository
 
 
 class LiveArchiveVODSource(AudioSource):
     def __init__(
         self,
         streamer: str,
-        store: VectorStore,
+        videos: VideoRepository,
+        ingest_states: IngestStateRepository,
         twitch_monitor: TwitchMonitor,
         chunk_seconds: int = 60,
         lag_seconds: int = 120,
@@ -26,7 +28,8 @@ class LiveArchiveVODSource(AudioSource):
         temp_dir: str = "temp_live_chunks",
     ):
         self.streamer = streamer.strip().lower()
-        self.store = store
+        self.videos = videos
+        self.ingest_states = ingest_states
         self.twitch_monitor = twitch_monitor
         self.chunk_seconds = int(chunk_seconds)
         self.lag_seconds = int(lag_seconds)
@@ -152,9 +155,9 @@ class LiveArchiveVODSource(AudioSource):
                 existing_status == VideoStatus.REINDEX_REQUESTED.value
                 and self._vod_platform_id is not None
             ):
-                self.store.delete_vod_ingest_state(self._vod_platform_id)
+                self.ingest_states.delete(self._vod_platform_id)
                 if self.video_id is not None:
-                    self.store.update_video_metadata(
+                    self.videos.update_video_metadata(
                         self.video_id,
                         status=VideoStatus.INDEXING.value,
                     )
@@ -195,7 +198,7 @@ class LiveArchiveVODSource(AudioSource):
         if self._user_profile is not None:
             creator_profile_image_url = str(self._user_profile.get("profile_image_url") or "") or None
         creator_url = f"https://twitch.tv/{self.streamer}"
-        creator_id = self.store.create_or_get_creator(
+        creator_id = self.videos.create_or_get_creator(
             self.streamer,
             creator_url,
             profile_image_url=creator_profile_image_url,
@@ -203,11 +206,11 @@ class LiveArchiveVODSource(AudioSource):
         self._creator_id = creator_id
         self._creator_profile_image_url = creator_profile_image_url
 
-        existing_video = self.store.get_video_by_url(self.current_vod_url)
+        existing_video = self.videos.get_video_by_url(self.current_vod_url)
         if existing_video is None:
             self._vod_title = incoming_title
             self._vod_thumbnail_url = incoming_thumbnail_url
-            self.video_id = self.store.create_video(
+            self.video_id = self.videos.create_video(
                 creator_id=creator_id,
                 url=self.current_vod_url,
                 title=self._vod_title,
@@ -234,8 +237,8 @@ class LiveArchiveVODSource(AudioSource):
             self._vod_title = existing_video.title
             self._vod_thumbnail_url = existing_video.thumbnail_url
             if existing_status == VideoStatus.REINDEX_REQUESTED.value:
-                self.store.delete_vod_ingest_state(self._vod_platform_id)
-            self.store.update_video_metadata(
+                self.ingest_states.delete(self._vod_platform_id)
+            self.videos.update_video_metadata(
                 self.video_id,
                 status=VideoStatus.INDEXING.value,
             )
@@ -244,7 +247,7 @@ class LiveArchiveVODSource(AudioSource):
                 thumbnail_url=incoming_thumbnail_url,
             )
 
-        state = self.store.get_vod_ingest_state(self._vod_platform_id)
+        state = self.ingest_states.get(self._vod_platform_id)
         if state is None:
             self.ingest_cursor_seconds = 0
         else:
@@ -260,10 +263,8 @@ class LiveArchiveVODSource(AudioSource):
     def _get_current_video_status(self) -> str | None:
         if self.video_id is None:
             return None
-        get_video_status = getattr(self.store, "get_video_status", None)
-        if not callable(get_video_status):
-            return None
-        return get_video_status(self.video_id)
+        status = self.videos.get_video_status(self.video_id)
+        return status.value if status is not None else None
 
     def _clear_active_vod(self, *, mark_finished: bool) -> None:
         self.video_id = None
@@ -286,7 +287,7 @@ class LiveArchiveVODSource(AudioSource):
 
         self._creator_profile_image_url = profile_image_url
         if profile_image_url is not None:
-            self.store.update_creator_metadata(self._creator_id, profile_image_url=profile_image_url)
+            self.videos.update_creator_metadata(self._creator_id, profile_image_url=profile_image_url)
 
     def _sync_video_metadata_if_changed(
         self,
@@ -308,7 +309,7 @@ class LiveArchiveVODSource(AudioSource):
         self._vod_title = title
         if should_update_thumbnail:
             self._vod_thumbnail_url = thumbnail_url
-        self.store.update_video_metadata(
+        self.videos.update_video_metadata(
             self.video_id,
             title=title,
             thumbnail_url=thumbnail_url if should_update_thumbnail else None,
@@ -411,7 +412,7 @@ class LiveArchiveVODSource(AudioSource):
         if self._vod_platform_id is None or self.video_id is None:
             return
 
-        self.store.upsert_vod_ingest_state(
+        self.ingest_states.upsert(
             vod_platform_id=self._vod_platform_id,
             video_id=self.video_id,
             streamer=self.streamer,
@@ -422,11 +423,7 @@ class LiveArchiveVODSource(AudioSource):
     def _finalize(self) -> None:
         self._commit_pending_progress()
         if self.video_id is not None:
-            update_video_status = getattr(self.store, "update_video_status", None)
-            if callable(update_video_status):
-                update_video_status(self.video_id, VideoStatus.SEARCHABLE.value)
-            else:
-                self.store.mark_video_processed(self.video_id, processed=True)
+            self.videos.update_video_status(self.video_id, VideoStatus.SEARCHABLE)
         if self._vod_platform_id is not None:
-            self.store.delete_vod_ingest_state(self._vod_platform_id)
+            self.ingest_states.delete(self._vod_platform_id)
         self._finished = True

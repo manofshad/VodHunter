@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 from fastapi.testclient import TestClient
 from backend.apps import public as public_app_module
+from backend.bootstrap_shared import SearchStack
 
 
 def _route_paths(routes) -> set[str]:
@@ -106,11 +107,24 @@ import backend.bootstrap_shared
     def test_public_lifespan_initializes_search_only(self) -> None:
         app = public_app_module.create_public_app(enable_lifespan=True)
         query_embedder = StubQueryEmbedder()
-        with patch('backend.bootstrap_shared.build_store_state', return_value={'store': object()}), patch('backend.bootstrap_shared.build_search_stack', return_value={'query_embedder': query_embedder, 'search_service': object(), 'search_manager': object()}):
+        jobs = SimpleNamespace(fail_incomplete_public_search_jobs=lambda **kwargs: None)
+        repositories = SimpleNamespace(
+            videos=object(),
+            fingerprints=object(),
+            ingest_states=object(),
+            search_jobs=jobs,
+        )
+        search_stack = SearchStack(
+            query_embedder=query_embedder,
+            search_service=object(),
+            search_manager=object(),
+        )
+        with patch('backend.bootstrap_shared.build_repositories', return_value=repositories), patch('backend.bootstrap_shared.build_search_stack', return_value=search_stack):
 
             async def run_lifespan() -> None:
                 async with app.router.lifespan_context(app):
-                    assert hasattr(app.state, 'store')
+                    assert hasattr(app.state, 'repositories')
+                    assert hasattr(app.state, 'videos')
                     assert hasattr(app.state, 'search_manager')
                     assert not hasattr(app.state, 'embedder')
             asyncio.run(run_lifespan())

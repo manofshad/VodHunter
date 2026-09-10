@@ -12,7 +12,7 @@ from search.models import (
     SearchSegment,
     SearchSource,
 )
-from storage.vector_store import (
+from storage.fingerprint_repository import (
     DEFAULT_NMFP_MODEL_VERSION,
     DEFAULT_NMFP_PREPROCESSING_VERSION,
     NMFP_VECTOR_DIM,
@@ -21,7 +21,7 @@ from storage.vector_store import (
 
 def _create_creator(store, scope, *, suffix: str = "") -> int:
     name = f"{scope.streamer}{suffix}"
-    creator_id = store.create_or_get_creator(
+    creator_id = store.videos.create_or_get_creator(
         name=name,
         url=f"https://www.twitch.tv/{name}",
         profile_image_url=f"https://cdn.example/{name}.png",
@@ -30,7 +30,7 @@ def _create_creator(store, scope, *, suffix: str = "") -> int:
 
 
 def _create_video(store, scope, creator_id: int, *, suffix: str = "") -> int:
-    video_id = store.create_video(
+    video_id = store.videos.create_video(
         creator_id=creator_id,
         url=f"https://www.twitch.tv/videos/{scope.token}{suffix}",
         title=f"Integration VOD {suffix or 'primary'}",
@@ -51,13 +51,13 @@ def test_migrated_schema_accepts_real_nmfp_vector_round_trip(store, database_sco
     timestamps = np.array([10.0, 10.5], dtype=np.float32)
     embeddings = np.zeros((2, NMFP_VECTOR_DIM), dtype=np.float32)
     embeddings[:, 0] = 1.0
-    fingerprint_ids = store.store_fingerprints(video_id, timestamps)
-    store.append_vectors(embeddings, fingerprint_ids, creator_id=creator_id)
+    fingerprint_ids = store.fingerprints.store_fingerprints(video_id, timestamps)
+    store.fingerprints.append_vectors(embeddings, fingerprint_ids, creator_id=creator_id)
 
-    other_fingerprint_ids = store.store_fingerprints(other_video_id, timestamps)
-    store.append_vectors(embeddings, other_fingerprint_ids, creator_id=other_creator_id)
+    other_fingerprint_ids = store.fingerprints.store_fingerprints(other_video_id, timestamps)
+    store.fingerprints.append_vectors(embeddings, other_fingerprint_ids, creator_id=other_creator_id)
 
-    candidates = store.query_fingerprint_candidates(
+    candidates = store.fingerprints.query_fingerprint_candidates(
         query_embeddings=embeddings[:1],
         query_timestamps=np.array([0.0], dtype=np.float32),
         top_k=10,
@@ -71,7 +71,7 @@ def test_migrated_schema_accepts_real_nmfp_vector_round_trip(store, database_sco
     assert {candidate.fingerprint_id for candidate in candidates} == set(fingerprint_ids)
     assert all(candidate.similarity > 0.99 for candidate in candidates)
 
-    streamers = store.list_searchable_streamers()
+    streamers = store.videos.list_searchable_streamers()
     assert {item.name for item in streamers} >= {database_scope.streamer, f"{database_scope.streamer}-other"}
 
 
@@ -80,19 +80,19 @@ def test_search_job_payload_survives_real_database_round_trip(store, database_sc
     creator_id = _create_creator(store, database_scope)
     video_id = _create_video(store, database_scope, creator_id)
     search_id = database_scope.remember_search(
-        store.create_public_search_job(
+        store.search_jobs.create_public_search_job(
             tiktok_url="https://www.tiktok.com/@integration/video/123456789",
             streamer=database_scope.streamer,
             creator_id=creator_id,
         )
     )
 
-    queued = store.get_public_search_job(search_id)
+    queued = store.search_jobs.get_public_search_job(search_id)
     assert queued is not None
     assert queued.status == "queued"
     assert queued.result is None
 
-    store.update_search_job_status(
+    store.search_jobs.update_search_job_status(
         search_id,
         status="running",
         stage="fingerprinting",
@@ -147,9 +147,9 @@ def test_search_job_payload_survives_real_database_round_trip(store, database_sc
         total_duration_ms=1234,
     )
 
-    store.complete_search_job(search_id, outcome)
+    store.search_jobs.complete_search_job(search_id, outcome)
 
-    completed = store.get_public_search_job(search_id)
+    completed = store.search_jobs.get_public_search_job(search_id)
     assert completed is not None
     assert completed.status == "completed"
     assert completed.stage is None

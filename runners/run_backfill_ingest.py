@@ -16,16 +16,11 @@ if str(ROOT_DIR) not in sys.path:
 load_dotenv(ROOT_DIR / ".env")
 
 from backend.bootstrap_ingest import build_ingest_state
-from backend.bootstrap_shared import build_store_state
+from backend.bootstrap_shared import build_repositories
 from pipeline.ingest_session import IngestSession
 from services.twitch_monitor import TwitchMonitor
-from storage.vector_store import (
-    VIDEO_STATUS_DELETED,
-    VIDEO_STATUS_INDEXING,
-    VIDEO_STATUS_REINDEX_REQUESTED,
-    VIDEO_STATUS_SEARCHABLE,
-)
-from storage.records import VodIngestStateRecord, VideoRecord
+from storage.records import VodIngestStateRecord, VideoRecord, VideoStatus
+from storage.repositories import Repositories
 from sources.historical_archive_vod_source import HistoricalArchiveVODSource
 
 
@@ -48,31 +43,27 @@ class FreshNMFPReindexPreconditionError(RuntimeError):
 
 def _get_existing_video_status(
     existing_video: VideoRecord | None,
-) -> str | None:
+) -> VideoStatus | None:
     if existing_video is None:
         return None
-    return (
-        existing_video.status.value
-        if existing_video.status is not None
-        else None
-    )
+    return existing_video.status
 
 
 def _classify_backfill_candidate(
     existing_video: VideoRecord | None,
     existing_state: VodIngestStateRecord | None,
-) -> tuple[bool, str | None, bool]:
+) -> tuple[bool, VideoStatus | str | None, bool]:
     if existing_video is None:
         return True, None, False
 
     existing_status = _get_existing_video_status(existing_video)
-    if existing_status == VIDEO_STATUS_REINDEX_REQUESTED:
+    if existing_status is VideoStatus.REINDEX_REQUESTED:
         return True, existing_status, True
-    if existing_status == VIDEO_STATUS_INDEXING:
+    if existing_status is VideoStatus.INDEXING:
         if existing_state is not None:
             return True, existing_status, False
         return False, existing_status, False
-    if existing_status in {VIDEO_STATUS_SEARCHABLE, VIDEO_STATUS_DELETED}:
+    if existing_status in {VideoStatus.SEARCHABLE, VideoStatus.DELETED}:
         return False, existing_status, False
 
     if existing_video.processed:
@@ -81,7 +72,8 @@ def _classify_backfill_candidate(
 
 
 def _validate_fresh_nmfp_reindex(
-    store: object,
+    videos: object,
+    ingest_states: object,
     vods: list[dict[str, object]],
 ) -> None:
     """Fail closed unless the schema migration prepared every retained VOD.
@@ -97,8 +89,8 @@ def _validate_fresh_nmfp_reindex(
     for vod in vods:
         vod_id = str(vod.get("id") or "").strip() or "<missing>"
         vod_url = str(vod.get("url") or "").strip()
-        existing_video = store.get_video_by_url(vod_url)
-        existing_state = store.get_vod_ingest_state(vod_id)
+        existing_video = videos.get_video_by_url(vod_url)
+        existing_state = ingest_states.get(vod_id)
 
         if existing_video is None:
             if existing_state is not None:
@@ -106,10 +98,10 @@ def _validate_fresh_nmfp_reindex(
             continue
 
         existing_status = _get_existing_video_status(existing_video)
-        if existing_status in {VIDEO_STATUS_REINDEX_REQUESTED, VIDEO_STATUS_DELETED}:
+        if existing_status in {VideoStatus.REINDEX_REQUESTED, VideoStatus.DELETED}:
             continue
 
-        fallback_status = existing_status
+        fallback_status = existing_status.value if existing_status is not None else None
         if fallback_status is None:
             fallback_status = "processed" if existing_video.processed else "unknown"
         problems.append(
@@ -147,7 +139,7 @@ def run_backfill_ingest(
     *,
     fresh_nmfp_reindex: bool = False,
     monitor: TwitchMonitor | None = None,
-    build_store: Callable[[], dict[str, object]] = build_store_state,
+    build_storage: Callable[[], Repositories] = build_repositories,
     build_ingest: Callable[[], dict[str, object]] = build_ingest_state,
     source_factory: Callable[..., HistoricalArchiveVODSource] = HistoricalArchiveVODSource,
     session_factory: Callable[..., IngestSession] = IngestSession,
@@ -159,8 +151,10 @@ def run_backfill_ingest(
     if int(days) < 1:
         raise ValueError("days must be >= 1")
 
-    store_state = build_store()
-    store = store_state["store"]
+    repositories = build_storage()
+    videos = repositories.videos
+    ingest_states = repositories.ingest_states
+    fingerprints = repositories.fingerprints
 
     twitch_monitor = monitor or TwitchMonitor.from_env()
     creator_metadata = twitch_monitor.get_user_profile(normalized_streamer)
@@ -169,7 +163,7 @@ def run_backfill_ingest(
     vods = twitch_monitor.list_archive_vods_since(user_id=user_id, created_after=cutoff)
 
     if fresh_nmfp_reindex:
-        _validate_fresh_nmfp_reindex(store, vods)
+        _validate_fresh_nmfp_reindex(videos, ingest_states, vods)
         out(
             "fresh_nmfp_reindex preflight=passed "
             f"streamer={normalized_streamer} vod_count={len(vods)} resume_allowed=false"
@@ -181,8 +175,8 @@ def run_backfill_ingest(
     result = BackfillResult()
     total_vods = len(vods)
     for index, vod in enumerate(vods, start=1):
-        existing_video = store.get_video_by_url(str(vod["url"]))
-        existing_state = store.get_vod_ingest_state(str(vod["id"]))
+        existing_video = videos.get_video_by_url(str(vod["url"]))
+        existing_state = ingest_states.get(str(vod["id"]))
         is_eligible, skip_reason, restart_from_scratch = _classify_backfill_candidate(
             existing_video,
             existing_state,
@@ -194,9 +188,7 @@ def run_backfill_ingest(
             continue
 
         if restart_from_scratch and existing_state is not None:
-            delete_vod_ingest_state = getattr(store, "delete_vod_ingest_state", None)
-            if callable(delete_vod_ingest_state):
-                delete_vod_ingest_state(str(vod["id"]))
+            ingest_states.delete(str(vod["id"]))
             existing_state = None
 
         starting_cursor = 0
@@ -227,7 +219,8 @@ def run_backfill_ingest(
             streamer=normalized_streamer,
             vod_metadata=vod,
             creator_metadata=creator_metadata,
-            store=store,
+            videos=videos,
+            ingest_states=ingest_states,
             chunk_seconds=INGEST_CHUNK_SECONDS,
             temp_dir=BACKFILL_TEMP_DIR,
             progress_callback=emit_progress,
@@ -236,7 +229,7 @@ def run_backfill_ingest(
         session = session_factory(
             source=source,
             embedder=embedder,
-            store=store,
+            fingerprints=fingerprints,
             poll_interval=SESSION_POLL_INTERVAL,
         )
 
