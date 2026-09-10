@@ -36,27 +36,25 @@ NMFP only reports ranges with enough consistent evidence. Very short sections, f
 
 ## Cut-aware alignment defaults
 
-All alignment thresholds are environment-configurable:
-
-| Setting | Default | Environment variable |
-|---|---:|---|
-| neighbors per fingerprint | 10 | `SEARCH_TOP_K` |
-| fingerprint hop | 0.5 s | `NMFP_HOP_SECONDS` |
-| offset bin | 0.5 s | `CUT_OFFSET_BIN_SECONDS` |
-| offset tolerance within a track | +/- 1 s | `CUT_OFFSET_TOLERANCE_SECONDS` |
-| maximum unsupported gap | 2 s | `CUT_MAX_UNMATCHED_GAP_SECONDS` |
-| minimum support | 6 fingerprints | `CUT_MIN_SUPPORT` |
-| minimum segment duration | 4 s | `CUT_MIN_SEGMENT_DURATION_SECONDS` |
-| minimum density | 0.4 | `CUT_MIN_DENSITY` |
-| merge query gap | 1 s | `CUT_MERGE_QUERY_GAP_SECONDS` |
-| merge offset tolerance | 4 s | `CUT_MERGE_OFFSET_TOLERANCE_SECONDS` |
-| maximum returned segments | 12 | `CUT_MAX_SEGMENTS` |
-
-Treat these as tuned defaults, not guarantees. Evaluate changes against representative edits before rollout.
+Alignment thresholds are code-owned defaults in
+`search/alignment_service.py`. The current defaults are 10 neighbors per
+fingerprint, a 0.5-second fingerprint hop, a 0.5-second offset bin, +/-1
+second offset tolerance, a 2-second unsupported-gap limit, six-fingerprint
+minimum support, a 4-second minimum segment, 0.4 minimum density, a 1-second
+merge gap, a 4-second merge offset tolerance, and at most 12 returned
+segments. Treat these as tuned defaults, not guarantees; evaluate code changes
+against representative edits before rollout.
 
 ## Setup and operations
 
-Copy `.env.example` to an ignored `.env`, fill secrets locally, and keep the pinned NMFP values unchanged. The production API uses Python 3.11 and installs the TensorFlow/Essentia NMFP runtime from the backend requirements files. The pinned upstream repository and checkpoint must be present before startup; the public Docker image bakes them in and verifies their immutable identities.
+Copy `.env.example` to an ignored `.env` and fill in deployment values and
+secrets locally. NMFP's model, preprocessing, sample-rate, window, hop, and
+vector-dimension identity is pinned in code; only the repository and model
+configuration paths vary by environment. The production API uses Python 3.11
+and installs the TensorFlow/Essentia NMFP runtime from the backend requirements
+files. The pinned upstream repository and checkpoint must be present before
+startup; the public Docker image bakes them in and verifies their immutable
+identities.
 
 For the self-hosted VPS stack, see [VPS deployment](docs/vps-deployment.md). It provides PostgreSQL/pgvector, the public API, the polling worker, and the public site. Production HTTPS and public routing are supplied by the hosting platform.
 

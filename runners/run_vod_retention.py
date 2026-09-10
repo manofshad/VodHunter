@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import argparse
 import logging
+import os
 from pathlib import Path
 import sys
 import time
@@ -17,7 +18,6 @@ if str(ROOT_DIR) not in sys.path:
 
 load_dotenv(ROOT_DIR / ".env")
 
-from backend import config
 from services.vod_retention import VodRetentionResult, purge_expired_vods
 
 
@@ -45,10 +45,16 @@ def run_once(
     retention_days: int | None = None,
     purge: Callable[..., VodRetentionResult] = purge_expired_vods,
 ) -> VodRetentionResult:
-    if database_url is None or retention_days is None:
-        config.validate_vod_retention_config()
-    resolved_database_url = config.DATABASE_URL if database_url is None else database_url
-    resolved_retention_days = config.VOD_RETENTION_DAYS if retention_days is None else retention_days
+    resolved_database_url = (
+        database_url
+        if database_url is not None
+        else os.getenv("DATABASE_URL", "").strip()
+    )
+    resolved_retention_days = (
+        retention_days
+        if retention_days is not None
+        else int(os.getenv("VOD_RETENTION_DAYS", "30"))
+    )
 
     result = purge(
         resolved_database_url,

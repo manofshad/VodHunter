@@ -4,6 +4,8 @@ import shutil
 import subprocess
 import uuid
 
+from pipeline.nmfp_inference import NMFP_SAMPLE_RATE
+
 
 class QueryPreprocessor:
     def __init__(self, temp_dir: str):
@@ -35,7 +37,7 @@ class QueryPreprocessor:
         cmd.extend([
             "-vn",
             "-ar",
-            "8000",
+            str(NMFP_SAMPLE_RATE),
             "-ac",
             "1",
             "-c:a",

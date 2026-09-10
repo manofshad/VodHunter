@@ -4,7 +4,6 @@ from secrets import compare_digest
 
 from fastapi import APIRouter, Header, HTTPException, Request
 
-from backend import config
 from backend.schemas import (
     ErrorResponse,
     InternalVideoMutationRequest,
@@ -24,8 +23,11 @@ def _raise_api_error(status_code: int, code: str, message: str) -> None:
     raise HTTPException(status_code=status_code, detail={"code": code, "message": message})
 
 
-def _require_internal_api_key(x_internal_api_key: str | None = Header(default=None)) -> None:
-    configured_key = config.INTERNAL_API_KEY
+def _require_internal_api_key(
+    request: Request,
+    x_internal_api_key: str | None = Header(default=None),
+) -> None:
+    configured_key = getattr(request.app.state, "internal_api_key", "")
     provided_key = x_internal_api_key or ""
     if not configured_key or not compare_digest(provided_key, configured_key):
         _raise_api_error(
@@ -69,7 +71,7 @@ def delete_video_index(
     request: Request,
     x_internal_api_key: str | None = Header(default=None, alias="X-Internal-Api-Key"),
 ) -> InternalVideoMutationResponse:
-    _require_internal_api_key(x_internal_api_key)
+    _require_internal_api_key(request, x_internal_api_key)
     try:
         status = request.app.state.store.delete_video_index(video_id, payload.actor_creator_id)
     except Exception as exc:
@@ -94,7 +96,7 @@ def request_video_reindex(
     request: Request,
     x_internal_api_key: str | None = Header(default=None, alias="X-Internal-Api-Key"),
 ) -> InternalVideoMutationResponse:
-    _require_internal_api_key(x_internal_api_key)
+    _require_internal_api_key(request, x_internal_api_key)
     try:
         status = request.app.state.store.request_video_reindex(video_id, payload.actor_creator_id)
     except Exception as exc:

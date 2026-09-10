@@ -15,9 +15,8 @@ if str(ROOT_DIR) not in sys.path:
 
 load_dotenv(ROOT_DIR / ".env")
 
-from backend import config
 from backend.bootstrap_ingest import build_ingest_state
-from backend.bootstrap_shared import build_store_state, prepare_runtime_dirs
+from backend.bootstrap_shared import build_store_state
 from pipeline.ingest_session import IngestSession
 from services.twitch_monitor import TwitchMonitor
 from storage.vector_store import (
@@ -27,6 +26,11 @@ from storage.vector_store import (
     VIDEO_STATUS_SEARCHABLE,
 )
 from sources.historical_archive_vod_source import HistoricalArchiveVODSource
+
+
+INGEST_CHUNK_SECONDS = 60
+SESSION_POLL_INTERVAL = 0.5
+BACKFILL_TEMP_DIR = str(ROOT_DIR / "data" / "temp_backfill_chunks")
 
 
 @dataclass
@@ -160,7 +164,6 @@ def run_backfill_ingest(
     if int(days) < 1:
         raise ValueError("days must be >= 1")
 
-    prepare_runtime_dirs()
     store_state = build_store()
     store = store_state["store"]
 
@@ -231,8 +234,8 @@ def run_backfill_ingest(
             vod_metadata=vod,
             creator_metadata=creator_metadata,
             store=store,
-            chunk_seconds=config.INGEST_CHUNK_SECONDS,
-            temp_dir=config.TEMP_BACKFILL_DIR,
+            chunk_seconds=INGEST_CHUNK_SECONDS,
+            temp_dir=BACKFILL_TEMP_DIR,
             progress_callback=emit_progress,
         )
 
@@ -240,7 +243,7 @@ def run_backfill_ingest(
             source=source,
             embedder=embedder,
             store=store,
-            poll_interval=config.SESSION_POLL_INTERVAL,
+            poll_interval=SESSION_POLL_INTERVAL,
         )
 
         try:

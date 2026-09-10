@@ -15,29 +15,27 @@ Before shipping:
 
 The product owner confirmed that the licensing decision for the AGPLv3 upstream code and separately distributed checkpoint is resolved for this migration. Packaging must still preserve applicable third-party notices and terms.
 
-Changing the repository commit, checkpoint, configuration, sample rate, windowing, hop, or embedding dimension creates a new fingerprint identity. Update all pinned identifiers together and rebuild the complete index; never mix identities in one searchable index.
+Changing the repository commit, checkpoint, model configuration, sample rate,
+windowing, hop, or embedding dimension creates a new fingerprint identity.
+Update all pinned identifiers together and rebuild the complete index; never
+mix identities in one searchable index.
 
 ## Environment
 
 Start with `.env.example`. Secret values belong only in the ignored `.env` or the deployment platform's secret store.
 
-The alignment settings are deliberately configurable:
-
-```text
-SEARCH_TOP_K=10
-NMFP_HOP_SECONDS=0.5
-CUT_OFFSET_BIN_SECONDS=0.5
-CUT_OFFSET_TOLERANCE_SECONDS=1.0
-CUT_MAX_UNMATCHED_GAP_SECONDS=2.0
-CUT_MIN_SUPPORT=6
-CUT_MIN_SEGMENT_DURATION_SECONDS=4.0
-CUT_MIN_DENSITY=0.4
-CUT_MERGE_QUERY_GAP_SECONDS=1.0
-CUT_MERGE_OFFSET_TOLERANCE_SECONDS=4.0
-CUT_MAX_SEGMENTS=12
-```
-
-Tune these only with a representative evaluation set. Lowering support or duration thresholds increases the chance that isolated neighbors become false tracks. The aligner cannot guarantee matches for tiny sections, silence, completely overlaid source audio, or strongly transformed audio; it returns those portions in `unmatched_ranges` when evidence is insufficient.
+Alignment thresholds are code-owned defaults in
+`search/alignment_service.py`: 10 neighbors per fingerprint, a 0.5-second
+fingerprint hop, a 0.5-second offset bin, +/-1 second offset tolerance, a
+2-second unsupported-gap limit, six-fingerprint minimum support, a 4-second
+minimum segment, 0.4 minimum density, a 1-second merge gap, a 4-second merge
+offset tolerance, and at most 12 returned segments. Tune these only with a
+representative evaluation set and change them in code with corresponding test
+coverage. Lowering support or duration thresholds increases the chance that
+isolated neighbors become false tracks. The aligner cannot guarantee matches
+for tiny sections, silence, completely overlaid source audio, or strongly
+transformed audio; it returns those portions in `unmatched_ranges` when
+evidence is insufficient.
 
 ## Fresh schema and index
 

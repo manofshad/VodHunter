@@ -308,7 +308,7 @@ class TestRemoteClipDownloader:
                     "https://www.tiktok.com/t/ZP8ctwC2V/?x=1"
                 )
 
-            connection_factory.assert_called_once_with("www.tiktok.com", timeout=20.0)
+            connection_factory.assert_called_once_with("www.tiktok.com", timeout=10.0)
             assert status == 301
             assert location == "https://www.tiktok.com/@demo/video/1234567890"
             assert connection.request_args[0] == "GET"

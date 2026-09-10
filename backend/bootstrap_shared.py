@@ -1,31 +1,27 @@
 from __future__ import annotations
 
-import os
 import logging
+import os
 
-from backend import config
+from pipeline.nmfp_inference import (
+    NMFP_EMBEDDING_DIM,
+    NMFP_MODEL_VERSION,
+    NMFP_PREPROCESSING_VERSION,
+    model_artifact_identity,
+)
 from storage.vector_store import VectorStore
 
 
 logger = logging.getLogger("uvicorn.error")
 
 
-def prepare_runtime_dirs() -> None:
-    os.makedirs(config.DATA_DIR, exist_ok=True)
-    os.makedirs(config.TEMP_BACKFILL_DIR, exist_ok=True)
-    os.makedirs(config.TEMP_SEARCH_DOWNLOAD_DIR, exist_ok=True)
-
-
-def build_store_state() -> dict[str, object]:
-    config.validate_storage_config()
-    config.validate_nmfp_config()
-
+def build_store_state(database_url: str | None = None) -> dict[str, object]:
     store = VectorStore(
-        database_url=config.DATABASE_URL,
-        vector_dim=config.VECTOR_DIM,
-        hnsw_ef_search=config.HNSW_EF_SEARCH,
-        model_version=config.NMFP_MODEL_VERSION,
-        preprocessing_version=config.NMFP_PREPROCESSING_VERSION,
+        database_url=(
+            database_url
+            if database_url is not None
+            else os.getenv("DATABASE_URL", "").strip()
+        ),
     )
     store.ensure_schema_ready()
 
@@ -34,19 +30,17 @@ def build_store_state() -> dict[str, object]:
 
 def build_local_query_embedder():
     from pipeline.embedder import Embedder
-    from pipeline.nmfp_inference import model_artifact_identity
     from search.local_query_embedder import LocalQueryEmbedder
 
-    config.validate_nmfp_config()
     local_embedder = Embedder()
-    if local_embedder.embedding_dim != config.VECTOR_DIM:
+    if local_embedder.embedding_dim != NMFP_EMBEDDING_DIM:
         raise ValueError(
             f"Local NMFP embedding dimension {local_embedder.embedding_dim} "
-            f"does not match VECTOR_DIM {config.VECTOR_DIM}"
+            f"does not match NMFP embedding dimension {NMFP_EMBEDDING_DIM}"
         )
-    if local_embedder.model_version != config.NMFP_MODEL_VERSION:
+    if local_embedder.model_version != NMFP_MODEL_VERSION:
         raise ValueError("Local NMFP model version does not match the production index")
-    if local_embedder.preprocessing_version != config.NMFP_PREPROCESSING_VERSION:
+    if local_embedder.preprocessing_version != NMFP_PREPROCESSING_VERSION:
         raise ValueError("Local NMFP preprocessing version does not match the production index")
 
     startup_ms = local_embedder.load()
@@ -65,6 +59,9 @@ def build_local_query_embedder():
 def build_search_stack(
     store: VectorStore,
     max_duration_seconds: int | None,
+    *,
+    download_temp_dir: str,
+    preprocess_temp_dir: str,
 ) -> dict[str, object]:
     from backend.services.remote_clip_downloader import RemoteClipDownloader
     from backend.services.search_manager import SearchManager
@@ -73,39 +70,19 @@ def build_search_stack(
     from search.search_service import SearchService
 
     query_embedder = build_local_query_embedder()
+    alignment_config = AlignmentConfig()
     search_service = SearchService(
         store=store,
-        preprocessor=QueryPreprocessor(temp_dir=config.TEMP_SEARCH_PREPROCESS_DIR),
+        preprocessor=QueryPreprocessor(temp_dir=preprocess_temp_dir),
         query_embedder=query_embedder,
-        alignment=AlignmentService(
-            config=AlignmentConfig(
-                top_k=config.SEARCH_TOP_K,
-                fingerprint_hop_seconds=config.NMFP_HOP_SECONDS,
-                offset_bin_seconds=config.CUT_OFFSET_BIN_SECONDS,
-                offset_tolerance_seconds=config.CUT_OFFSET_TOLERANCE_SECONDS,
-                max_unmatched_gap_seconds=config.CUT_MAX_UNMATCHED_GAP_SECONDS,
-                min_support=config.CUT_MIN_SUPPORT,
-                min_segment_duration_seconds=config.CUT_MIN_SEGMENT_DURATION_SECONDS,
-                min_density=config.CUT_MIN_DENSITY,
-                min_score=config.CUT_MIN_SCORE,
-                merge_query_gap_seconds=config.CUT_MERGE_QUERY_GAP_SECONDS,
-                merge_offset_tolerance_seconds=config.CUT_MERGE_OFFSET_TOLERANCE_SECONDS,
-                max_segments=config.CUT_MAX_SEGMENTS,
-            ),
-        ),
-        top_k=config.SEARCH_TOP_K,
+        alignment=AlignmentService(config=alignment_config),
+        top_k=alignment_config.top_k,
     )
 
     search_manager = SearchManager(
         search_service=search_service,
         remote_downloader=RemoteClipDownloader(
-            temp_dir=config.TEMP_SEARCH_DOWNLOAD_DIR,
-            timeout_seconds=config.TIKTOK_DOWNLOAD_TIMEOUT_SECONDS,
-            resolve_timeout_seconds=config.TIKTOK_LINK_RESOLVE_TIMEOUT_SECONDS,
-            resolve_attempts=config.TIKTOK_LINK_RESOLVE_ATTEMPTS,
-            max_resolve_redirects=config.TIKTOK_LINK_MAX_REDIRECTS,
-            resolve_retry_delay_seconds=config.TIKTOK_LINK_RESOLVE_RETRY_DELAY_SECONDS,
-            max_file_mb=config.TIKTOK_MAX_FILE_MB,
+            temp_dir=download_temp_dir,
         ),
         max_duration_seconds=max_duration_seconds,
     )
