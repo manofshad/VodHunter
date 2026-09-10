@@ -23,6 +23,7 @@ from pipeline.ingest_session import IngestSession
 from services.twitch_monitor import TwitchMonitor
 from sources.historical_archive_vod_source import HistoricalArchiveVODSource
 from sources.live_archive_vod_source import LiveArchiveVODSource
+from storage.records import VodIngestStateRecord, VideoRecord, VideoStatus
 
 
 INGEST_CHUNK_SECONDS = 60
@@ -60,7 +61,7 @@ class SessionRunHandle:
 @dataclass
 class BacklogCandidate:
     vod: dict[str, object]
-    existing_state: dict[str, object] | None
+    existing_state: VodIngestStateRecord | None
 
 
 @dataclass
@@ -70,27 +71,22 @@ class BacklogRunOutcome:
     error: Exception | None = None
 
 
-VIDEO_STATUS_INDEXING = "indexing"
-VIDEO_STATUS_SEARCHABLE = "searchable"
-VIDEO_STATUS_DELETED = "deleted"
-VIDEO_STATUS_REINDEX_REQUESTED = "reindex_requested"
+VIDEO_STATUS_INDEXING = VideoStatus.INDEXING.value
+VIDEO_STATUS_SEARCHABLE = VideoStatus.SEARCHABLE.value
+VIDEO_STATUS_DELETED = VideoStatus.DELETED.value
+VIDEO_STATUS_REINDEX_REQUESTED = VideoStatus.REINDEX_REQUESTED.value
 
 
 def _get_existing_video_status(
-    store: object,
-    existing_video: tuple[object, ...] | None,
+    existing_video: VideoRecord | None,
 ) -> str | None:
     if existing_video is None:
         return None
-
-    get_video_status = getattr(store, "get_video_status", None)
-    if not callable(get_video_status):
-        return None
-
-    status = get_video_status(int(existing_video[0]))
-    if status is None:
-        return None
-    return str(status).strip().lower() or None
+    return (
+        existing_video.status.value
+        if existing_video.status is not None
+        else None
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -209,11 +205,11 @@ def run_hybrid_ingest(
                     f"vod={vod_id} url={vod['url']}"
                 )
 
-            if candidate.existing_state is not None and int(candidate.existing_state.get("last_ingested_seconds", 0)) > 0:
+            if candidate.existing_state is not None and candidate.existing_state.last_ingested_seconds > 0:
                 result.resumed += 1
                 out(
                     f"resume mode=backlog vod={vod_id} "
-                    f"cursor={int(candidate.existing_state['last_ingested_seconds'])}"
+                    f"cursor={candidate.existing_state.last_ingested_seconds}"
                 )
 
             backlog_outcome = _run_backlog_session(
@@ -277,7 +273,7 @@ def _build_backlog(
     for vod in vods:
         vod_id = str(vod["id"])
         existing_video = store.get_video_by_url(str(vod["url"]))
-        existing_status = _get_existing_video_status(store, existing_video)
+        existing_status = _get_existing_video_status(existing_video)
         existing_state = store.get_vod_ingest_state(vod_id)
 
         if existing_status == VIDEO_STATUS_REINDEX_REQUESTED:
@@ -303,7 +299,7 @@ def _build_backlog(
                 out(f"skip {existing_status} vod={vod_id} url={vod['url']}")
             continue
 
-        if existing_video is not None and bool(existing_video[5]):
+        if existing_video is not None and existing_video.processed:
             if vod_id not in skipped_vods_logged:
                 skipped_vods_logged.add(vod_id)
                 out(f"skip processed vod={vod_id} url={vod['url']}")
@@ -313,7 +309,7 @@ def _build_backlog(
             backlog.append(BacklogCandidate(vod=vod, existing_state=existing_state))
             continue
 
-        if existing_video is None or not bool(existing_video[5]):
+        if existing_video is None or not existing_video.processed:
             backlog.append(BacklogCandidate(vod=vod, existing_state=None))
             continue
 
@@ -352,7 +348,7 @@ def _run_backlog_session(
     *,
     streamer: str,
     vod: dict[str, object],
-    existing_state: dict[str, object] | None,
+    existing_state: VodIngestStateRecord | None,
     store: object,
     embedder: object,
     twitch_monitor: TwitchMonitor,
@@ -364,7 +360,7 @@ def _run_backlog_session(
     backlog_live_poll_seconds: float,
 ) -> BacklogRunOutcome:
     creator_metadata = twitch_monitor.get_user_profile(streamer, force_refresh=True)
-    starting_cursor = 0 if existing_state is None else int(existing_state.get("last_ingested_seconds", 0))
+    starting_cursor = 0 if existing_state is None else existing_state.last_ingested_seconds
     vod_id = str(vod["id"])
     out(f"starting mode=backlog vod={vod_id} url={vod['url']} cursor={starting_cursor} backlog={backlog_size}")
 

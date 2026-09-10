@@ -9,6 +9,7 @@ from pipeline.nmfp_inference import NMFP_HOP_SECONDS, NMFP_SAMPLE_RATE
 from sources.audio_chunk import AudioChunk
 from sources.audio_source import AudioSource
 from services.twitch_monitor import TwitchMonitor
+from storage.records import VideoStatus
 from storage.vector_store import VectorStore
 
 
@@ -141,13 +142,22 @@ class LiveArchiveVODSource(AudioSource):
             self._switch_to_vod(latest_vod)
         else:
             existing_status = self._get_current_video_status()
-            if existing_status in {"deleted", "searchable"}:
+            if existing_status in {
+                VideoStatus.DELETED.value,
+                VideoStatus.SEARCHABLE.value,
+            }:
                 self._clear_active_vod(mark_finished=True)
                 return
-            if existing_status == "reindex_requested" and self._vod_platform_id is not None:
+            if (
+                existing_status == VideoStatus.REINDEX_REQUESTED.value
+                and self._vod_platform_id is not None
+            ):
                 self.store.delete_vod_ingest_state(self._vod_platform_id)
                 if self.video_id is not None:
-                    self.store.update_video_metadata(self.video_id, status="indexing")
+                    self.store.update_video_metadata(
+                        self.video_id,
+                        status=VideoStatus.INDEXING.value,
+                    )
                 self.ingest_cursor_seconds = 0
                 self._last_seen_duration_seconds = 0
                 self._pending_commit_end_seconds = None
@@ -204,24 +214,31 @@ class LiveArchiveVODSource(AudioSource):
                 thumbnail_url=self._vod_thumbnail_url,
                 processed=False,
                 streamed_at=streamed_at,
-                status="indexing",
+                status=VideoStatus.INDEXING.value,
             )
         else:
-            self.video_id = int(existing_video[0])
-            existing_status = None
-            get_video_status = getattr(self.store, "get_video_status", None)
-            if callable(get_video_status):
-                existing_status = get_video_status(self.video_id)
-            if existing_status in {"deleted", "searchable"}:
-                self._vod_title = str(existing_video[3])
-                self._vod_thumbnail_url = str(existing_video[4]) if existing_video[4] is not None else None
+            self.video_id = existing_video.id
+            existing_status = (
+                existing_video.status.value
+                if existing_video.status is not None
+                else None
+            )
+            if existing_status in {
+                VideoStatus.DELETED.value,
+                VideoStatus.SEARCHABLE.value,
+            }:
+                self._vod_title = existing_video.title
+                self._vod_thumbnail_url = existing_video.thumbnail_url
                 self._clear_active_vod(mark_finished=True)
                 return
-            self._vod_title = str(existing_video[3])
-            self._vod_thumbnail_url = str(existing_video[4]) if existing_video[4] is not None else None
-            if existing_status == "reindex_requested":
+            self._vod_title = existing_video.title
+            self._vod_thumbnail_url = existing_video.thumbnail_url
+            if existing_status == VideoStatus.REINDEX_REQUESTED.value:
                 self.store.delete_vod_ingest_state(self._vod_platform_id)
-            self.store.update_video_metadata(self.video_id, status="indexing")
+            self.store.update_video_metadata(
+                self.video_id,
+                status=VideoStatus.INDEXING.value,
+            )
             self._sync_video_metadata_if_changed(
                 title=incoming_title,
                 thumbnail_url=incoming_thumbnail_url,
@@ -231,8 +248,8 @@ class LiveArchiveVODSource(AudioSource):
         if state is None:
             self.ingest_cursor_seconds = 0
         else:
-            self.ingest_cursor_seconds = int(state.get("last_ingested_seconds", 0))
-            self._last_seen_duration_seconds = int(state.get("last_seen_duration_seconds", 0))
+            self.ingest_cursor_seconds = state.last_ingested_seconds
+            self._last_seen_duration_seconds = state.last_seen_duration_seconds
 
         self._pending_commit_end_seconds = None
         self._pending_chunk_path = None
@@ -407,7 +424,7 @@ class LiveArchiveVODSource(AudioSource):
         if self.video_id is not None:
             update_video_status = getattr(self.store, "update_video_status", None)
             if callable(update_video_status):
-                update_video_status(self.video_id, "searchable")
+                update_video_status(self.video_id, VideoStatus.SEARCHABLE.value)
             else:
                 self.store.mark_video_processed(self.video_id, processed=True)
         if self._vod_platform_id is not None:

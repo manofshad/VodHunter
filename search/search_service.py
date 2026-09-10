@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 import logging
 import time
 from typing import Callable
@@ -23,6 +23,13 @@ from search.twitch_time import build_twitch_timestamp_url
 from storage.vector_store import VectorStore
 
 logger = logging.getLogger("uvicorn.error")
+
+
+@dataclass(frozen=True, slots=True)
+class _RankedSourceEntry:
+    is_primary: bool
+    representative: SearchSegment
+    source: SearchSource
 
 
 def _duration_ms(seconds: float | None) -> int | None:
@@ -231,7 +238,7 @@ class SearchService:
                 timestamp_url = None
                 if row is not None:
                     timestamp_url = build_twitch_timestamp_url(
-                        row[1], int(round(segment.vod_start))
+                        row.url, int(round(segment.vod_start))
                     )
                 segments.append(replace(segment, video_url_at_timestamp=timestamp_url))
 
@@ -239,7 +246,7 @@ class SearchService:
             for segment in segments:
                 segments_by_video_id.setdefault(segment.video_id, []).append(segment)
 
-            source_entries: list[tuple[bool, SearchSegment, SearchSource]] = []
+            source_entries: list[_RankedSourceEntry] = []
             for source_video_id, source_segments in segments_by_video_id.items():
                 source_row = video_rows.get(source_video_id)
                 representative = max(
@@ -252,10 +259,10 @@ class SearchService:
                 )
                 if source_row is None:
                     source_entries.append(
-                        (
-                            source_video_id == alignment.video_id,
-                            representative,
-                            SearchSource(
+                        _RankedSourceEntry(
+                            is_primary=source_video_id == alignment.video_id,
+                            representative=representative,
+                            source=SearchSource(
                                 video_id=source_video_id,
                                 video_url_at_timestamp=representative.video_url_at_timestamp,
                                 streamer=normalized_streamer,
@@ -265,26 +272,18 @@ class SearchService:
                     )
                     continue
 
-                (
-                    source_id,
-                    source_url,
-                    source_title,
-                    source_streamer,
-                    source_thumbnail,
-                    source_profile_image,
-                ) = source_row
                 source_entries.append(
-                    (
-                        source_id == alignment.video_id,
-                        representative,
-                        SearchSource(
-                            video_id=source_id,
-                            video_url=source_url,
+                    _RankedSourceEntry(
+                        is_primary=source_row.id == alignment.video_id,
+                        representative=representative,
+                        source=SearchSource(
+                            video_id=source_row.id,
+                            video_url=source_row.url,
                             video_url_at_timestamp=representative.video_url_at_timestamp,
-                            thumbnail_url=source_thumbnail,
-                            title=source_title,
-                            streamer=source_streamer,
-                            profile_image_url=source_profile_image,
+                            thumbnail_url=source_row.thumbnail_url,
+                            title=source_row.title,
+                            streamer=source_row.creator_name,
+                            profile_image_url=source_row.creator_profile_image_url,
                             segments=source_segments,
                         ),
                     )
@@ -292,28 +291,27 @@ class SearchService:
 
             source_entries.sort(
                 key=lambda entry: (
-                    entry[0],
-                    entry[1].ranking_score,
-                    entry[1].duration_seconds,
-                    entry[1].supporting_fingerprints,
+                    entry.is_primary,
+                    entry.representative.ranking_score,
+                    entry.representative.duration_seconds,
+                    entry.representative.supporting_fingerprints,
                 ),
                 reverse=True,
             )
-            sources = [entry[2] for entry in source_entries]
+            sources = [entry.source for entry in source_entries]
 
-            video_id, video_url, title, streamer_name, thumbnail_url, profile_image_url = primary_row
             primary_timestamp = int(alignment.timestamp_seconds or 0)
             result = SearchResult(
                 found=True,
-                streamer=streamer_name,
-                profile_image_url=profile_image_url,
-                video_id=video_id,
-                video_url=video_url,
+                streamer=primary_row.creator_name,
+                profile_image_url=primary_row.creator_profile_image_url,
+                video_id=primary_row.id,
+                video_url=primary_row.url,
                 video_url_at_timestamp=build_twitch_timestamp_url(
-                    video_url, primary_timestamp
+                    primary_row.url, primary_timestamp
                 ),
-                thumbnail_url=thumbnail_url,
-                title=title,
+                thumbnail_url=primary_row.thumbnail_url,
+                title=primary_row.title,
                 timestamp_seconds=primary_timestamp,
                 score=alignment.score,
                 reason=alignment.reason,
