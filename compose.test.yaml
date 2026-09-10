@@ -1,0 +1,19 @@
+name: vodhunter-test
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: vodhunter_test
+      POSTGRES_USER: vodhunter
+      POSTGRES_PASSWORD: vodhunter
+    ports:
+      - "55432:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: "no"
