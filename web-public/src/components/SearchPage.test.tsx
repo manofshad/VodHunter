@@ -1,8 +1,9 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { useState } from "react";
+import { createRef, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { SearchResponse } from "../api/types";
+import { StreamerPicker } from "./search/StreamerPicker";
 import { DateRangePicker, SearchResultCard, formatTimelineTime, isSupportedTikTokUrl } from "./SearchPage";
 
 function multiSegmentResult(): SearchResponse {
@@ -298,5 +299,58 @@ describe("DateRangePicker", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("StreamerPicker", () => {
+  it("closes after a selection and returns focus to its trigger", () => {
+    const onSelect = vi.fn();
+    const triggerRef = createRef<HTMLButtonElement>();
+    render(
+      <StreamerPicker
+        streamer=""
+        streamers={[
+          { name: "alice", profile_image_url: null },
+          { name: "bob", profile_image_url: null },
+        ]}
+        loading={false}
+        disabled={false}
+        error={null}
+        triggerRef={triggerRef}
+        onSelect={onSelect}
+      />,
+    );
+
+    const trigger = screen.getByRole("button", { name: "Streamer" });
+    fireEvent.click(trigger);
+    expect(screen.getByRole("listbox")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("option", { name: "alice" }));
+
+    expect(onSelect).toHaveBeenCalledWith("alice");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("closes on Escape and returns focus to its trigger", () => {
+    const triggerRef = createRef<HTMLButtonElement>();
+    render(
+      <StreamerPicker
+        streamer=""
+        streamers={[{ name: "alice", profile_image_url: null }]}
+        loading={false}
+        disabled={false}
+        error={null}
+        triggerRef={triggerRef}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    const trigger = screen.getByRole("button", { name: "Streamer" });
+    fireEvent.click(trigger);
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
   });
 });
