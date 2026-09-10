@@ -6,6 +6,7 @@ from typing import Iterable
 
 import numpy as np
 
+from pipeline.nmfp_inference import NMFP_HOP_SECONDS
 from search.models import (
     AlignmentResult,
     FingerprintCandidate,
@@ -18,7 +19,7 @@ class AlignmentConfig:
     """Tunable rules for turning ranked NMFP neighbors into cut-aware tracks."""
 
     top_k: int = 10
-    fingerprint_hop_seconds: float = 0.5
+    fingerprint_hop_seconds: float = NMFP_HOP_SECONDS
     offset_bin_seconds: float = 0.5
     offset_tolerance_seconds: float = 1.0
     max_unmatched_gap_seconds: float = 2.0

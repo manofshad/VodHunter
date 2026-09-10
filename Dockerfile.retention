@@ -10,7 +10,6 @@ RUN mkdir -p backend services runners
 COPY backend/requirements-retention.txt ./backend/requirements-retention.txt
 RUN pip install --no-cache-dir -r backend/requirements-retention.txt
 
-COPY backend/config.py ./backend/config.py
 COPY backend/db_url.py ./backend/db_url.py
 COPY services/vod_retention.py ./services/vod_retention.py
 COPY runners/run_vod_retention.py ./runners/run_vod_retention.py

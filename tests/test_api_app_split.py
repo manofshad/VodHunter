@@ -106,7 +106,7 @@ import backend.bootstrap_shared
     def test_public_lifespan_initializes_search_only(self) -> None:
         app = public_app_module.create_public_app(enable_lifespan=True)
         query_embedder = StubQueryEmbedder()
-        with patch('backend.bootstrap_shared.prepare_runtime_dirs') as prepare_dirs, patch('backend.bootstrap_shared.build_store_state', return_value={'store': object()}), patch('backend.bootstrap_shared.build_search_stack', return_value={'query_embedder': query_embedder, 'search_service': object(), 'search_manager': object()}):
+        with patch('backend.bootstrap_shared.build_store_state', return_value={'store': object()}), patch('backend.bootstrap_shared.build_search_stack', return_value={'query_embedder': query_embedder, 'search_service': object(), 'search_manager': object()}):
 
             async def run_lifespan() -> None:
                 async with app.router.lifespan_context(app):
@@ -114,5 +114,4 @@ import backend.bootstrap_shared
                     assert hasattr(app.state, 'search_manager')
                     assert not hasattr(app.state, 'embedder')
             asyncio.run(run_lifespan())
-            prepare_dirs.assert_called_once()
             assert query_embedder.close_calls == 1

@@ -17,13 +17,23 @@ if str(ROOT_DIR) not in sys.path:
 
 load_dotenv(ROOT_DIR / ".env")
 
-from backend import config
 from backend.bootstrap_ingest import build_ingest_state
-from backend.bootstrap_shared import build_store_state, prepare_runtime_dirs
+from backend.bootstrap_shared import build_store_state
 from pipeline.ingest_session import IngestSession
 from services.twitch_monitor import TwitchMonitor
 from sources.historical_archive_vod_source import HistoricalArchiveVODSource
 from sources.live_archive_vod_source import LiveArchiveVODSource
+
+
+INGEST_CHUNK_SECONDS = 60
+MONITOR_POLL_SECONDS = 30.0
+SESSION_POLL_INTERVAL = 0.5
+MONITOR_RETRY_SECONDS = 5.0
+LIVE_ARCHIVE_LAG_SECONDS = 120
+LIVE_ARCHIVE_POLL_SECONDS = 15.0
+LIVE_ARCHIVE_FINALIZE_CHECKS = 3
+LIVE_TEMP_DIR = str(ROOT_DIR / "data" / "temp_live_chunks")
+BACKFILL_TEMP_DIR = str(ROOT_DIR / "data" / "temp_backfill_chunks")
 
 
 @dataclass
@@ -102,10 +112,10 @@ def run_hybrid_ingest(
     session_factory: Callable[..., IngestSession] = IngestSession,
     out: Callable[[str], None] = print,
     should_stop: Callable[[], bool] | None = None,
-    watch_poll_seconds: float = config.MONITOR_POLL_SECONDS,
-    backlog_live_poll_seconds: float = config.LIVE_ARCHIVE_POLL_SECONDS,
-    session_wait_seconds: float = config.SESSION_POLL_INTERVAL,
-    retry_seconds: float = config.MONITOR_RETRY_SECONDS,
+    watch_poll_seconds: float = MONITOR_POLL_SECONDS,
+    backlog_live_poll_seconds: float = LIVE_ARCHIVE_POLL_SECONDS,
+    session_wait_seconds: float = SESSION_POLL_INTERVAL,
+    retry_seconds: float = MONITOR_RETRY_SECONDS,
 ) -> HybridIngestResult:
     normalized_streamer = streamer.strip().lower()
     if not normalized_streamer:
@@ -115,7 +125,6 @@ def run_hybrid_ingest(
 
     should_stop = should_stop or (lambda: False)
 
-    prepare_runtime_dirs()
     store_state = build_store()
     ingest_state = build_ingest()
     store = store_state["store"]
@@ -324,17 +333,17 @@ def _start_live_session(
         streamer=streamer,
         store=store,
         twitch_monitor=twitch_monitor,
-        chunk_seconds=config.INGEST_CHUNK_SECONDS,
-        lag_seconds=config.LIVE_ARCHIVE_LAG_SECONDS,
-        poll_seconds=config.LIVE_ARCHIVE_POLL_SECONDS,
-        finalize_checks=config.LIVE_ARCHIVE_FINALIZE_CHECKS,
-        temp_dir=config.TEMP_LIVE_DIR,
+        chunk_seconds=INGEST_CHUNK_SECONDS,
+        lag_seconds=LIVE_ARCHIVE_LAG_SECONDS,
+        poll_seconds=LIVE_ARCHIVE_POLL_SECONDS,
+        finalize_checks=LIVE_ARCHIVE_FINALIZE_CHECKS,
+        temp_dir=LIVE_TEMP_DIR,
     )
     session = session_factory(
         source=source,
         embedder=embedder,
         store=store,
-        poll_interval=config.SESSION_POLL_INTERVAL,
+        poll_interval=SESSION_POLL_INTERVAL,
     )
     return _spawn_session(session=session, source=source)
 
@@ -377,15 +386,15 @@ def _run_backlog_session(
         vod_metadata=vod,
         creator_metadata=creator_metadata,
         store=store,
-        chunk_seconds=config.INGEST_CHUNK_SECONDS,
-        temp_dir=config.TEMP_BACKFILL_DIR,
+        chunk_seconds=INGEST_CHUNK_SECONDS,
+        temp_dir=BACKFILL_TEMP_DIR,
         progress_callback=emit_progress,
     )
     session = session_factory(
         source=source,
         embedder=embedder,
         store=store,
-        poll_interval=config.SESSION_POLL_INTERVAL,
+        poll_interval=SESSION_POLL_INTERVAL,
     )
     handle = _spawn_session(session=session, source=source)
 

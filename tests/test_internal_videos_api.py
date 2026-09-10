@@ -5,7 +5,6 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from backend import config
 from backend.apps.public import create_public_app
 from storage.vector_store import (
     InvalidVideoStateTransitionError,
@@ -37,14 +36,20 @@ class StubInternalVideoStore:
         return self.reindex_result
 
 
-def _build_client(store: StubInternalVideoStore) -> tuple[Any, TestClient]:
-    app = create_public_app(enable_lifespan=False)
+def _build_client(
+    store: StubInternalVideoStore,
+    *,
+    internal_api_key: str = "test-internal-key",
+) -> tuple[Any, TestClient]:
+    app = create_public_app(
+        enable_lifespan=False,
+        internal_api_key=internal_api_key,
+    )
     app.state.store = store
     return app, TestClient(app)
 
 
-def test_public_app_exposes_internal_video_routes(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(config, "INTERNAL_API_KEY", "test-internal-key")
+def test_public_app_exposes_internal_video_routes() -> None:
     store = StubInternalVideoStore()
     app, client = _build_client(store)
 
@@ -60,8 +65,7 @@ def test_public_app_exposes_internal_video_routes(monkeypatch: pytest.MonkeyPatc
     assert store.delete_calls == [(11, 99)]
 
 
-def test_delete_index_returns_deleted_for_searchable_video(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(config, "INTERNAL_API_KEY", "test-internal-key")
+def test_delete_index_returns_deleted_for_searchable_video() -> None:
     store = StubInternalVideoStore()
     app, client = _build_client(store)
 
@@ -78,8 +82,7 @@ def test_delete_index_returns_deleted_for_searchable_video(monkeypatch: pytest.M
     assert store.reindex_calls == []
 
 
-def test_request_reindex_returns_reindex_requested_for_deleted_video(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(config, "INTERNAL_API_KEY", "test-internal-key")
+def test_request_reindex_returns_reindex_requested_for_deleted_video() -> None:
     store = StubInternalVideoStore()
     app, client = _build_client(store)
 
@@ -98,9 +101,8 @@ def test_request_reindex_returns_reindex_requested_for_deleted_video(monkeypatch
 
 @pytest.mark.parametrize("header_value", [None, "wrong-key"])
 def test_internal_videos_rejects_bad_or_missing_api_key(
-    monkeypatch: pytest.MonkeyPatch, header_value: str | None
+    header_value: str | None,
 ) -> None:
-    monkeypatch.setattr(config, "INTERNAL_API_KEY", "test-internal-key")
     store = StubInternalVideoStore()
     app, client = _build_client(store)
     headers = {"X-Internal-Api-Key": header_value} if header_value is not None else {}
@@ -123,8 +125,7 @@ def test_internal_videos_rejects_bad_or_missing_api_key(
     assert store.reindex_calls == []
 
 
-def test_internal_videos_rejects_creator_mismatch(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(config, "INTERNAL_API_KEY", "test-internal-key")
+def test_internal_videos_rejects_creator_mismatch() -> None:
     store = StubInternalVideoStore()
     store.delete_error = VideoOwnerMismatchError()
     app, client = _build_client(store)
@@ -146,8 +147,7 @@ def test_internal_videos_rejects_creator_mismatch(monkeypatch: pytest.MonkeyPatc
     assert store.delete_calls == [(11, 12)]
 
 
-def test_internal_videos_returns_not_found_for_missing_video(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(config, "INTERNAL_API_KEY", "test-internal-key")
+def test_internal_videos_returns_not_found_for_missing_video() -> None:
     store = StubInternalVideoStore()
     store.delete_error = VideoNotFoundError()
     app, client = _build_client(store)
@@ -175,11 +175,9 @@ def test_internal_videos_returns_not_found_for_missing_video(monkeypatch: pytest
     ("/internal/videos/11/request-reindex", InvalidVideoStateTransitionError("indexing")),
 ])
 def test_internal_videos_rejects_invalid_state_transitions(
-    monkeypatch: pytest.MonkeyPatch,
     path: str,
     error: InvalidVideoStateTransitionError,
 ) -> None:
-    monkeypatch.setattr(config, "INTERNAL_API_KEY", "test-internal-key")
     store = StubInternalVideoStore()
     if path.endswith("delete-index"):
         store.delete_error = error
@@ -203,8 +201,7 @@ def test_internal_videos_rejects_invalid_state_transitions(
     }
 
 
-def test_delete_index_is_idempotent_when_video_already_deleted(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(config, "INTERNAL_API_KEY", "test-internal-key")
+def test_delete_index_is_idempotent_when_video_already_deleted() -> None:
     store = StubInternalVideoStore()
     app, client = _build_client(store)
 
@@ -220,8 +217,7 @@ def test_delete_index_is_idempotent_when_video_already_deleted(monkeypatch: pyte
     assert store.delete_calls == [(11, 99)]
 
 
-def test_request_reindex_is_idempotent_when_already_requested(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(config, "INTERNAL_API_KEY", "test-internal-key")
+def test_request_reindex_is_idempotent_when_already_requested() -> None:
     store = StubInternalVideoStore()
     app, client = _build_client(store)
 
