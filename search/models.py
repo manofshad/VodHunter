@@ -192,52 +192,11 @@ class SearchRequestOutcome:
     result: SearchResult
     execution_metadata: SearchExecutionMetadata
     input_type: str
-    clip_filename: str | None = None
     download_source: str | None = None
     download_host: str | None = None
     input_duration_seconds: float | None = None
     total_duration_ms: int | None = None
     date_range: SearchDateRange | None = None
-
-
-@dataclass
-class SearchRequestLog:
-    source_app: str
-    route: str
-    input_type: str | None = None
-    streamer: str | None = None
-    creator_id: int | None = None
-    success: bool = False
-    http_status: int | None = None
-    error_code: str | None = None
-    error_message: str | None = None
-    result_reason: str | None = None
-    found_match: bool | None = None
-    matched_video_id: int | None = None
-    matched_timestamp_seconds: int | None = None
-    score: float | None = None
-    clip_filename: str | None = None
-    download_source: str | None = None
-    download_host: str | None = None
-    input_duration_seconds: float | None = None
-    total_duration_ms: int | None = None
-    preprocess_duration_ms: int | None = None
-    embed_duration_ms: int | None = None
-    model_startup_duration_ms: int | None = None
-    fingerprint_preprocessing_duration_ms: int | None = None
-    fingerprint_inference_duration_ms: int | None = None
-    fingerprint_duration_ms: int | None = None
-    model_cold_start: bool | None = None
-    vector_query_duration_ms: int | None = None
-    alignment_duration_ms: int | None = None
-    query_fingerprint_count: int | None = None
-    candidate_count: int | None = None
-    segment_count: int | None = None
-    model_version: str | None = None
-    preprocessing_version: str | None = None
-    result_payload: dict[str, Any] | None = None
-    streamed_from: datetime | None = None
-    streamed_to: datetime | None = None
 
 
 @dataclass

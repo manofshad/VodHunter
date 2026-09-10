@@ -568,7 +568,7 @@ function FeatureGrid() {
   const features = [
     {
       title: "Find The Exact VOD Moment",
-      description: "Upload a short clip and match it to the exact timestamp inside a Twitch VOD.",
+      description: "Paste a TikTok clip link and match it to the exact timestamp inside a Twitch VOD.",
     },
     {
       title: "Audio-Based Matching",

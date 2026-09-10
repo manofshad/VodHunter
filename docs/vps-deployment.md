@@ -9,10 +9,9 @@ The production stack is defined in `compose.production.yaml`. It runs:
 - the public React site
 - a Coolify-managed Traefik proxy for HTTPS at `vodhunter.com` and `www.vodhunter.com`
 
-The admin API and Twitch EventSub are not deployed in this first rollout. The
-worker uses Helix polling and defaults to a 30-day scan window. The retention
-service is configured for the same 30-day window, so the worker can catch up
-the full retained history without leaving a one-day boundary gap.
+The worker uses Twitch Helix polling and defaults to a 30-day scan window. The
+retention service is configured for the same 30-day window, so the worker can
+catch up the full retained history without leaving a one-day boundary gap.
 
 ## First deployment
 

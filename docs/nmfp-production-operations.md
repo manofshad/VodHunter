@@ -177,7 +177,7 @@ An empty or partial segment list is valid. Never describe unmatched ranges as de
 
 ## Latency and observability
 
-The benchmark's roughly 231-240 ms median measured cached alignment with query fingerprints already present. It excluded cold TensorFlow startup and query fingerprint extraction. It is not comparable to upload-to-result latency.
+The benchmark's roughly 231-240 ms median measured cached alignment with query fingerprints already present. It excluded cold TensorFlow startup and query fingerprint extraction. It is not comparable to clip-to-result latency.
 
 Production emits and persists the following independently:
 
@@ -209,7 +209,6 @@ Run focused operational tests and then the complete suites:
 python3 -m pytest tests/test_run_backfill_ingest.py tests/test_run_hybrid_ingest.py
 python3 -m pytest
 (cd web-public && npm test && npm run build)
-(cd web-admin && npm test && npm run build)
 ```
 
 Recommended rollout order:

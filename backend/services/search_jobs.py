@@ -80,7 +80,7 @@ class SearchJobService:
         except SearchInputError as exc:
             self.store.fail_search_job(
                 search_id,
-                error_code="INVALID_UPLOAD",
+                error_code="INVALID_SEARCH_INPUT",
                 error_message=str(exc),
                 http_status=400,
             )

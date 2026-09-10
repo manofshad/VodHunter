@@ -6,7 +6,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend import config
-from backend.apps.admin import create_admin_app
 from backend.apps.public import create_public_app
 from storage.vector_store import (
     InvalidVideoStateTransitionError,
@@ -39,12 +38,6 @@ class StubInternalVideoStore:
 
 
 def _build_client(store: StubInternalVideoStore) -> tuple[Any, TestClient]:
-    app = create_admin_app(enable_lifespan=False)
-    app.state.store = store
-    return app, TestClient(app)
-
-
-def _build_public_client(store: StubInternalVideoStore) -> tuple[Any, TestClient]:
     app = create_public_app(enable_lifespan=False)
     app.state.store = store
     return app, TestClient(app)
@@ -53,7 +46,7 @@ def _build_public_client(store: StubInternalVideoStore) -> tuple[Any, TestClient
 def test_public_app_exposes_internal_video_routes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(config, "INTERNAL_API_KEY", "test-internal-key")
     store = StubInternalVideoStore()
-    app, client = _build_public_client(store)
+    app, client = _build_client(store)
 
     with client:
         response = client.post(

@@ -1,7 +1,4 @@
-"""Compatibility ASGI entrypoint.
-
-Use backend.apps.public:app (public) or backend.apps.admin:app (admin) for new deployments.
-"""
+"""Compatibility ASGI entrypoint for the public API."""
 
 from backend.apps.public import app, create_public_app
 

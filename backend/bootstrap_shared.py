@@ -16,11 +16,6 @@ def prepare_runtime_dirs() -> None:
     os.makedirs(config.TEMP_SEARCH_DOWNLOAD_DIR, exist_ok=True)
 
 
-def prepare_admin_runtime_dirs() -> None:
-    prepare_runtime_dirs()
-    os.makedirs(config.TEMP_SEARCH_UPLOAD_DIR, exist_ok=True)
-
-
 def build_store_state() -> dict[str, object]:
     config.validate_storage_config()
     config.validate_nmfp_config()
@@ -89,8 +84,6 @@ def build_local_query_embedder(embedder=None):
 def build_search_stack(
     store: VectorStore,
     max_duration_seconds: int | None,
-    upload_temp_dir: str | None = None,
-    embedder=None,
 ) -> dict[str, object]:
     from backend.services.remote_clip_downloader import RemoteClipDownloader
     from backend.services.search_manager import SearchManager
@@ -98,7 +91,7 @@ def build_search_stack(
     from search.query_preprocessor import QueryPreprocessor
     from search.search_service import SearchService
 
-    query_embedder = build_local_query_embedder(embedder=embedder)
+    query_embedder = build_local_query_embedder()
     search_service = SearchService(
         store=store,
         preprocessor=QueryPreprocessor(temp_dir=config.TEMP_SEARCH_PREPROCESS_DIR),
@@ -124,7 +117,6 @@ def build_search_stack(
 
     search_manager = SearchManager(
         search_service=search_service,
-        upload_temp_dir=upload_temp_dir,
         remote_downloader=RemoteClipDownloader(
             temp_dir=config.TEMP_SEARCH_DOWNLOAD_DIR,
             timeout_seconds=config.TIKTOK_DOWNLOAD_TIMEOUT_SECONDS,

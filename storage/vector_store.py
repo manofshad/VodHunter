@@ -19,7 +19,6 @@ from search.models import (
     FingerprintCandidate,
     SearchDateRange,
     SearchJobRecord,
-    SearchRequestLog,
     SearchRequestOutcome,
     SearchResult,
 )
@@ -1030,32 +1029,6 @@ class VectorStore:
         )
 
 
-    def list_live_sessions(self, limit: int, offset: int) -> list[dict[str, Any]]:
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT videos.id, creators.name, videos.url, videos.title, videos.processed
-                    FROM videos
-                    JOIN creators ON creators.id = videos.creator_id
-                    WHERE videos.url LIKE 'https://twitch.tv/%%' OR videos.url LIKE 'https://www.twitch.tv/%%'
-                    ORDER BY videos.id DESC
-                    LIMIT %s OFFSET %s
-                    """,
-                    (int(limit), int(offset)),
-                )
-                rows = cur.fetchall()
-        return [
-            {
-                "video_id": int(r[0]),
-                "creator_name": str(r[1]),
-                "url": str(r[2]),
-                "title": str(r[3]),
-                "processed": bool(r[4]),
-            }
-            for r in rows
-        ]
-
     def list_searchable_streamers(self) -> list[dict[str, str | None]]:
         with self._connect() as conn:
             with conn.cursor() as cur:
@@ -1104,100 +1077,6 @@ class VectorStore:
 
         known_fields = {field.name for field in fields(SearchResult)}
         return SearchResult(**{key: item for key, item in value.items() if key in known_fields})
-
-    def log_search_request(self, log: SearchRequestLog) -> None:
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO search_requests (
-                        source_app,
-                        route,
-                        input_type,
-                        streamer,
-                        creator_id,
-                        success,
-                        http_status,
-                        error_code,
-                        error_message,
-                        result_reason,
-                        found_match,
-                        matched_video_id,
-                        matched_timestamp_seconds,
-                        score,
-                        clip_filename,
-                        download_source,
-                        download_host,
-                        input_duration_seconds,
-                        total_duration_ms,
-                        preprocess_duration_ms,
-                        embed_duration_ms,
-                        model_startup_duration_ms,
-                        model_cold_start,
-                        fingerprint_preprocessing_duration_ms,
-                        fingerprint_inference_duration_ms,
-                        fingerprint_duration_ms,
-                        vector_query_duration_ms,
-                        alignment_duration_ms,
-                        query_fingerprint_count,
-                        candidate_count,
-                        segment_count,
-                        model_version,
-                        preprocessing_version,
-                        result_payload,
-                        streamed_from,
-                        streamed_to
-                    )
-                    VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s
-                    )
-                    """,
-                    (
-                        log.source_app,
-                        log.route,
-                        log.input_type,
-                        log.streamer,
-                        log.creator_id,
-                        bool(log.success),
-                        log.http_status,
-                        log.error_code,
-                        log.error_message,
-                        log.result_reason,
-                        log.found_match,
-                        log.matched_video_id,
-                        log.matched_timestamp_seconds,
-                        log.score,
-                        log.clip_filename,
-                        log.download_source,
-                        log.download_host,
-                        log.input_duration_seconds,
-                        log.total_duration_ms,
-                        log.preprocess_duration_ms,
-                        log.embed_duration_ms,
-                        log.model_startup_duration_ms,
-                        log.model_cold_start,
-                        log.fingerprint_preprocessing_duration_ms,
-                        log.fingerprint_inference_duration_ms,
-                        log.fingerprint_duration_ms,
-                        log.vector_query_duration_ms,
-                        log.alignment_duration_ms,
-                        log.query_fingerprint_count,
-                        log.candidate_count,
-                        log.segment_count,
-                        log.model_version or getattr(self, "model_version", DEFAULT_NMFP_MODEL_VERSION),
-                        log.preprocessing_version
-                        or getattr(
-                            self,
-                            "preprocessing_version",
-                            DEFAULT_NMFP_PREPROCESSING_VERSION,
-                        ),
-                        json.dumps(log.result_payload) if log.result_payload is not None else None,
-                        log.streamed_from,
-                        log.streamed_to,
-                    ),
-                )
 
     def create_public_search_job(
         self,
@@ -1304,7 +1183,6 @@ class VectorStore:
                         matched_video_id = %s,
                         matched_timestamp_seconds = %s,
                         score = %s,
-                        clip_filename = %s,
                         download_source = %s,
                         download_host = %s,
                         input_duration_seconds = %s,
@@ -1335,7 +1213,6 @@ class VectorStore:
                         metadata.matched_video_id if metadata.matched_video_id is not None else result.video_id,
                         metadata.matched_timestamp_seconds if metadata.matched_timestamp_seconds is not None else result.timestamp_seconds,
                         metadata.score if metadata.score is not None else result.score,
-                        outcome.clip_filename,
                         outcome.download_source,
                         outcome.download_host,
                         outcome.input_duration_seconds,
