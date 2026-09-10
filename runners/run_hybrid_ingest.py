@@ -18,12 +18,13 @@ if str(ROOT_DIR) not in sys.path:
 load_dotenv(ROOT_DIR / ".env")
 
 from backend.bootstrap_ingest import build_ingest_state
-from backend.bootstrap_shared import build_store_state
+from backend.bootstrap_shared import build_repositories
 from pipeline.ingest_session import IngestSession
 from services.twitch_monitor import TwitchMonitor
 from sources.historical_archive_vod_source import HistoricalArchiveVODSource
 from sources.live_archive_vod_source import LiveArchiveVODSource
 from storage.records import VodIngestStateRecord, VideoRecord, VideoStatus
+from storage.repositories import Repositories
 
 
 INGEST_CHUNK_SECONDS = 60
@@ -71,22 +72,12 @@ class BacklogRunOutcome:
     error: Exception | None = None
 
 
-VIDEO_STATUS_INDEXING = VideoStatus.INDEXING.value
-VIDEO_STATUS_SEARCHABLE = VideoStatus.SEARCHABLE.value
-VIDEO_STATUS_DELETED = VideoStatus.DELETED.value
-VIDEO_STATUS_REINDEX_REQUESTED = VideoStatus.REINDEX_REQUESTED.value
-
-
 def _get_existing_video_status(
     existing_video: VideoRecord | None,
-) -> str | None:
+) -> VideoStatus | None:
     if existing_video is None:
         return None
-    return (
-        existing_video.status.value
-        if existing_video.status is not None
-        else None
-    )
+    return existing_video.status
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -101,7 +92,7 @@ def run_hybrid_ingest(
     days: int = 30,
     *,
     monitor: TwitchMonitor | None = None,
-    build_store: Callable[[], dict[str, object]] = build_store_state,
+    build_storage: Callable[[], Repositories] = build_repositories,
     build_ingest: Callable[[], dict[str, object]] = build_ingest_state,
     historical_source_factory: Callable[..., HistoricalArchiveVODSource] = HistoricalArchiveVODSource,
     live_source_factory: Callable[..., LiveArchiveVODSource] = LiveArchiveVODSource,
@@ -121,9 +112,11 @@ def run_hybrid_ingest(
 
     should_stop = should_stop or (lambda: False)
 
-    store_state = build_store()
+    repositories = build_storage()
     ingest_state = build_ingest()
-    store = store_state["store"]
+    videos = repositories.videos
+    ingest_states = repositories.ingest_states
+    fingerprints = repositories.fingerprints
     embedder = ingest_state["embedder"]
     twitch_monitor = monitor or TwitchMonitor.from_env()
 
@@ -153,7 +146,9 @@ def run_hybrid_ingest(
                 out(f"mode=live streamer={normalized_streamer} reason=stream_live")
             live_handle = _start_live_session(
                 streamer=normalized_streamer,
-                store=store,
+                videos=videos,
+                ingest_states=ingest_states,
+                fingerprints=fingerprints,
                 embedder=embedder,
                 twitch_monitor=twitch_monitor,
                 session_factory=session_factory,
@@ -183,7 +178,8 @@ def run_hybrid_ingest(
 
         backlog = _build_backlog(
             twitch_monitor=twitch_monitor,
-            store=store,
+            videos=videos,
+            ingest_states=ingest_states,
             user_id=user_id,
             days=days,
             skipped_vods_logged=logged_skipped_vods,
@@ -216,7 +212,9 @@ def run_hybrid_ingest(
                 streamer=normalized_streamer,
                 vod=vod,
                 existing_state=candidate.existing_state,
-                store=store,
+                videos=videos,
+                ingest_states=ingest_states,
+                fingerprints=fingerprints,
                 embedder=embedder,
                 twitch_monitor=twitch_monitor,
                 session_factory=session_factory,
@@ -260,7 +258,8 @@ def run_hybrid_ingest(
 def _build_backlog(
     *,
     twitch_monitor: TwitchMonitor,
-    store: object,
+    videos: object,
+    ingest_states: object,
     user_id: str,
     days: int,
     skipped_vods_logged: set[str],
@@ -272,19 +271,17 @@ def _build_backlog(
 
     for vod in vods:
         vod_id = str(vod["id"])
-        existing_video = store.get_video_by_url(str(vod["url"]))
+        existing_video = videos.get_video_by_url(str(vod["url"]))
         existing_status = _get_existing_video_status(existing_video)
-        existing_state = store.get_vod_ingest_state(vod_id)
+        existing_state = ingest_states.get(vod_id)
 
-        if existing_status == VIDEO_STATUS_REINDEX_REQUESTED:
+        if existing_status is VideoStatus.REINDEX_REQUESTED:
             if existing_state is not None:
-                delete_vod_ingest_state = getattr(store, "delete_vod_ingest_state", None)
-                if callable(delete_vod_ingest_state):
-                    delete_vod_ingest_state(vod_id)
+                ingest_states.delete(vod_id)
             backlog.append(BacklogCandidate(vod=vod, existing_state=None))
             continue
 
-        if existing_status == VIDEO_STATUS_INDEXING:
+        if existing_status is VideoStatus.INDEXING:
             if existing_state is not None:
                 backlog.append(BacklogCandidate(vod=vod, existing_state=existing_state))
                 continue
@@ -293,7 +290,7 @@ def _build_backlog(
                 out(f"skip {existing_status} vod={vod_id} url={vod['url']}")
             continue
 
-        if existing_status in {VIDEO_STATUS_DELETED, VIDEO_STATUS_SEARCHABLE}:
+        if existing_status in {VideoStatus.DELETED, VideoStatus.SEARCHABLE}:
             if vod_id not in skipped_vods_logged:
                 skipped_vods_logged.add(vod_id)
                 out(f"skip {existing_status} vod={vod_id} url={vod['url']}")
@@ -319,7 +316,9 @@ def _build_backlog(
 def _start_live_session(
     *,
     streamer: str,
-    store: object,
+    videos: object,
+    ingest_states: object,
+    fingerprints: object,
     embedder: object,
     twitch_monitor: TwitchMonitor,
     session_factory: Callable[..., IngestSession],
@@ -327,7 +326,8 @@ def _start_live_session(
 ) -> SessionRunHandle:
     source = live_source_factory(
         streamer=streamer,
-        store=store,
+        videos=videos,
+        ingest_states=ingest_states,
         twitch_monitor=twitch_monitor,
         chunk_seconds=INGEST_CHUNK_SECONDS,
         lag_seconds=LIVE_ARCHIVE_LAG_SECONDS,
@@ -338,7 +338,7 @@ def _start_live_session(
     session = session_factory(
         source=source,
         embedder=embedder,
-        store=store,
+        fingerprints=fingerprints,
         poll_interval=SESSION_POLL_INTERVAL,
     )
     return _spawn_session(session=session, source=source)
@@ -349,7 +349,9 @@ def _run_backlog_session(
     streamer: str,
     vod: dict[str, object],
     existing_state: VodIngestStateRecord | None,
-    store: object,
+    videos: object,
+    ingest_states: object,
+    fingerprints: object,
     embedder: object,
     twitch_monitor: TwitchMonitor,
     session_factory: Callable[..., IngestSession],
@@ -381,7 +383,8 @@ def _run_backlog_session(
         streamer=streamer,
         vod_metadata=vod,
         creator_metadata=creator_metadata,
-        store=store,
+        videos=videos,
+        ingest_states=ingest_states,
         chunk_seconds=INGEST_CHUNK_SECONDS,
         temp_dir=BACKFILL_TEMP_DIR,
         progress_callback=emit_progress,
@@ -389,7 +392,7 @@ def _run_backlog_session(
     session = session_factory(
         source=source,
         embedder=embedder,
-        store=store,
+        fingerprints=fingerprints,
         poll_interval=SESSION_POLL_INTERVAL,
     )
     handle = _spawn_session(session=session, source=source)

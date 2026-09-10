@@ -10,13 +10,12 @@ from search.local_query_embedder import LocalQueryEmbedder
 
 class TestSearchEmbedderBootstrap:
 
-    def test_build_store_state_checks_schema_readiness_without_running_init_db(self) -> None:
-        store = Mock(spec=['ensure_schema_ready'])
-        with patch('backend.bootstrap_shared.VectorStore', return_value=store) as vector_store_cls:
-            state = bootstrap_shared.build_store_state('postgresql://db')
-        assert state == {'store': store}
-        vector_store_cls.assert_called_once_with(database_url='postgresql://db')
-        vector_store_cls.return_value.ensure_schema_ready.assert_called_once_with()
+    def test_build_repositories_delegates_to_storage_composition(self) -> None:
+        repositories = object()
+        with patch('backend.bootstrap_shared._build_repositories', return_value=repositories) as build_repositories:
+            state = bootstrap_shared.build_repositories('postgresql://db')
+        assert state is repositories
+        build_repositories.assert_called_once_with(database_url='postgresql://db')
 
     def test_builds_and_preloads_local_query_embedder(self) -> None:
         embedder = Mock(

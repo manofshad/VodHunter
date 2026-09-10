@@ -87,7 +87,8 @@ class FakeStore:
                 return
 
     def get_video_status(self, video_id: int):
-        return self.video_status_by_id.get(int(video_id))
+        value = self.video_status_by_id.get(int(video_id))
+        return VideoStatus(value) if value is not None else None
 
     def update_video_status(self, video_id: int, status: str) -> None:
         self.video_status_by_id[int(video_id)] = status
@@ -116,6 +117,20 @@ class FakeStore:
 
     def delete_vod_ingest_state(self, vod_platform_id: str) -> None:
         self.vod_state.pop(vod_platform_id, None)
+
+
+class FakeIngestStates:
+    def __init__(self, store: FakeStore):
+        self.store = store
+
+    def get(self, vod_platform_id: str):
+        return self.store.get_vod_ingest_state(vod_platform_id)
+
+    def upsert(self, **kwargs) -> None:
+        self.store.upsert_vod_ingest_state(**kwargs)
+
+    def delete(self, vod_platform_id: str) -> None:
+        self.store.delete_vod_ingest_state(vod_platform_id)
 
 class TestHistoricalArchiveVODSource:
 
@@ -150,10 +165,12 @@ segment-3.ts
 
     def test_extracts_from_local_hls_subset_and_validates_duration(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
+            store = FakeStore()
             source = HistoricalArchiveVODSource(
                 streamer='alice',
                 vod_metadata=self._make_vod(),
-                store=FakeStore(),
+                videos=store,
+                ingest_states=FakeIngestStates(store),
                 chunk_seconds=60,
                 temp_dir=f'{tmp}/chunks',
             )
@@ -215,7 +232,7 @@ segment-2.ts
             creator_id = store.create_or_get_creator('alice', 'https://twitch.tv/alice')
             video_id = store.create_video(creator_id=creator_id, url='https://www.twitch.tv/videos/vod-1', title='Old', thumbnail_url=None, processed=False)
             store.upsert_vod_ingest_state('vod-1', video_id, 'alice', 120, 180)
-            source = HistoricalArchiveVODSource(streamer='alice', vod_metadata=self._make_vod(), store=store, creator_metadata={'profile_image_url': 'https://cdn/alice.png'}, chunk_seconds=60, temp_dir=f'{tmp}/chunks')
+            source = HistoricalArchiveVODSource(streamer='alice', vod_metadata=self._make_vod(), videos=store, ingest_states=FakeIngestStates(store), creator_metadata={'profile_image_url': 'https://cdn/alice.png'}, chunk_seconds=60, temp_dir=f'{tmp}/chunks')
 
             extraction_calls: list[tuple[float, float]] = []
 
@@ -245,7 +262,7 @@ segment-2.ts
     def test_finalize_marks_video_processed_and_clears_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = FakeStore()
-            source = HistoricalArchiveVODSource(streamer='alice', vod_metadata=self._make_vod(), store=store, creator_metadata={'profile_image_url': 'https://cdn/alice.png'}, chunk_seconds=180, temp_dir=f'{tmp}/chunks')
+            source = HistoricalArchiveVODSource(streamer='alice', vod_metadata=self._make_vod(), videos=store, ingest_states=FakeIngestStates(store), creator_metadata={'profile_image_url': 'https://cdn/alice.png'}, chunk_seconds=180, temp_dir=f'{tmp}/chunks')
 
             def fake_extract_chunk(start_seconds: int, duration_seconds: int) -> str:
                 out = os.path.join(source.temp_dir, f'chunk_{start_seconds}_{duration_seconds}.wav')
@@ -282,7 +299,8 @@ segment-2.ts
             source = HistoricalArchiveVODSource(
                 streamer='alice',
                 vod_metadata=self._make_vod(),
-                store=store,
+                videos=store,
+                ingest_states=FakeIngestStates(store),
                 creator_metadata={'profile_image_url': 'https://cdn/alice.png'},
                 chunk_seconds=60,
                 temp_dir=f'{tmp}/chunks',
@@ -308,7 +326,8 @@ segment-2.ts
             source = HistoricalArchiveVODSource(
                 streamer='alice',
                 vod_metadata=self._make_vod(),
-                store=store,
+                videos=store,
+                ingest_states=FakeIngestStates(store),
                 creator_metadata={'profile_image_url': 'https://cdn/alice.png'},
                 chunk_seconds=60,
                 temp_dir=f'{tmp}/chunks',

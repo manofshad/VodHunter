@@ -13,8 +13,9 @@ import urllib.request
 from pipeline.nmfp_inference import NMFP_HOP_SECONDS, NMFP_SAMPLE_RATE
 from sources.audio_chunk import AudioChunk
 from sources.audio_source import AudioSource
+from storage.ingest_state_repository import IngestStateRepository
 from storage.records import VideoStatus
-from storage.vector_store import VectorStore
+from storage.video_repository import VideoRepository
 
 
 @dataclass(frozen=True)
@@ -177,7 +178,8 @@ class HistoricalArchiveVODSource(AudioSource):
         self,
         streamer: str,
         vod_metadata: dict[str, Any],
-        store: VectorStore,
+        videos: VideoRepository,
+        ingest_states: IngestStateRepository,
         creator_metadata: dict[str, Any] | None = None,
         chunk_seconds: int = 60,
         temp_dir: str = "temp_backfill_chunks",
@@ -188,7 +190,8 @@ class HistoricalArchiveVODSource(AudioSource):
         self.streamer = streamer.strip().lower()
         self.vod_metadata = dict(vod_metadata)
         self.creator_metadata = dict(creator_metadata or {})
-        self.store = store
+        self.videos = videos
+        self.ingest_states = ingest_states
         self.chunk_seconds = int(chunk_seconds)
         self.temp_dir = temp_dir
         self.progress_callback = progress_callback
@@ -236,15 +239,15 @@ class HistoricalArchiveVODSource(AudioSource):
         self._started = True
 
         creator_url = f"https://twitch.tv/{self.streamer}"
-        self._creator_id = self.store.create_or_get_creator(
+        self._creator_id = self.videos.create_or_get_creator(
             self.streamer,
             creator_url,
             profile_image_url=self._creator_profile_image_url,
         )
 
-        existing_video = self.store.get_video_by_url(self.current_vod_url)
+        existing_video = self.videos.get_video_by_url(self.current_vod_url)
         if existing_video is None:
-            self.video_id = self.store.create_video(
+            self.video_id = self.videos.create_video(
                 creator_id=self._creator_id,
                 url=self.current_vod_url,
                 title=self._vod_title,
@@ -261,8 +264,8 @@ class HistoricalArchiveVODSource(AudioSource):
                 else None
             )
             if existing_status == VideoStatus.REINDEX_REQUESTED.value:
-                self.store.delete_vod_ingest_state(self._vod_platform_id)
-            self.store.update_video_metadata(
+                self.ingest_states.delete(self._vod_platform_id)
+            self.videos.update_video_metadata(
                 self.video_id,
                 title=self._vod_title,
                 thumbnail_url=self._vod_thumbnail_url,
@@ -270,7 +273,7 @@ class HistoricalArchiveVODSource(AudioSource):
                 status=VideoStatus.INDEXING.value,
             )
 
-        state = self.store.get_vod_ingest_state(self._vod_platform_id)
+        state = self.ingest_states.get(self._vod_platform_id)
         self.ingest_cursor_seconds = state.last_ingested_seconds if state else 0
         self._save_ingest_state()
 
@@ -512,7 +515,7 @@ class HistoricalArchiveVODSource(AudioSource):
     def _save_ingest_state(self) -> None:
         if self.video_id is None:
             return
-        self.store.upsert_vod_ingest_state(
+        self.ingest_states.upsert(
             vod_platform_id=self._vod_platform_id,
             video_id=self.video_id,
             streamer=self.streamer,
@@ -523,12 +526,8 @@ class HistoricalArchiveVODSource(AudioSource):
     def _finalize(self) -> None:
         self._commit_pending_progress()
         if self.video_id is not None:
-            update_video_status = getattr(self.store, "update_video_status", None)
-            if callable(update_video_status):
-                update_video_status(self.video_id, VideoStatus.SEARCHABLE.value)
-            else:
-                self.store.mark_video_processed(self.video_id, processed=True)
-        self.store.delete_vod_ingest_state(self._vod_platform_id)
+            self.videos.update_video_status(self.video_id, VideoStatus.SEARCHABLE)
+        self.ingest_states.delete(self._vod_platform_id)
         self._finished = True
         self._emit_progress(
             {

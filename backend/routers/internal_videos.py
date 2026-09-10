@@ -9,7 +9,7 @@ from backend.schemas import (
     InternalVideoMutationRequest,
     InternalVideoMutationResponse,
 )
-from storage.vector_store import (
+from storage.errors import (
     InvalidVideoStateTransitionError,
     VideoNotFoundError,
     VideoOwnerMismatchError,
@@ -37,7 +37,7 @@ def _require_internal_api_key(
         )
 
 
-def _translate_store_error(exc: Exception) -> None:
+def _translate_video_mutation_error(exc: Exception) -> None:
     if isinstance(exc, VideoNotFoundError):
         _raise_api_error(status_code=404, code="VIDEO_NOT_FOUND", message="Video was not found")
     if isinstance(exc, VideoOwnerMismatchError):
@@ -73,11 +73,11 @@ def delete_video_index(
 ) -> InternalVideoMutationResponse:
     _require_internal_api_key(request, x_internal_api_key)
     try:
-        status = request.app.state.store.delete_video_index(video_id, payload.actor_creator_id)
+        status = request.app.state.videos.delete_video_index(video_id, payload.actor_creator_id)
     except Exception as exc:
-        _translate_store_error(exc)
+        _translate_video_mutation_error(exc)
         raise
-    return InternalVideoMutationResponse(video_id=video_id, status=status)
+    return InternalVideoMutationResponse(video_id=video_id, status=str(getattr(status, "value", status)))
 
 
 @router.post(
@@ -98,8 +98,8 @@ def request_video_reindex(
 ) -> InternalVideoMutationResponse:
     _require_internal_api_key(request, x_internal_api_key)
     try:
-        status = request.app.state.store.request_video_reindex(video_id, payload.actor_creator_id)
+        status = request.app.state.videos.request_video_reindex(video_id, payload.actor_creator_id)
     except Exception as exc:
-        _translate_store_error(exc)
+        _translate_video_mutation_error(exc)
         raise
-    return InternalVideoMutationResponse(video_id=video_id, status=status)
+    return InternalVideoMutationResponse(video_id=video_id, status=str(getattr(status, "value", status)))

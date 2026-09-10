@@ -11,7 +11,6 @@ from search.models import (
     SearchResult,
 )
 from storage.records import SearchableStreamer
-from storage.vector_store import VectorStore
 
 
 class StubSearchManager:
@@ -93,7 +92,7 @@ class StubSearchJobService:
 
 def build_client(app_factory):
     app = app_factory(enable_lifespan=False)
-    app.state.store = StubStore()
+    app.state.videos = StubStore()
     app.state.search_manager = StubSearchManager()
     app.state.search_job_service = StubSearchJobService()
     return app, TestClient(app)
@@ -335,58 +334,3 @@ def test_public_search_job_endpoint_returns_404_for_unknown_job() -> None:
 
     assert response.status_code == 404
     assert response.json()["detail"]["code"] == "SEARCH_NOT_FOUND"
-
-
-class FakeCursor:
-    def __init__(self):
-        self.executed: list[tuple[str, tuple | None]] = []
-
-    def execute(self, query: str, params=None):
-        self.executed.append((query, params))
-
-    def fetchone(self):
-        return None
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        return None
-
-
-class FakeConnection:
-    def __init__(self, cursor: FakeCursor):
-        self._cursor = cursor
-
-    def cursor(self):
-        return self._cursor
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        return None
-
-
-def test_update_video_status_keeps_deleted_vods_processed_for_legacy_readers() -> None:
-    cursor = FakeCursor()
-    store = VectorStore.__new__(VectorStore)
-    store._connect = lambda: FakeConnection(cursor)
-
-    store.update_video_status(55, "deleted")
-
-    assert cursor.executed == [
-        ("UPDATE videos SET status = %s, processed = %s WHERE id = %s", ("deleted", True, 55))
-    ]
-
-
-def test_update_video_status_keeps_reindex_requested_vods_processed_for_legacy_readers() -> None:
-    cursor = FakeCursor()
-    store = VectorStore.__new__(VectorStore)
-    store._connect = lambda: FakeConnection(cursor)
-
-    store.update_video_status(56, "reindex_requested")
-
-    assert cursor.executed == [
-        ("UPDATE videos SET status = %s, processed = %s WHERE id = %s", ("reindex_requested", True, 56))
-    ]

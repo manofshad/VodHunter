@@ -83,7 +83,7 @@ class StubSearchManager:
 
 def test_search_job_service_completes_job() -> None:
     store = StubStore()
-    service = SearchJobService(store=store, search_manager=StubSearchManager(), executor=InlineExecutor())
+    service = SearchJobService(jobs=store, search_manager=StubSearchManager(), executor=InlineExecutor())
 
     search_id = service.create_public_search_job(
         tiktok_url="https://www.tiktok.com/@u/video/1",
@@ -104,7 +104,7 @@ def test_search_job_service_completes_job() -> None:
 def test_search_job_service_forwards_date_range() -> None:
     store = StubStore()
     manager = StubSearchManager()
-    service = SearchJobService(store=store, search_manager=manager, executor=InlineExecutor())
+    service = SearchJobService(jobs=store, search_manager=manager, executor=InlineExecutor())
     date_range = SearchDateRange(
         streamed_from=datetime(2026, 4, 1, tzinfo=timezone.utc),
         streamed_to=datetime(2026, 4, 8, tzinfo=timezone.utc),
@@ -123,7 +123,7 @@ def test_search_job_service_forwards_date_range() -> None:
 
 def test_search_job_service_rejects_invalid_url_before_persisting_job() -> None:
     store = StubStore()
-    service = SearchJobService(store=store, search_manager=StubSearchManager(), executor=InlineExecutor())
+    service = SearchJobService(jobs=store, search_manager=StubSearchManager(), executor=InlineExecutor())
 
     with pytest.raises(InvalidTikTokUrlError):
         service.create_public_search_job(
@@ -139,7 +139,7 @@ def test_search_job_service_fails_job_for_handled_error() -> None:
     store = StubStore()
     manager = StubSearchManager()
     manager.raise_error = DownloadError("download failed")
-    service = SearchJobService(store=store, search_manager=manager, executor=InlineExecutor())
+    service = SearchJobService(jobs=store, search_manager=manager, executor=InlineExecutor())
 
     service.create_public_search_job(
         tiktok_url="https://www.tiktok.com/@u/video/1",
@@ -155,7 +155,7 @@ def test_search_job_service_reports_invalid_search_input() -> None:
     store = StubStore()
     manager = StubSearchManager()
     manager.raise_error = SearchInputError("Could not determine input video duration")
-    service = SearchJobService(store=store, search_manager=manager, executor=InlineExecutor())
+    service = SearchJobService(jobs=store, search_manager=manager, executor=InlineExecutor())
 
     service.create_public_search_job(
         tiktok_url="https://www.tiktok.com/@u/video/1",
@@ -169,7 +169,7 @@ def test_search_job_service_reports_invalid_search_input() -> None:
 
 def test_search_job_service_marks_incomplete_jobs_failed_on_restart() -> None:
     store = StubStore()
-    service = SearchJobService(store=store, search_manager=StubSearchManager(), executor=InlineExecutor())
+    service = SearchJobService(jobs=store, search_manager=StubSearchManager(), executor=InlineExecutor())
 
     service.fail_incomplete_public_search_jobs()
 

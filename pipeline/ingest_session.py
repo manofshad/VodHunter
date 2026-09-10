@@ -1,10 +1,26 @@
 import logging
 import time
+from typing import Protocol
+
+import numpy as np
 
 from sources.audio_source import AudioSource
 from pipeline.embedder import Embedder
-from storage.vector_store import VectorStore
 from sources.audio_chunk import AudioChunk
+
+
+class _FingerprintWriter(Protocol):
+    model_version: str
+    preprocessing_version: str
+
+    def store_fingerprints(self, video_id: int, timestamps: np.ndarray) -> list[int]: ...
+
+    def append_vectors(
+        self,
+        embeddings: np.ndarray,
+        ids: list[int],
+        creator_id: int | None,
+    ) -> None: ...
 
 
 logger = logging.getLogger("uvicorn.error")
@@ -15,12 +31,12 @@ class IngestSession:
         self,
         source: AudioSource,
         embedder: Embedder,
-        store: VectorStore,
+        fingerprints: _FingerprintWriter,
         poll_interval: float = 0.25,
     ):
         self.source = source
         self.embedder = embedder
-        self.store = store
+        self.fingerprints = fingerprints
         self.poll_interval = poll_interval
         self._running = False
 
@@ -50,9 +66,9 @@ class IngestSession:
                     embeddings = extraction.embeddings
                     timestamps = extraction.timestamps
                     metrics = extraction.metrics
-                    store_model_version = getattr(self.store, "model_version", None)
+                    store_model_version = getattr(self.fingerprints, "model_version", None)
                     store_preprocessing_version = getattr(
-                        self.store, "preprocessing_version", None
+                        self.fingerprints, "preprocessing_version", None
                     )
                     if (
                         store_model_version is not None
@@ -100,12 +116,12 @@ class IngestSession:
                         f"duration_seconds={chunk.duration_seconds:.3f}; refusing to advance cursor"
                     )
 
-                ids = self.store.store_fingerprints(
+                ids = self.fingerprints.store_fingerprints(
                     video_id=self.source.video_id,
                     timestamps=timestamps,
                 )
 
-                self.store.append_vectors(
+                self.fingerprints.append_vectors(
                     embeddings=embeddings,
                     ids=ids,
                     creator_id=self.source.creator_id,

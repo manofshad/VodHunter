@@ -6,12 +6,7 @@ from uuid import uuid4
 
 import pytest
 
-from storage.vector_store import (
-    DEFAULT_NMFP_MODEL_VERSION,
-    DEFAULT_NMFP_PREPROCESSING_VERSION,
-    NMFP_VECTOR_DIM,
-    VectorStore,
-)
+from storage.repositories import Repositories, build_repositories
 
 
 @pytest.fixture(scope="session")
@@ -96,13 +91,5 @@ def database_scope(database_url: str):
 
 
 @pytest.fixture
-def store(database_url: str) -> VectorStore:
-    value = VectorStore(
-        database_url=database_url,
-        vector_dim=NMFP_VECTOR_DIM,
-        hnsw_ef_search=40,
-        model_version=DEFAULT_NMFP_MODEL_VERSION,
-        preprocessing_version=DEFAULT_NMFP_PREPROCESSING_VERSION,
-    )
-    value.ensure_schema_ready()
-    return value
+def store(database_url: str) -> Repositories:
+    return build_repositories(database_url)

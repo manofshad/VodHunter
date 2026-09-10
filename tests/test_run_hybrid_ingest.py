@@ -92,9 +92,22 @@ class FakeStore:
     def get_vod_ingest_state(self, vod_platform_id: str):
         return self.vod_state.get(vod_platform_id)
 
+    def get(self, vod_platform_id: str):
+        return self.get_vod_ingest_state(vod_platform_id)
+
     def delete_vod_ingest_state(self, vod_platform_id: str) -> None:
         self.deleted_vod_state_ids.append(vod_platform_id)
         self.vod_state.pop(vod_platform_id, None)
+
+    def delete(self, vod_platform_id: str) -> None:
+        self.delete_vod_ingest_state(vod_platform_id)
+
+
+class FakeRepositories:
+    def __init__(self, store: FakeStore):
+        self.videos = store
+        self.ingest_states = store
+        self.fingerprints = store
 
 
 class FakeSource:
@@ -109,7 +122,7 @@ class FakeBacklogSession:
     raise_error_for: set[str] = set()
     run_started_event: threading.Event | None = None
 
-    def __init__(self, source, embedder, store, poll_interval):
+    def __init__(self, source, embedder, fingerprints, poll_interval):
         self.source = source
         self.vod_id = str(source.vod_metadata["id"])
         self.stopped = False
@@ -143,7 +156,7 @@ class FakeBacklogSession:
                         "vod_id": self.vod_id,
                     }
                 )
-            self.source.kwargs["store"].set_video(
+            self.source.kwargs["videos"].set_video(
                 video_id=1,
                 creator_id=1,
                 url=str(self.source.vod_metadata["url"]),
@@ -152,12 +165,12 @@ class FakeBacklogSession:
                 processed=True,
                 status="searchable",
             )
-            self.source.kwargs["store"].vod_state.pop(self.vod_id, None)
+            self.source.kwargs["videos"].vod_state.pop(self.vod_id, None)
 
     def stop(self) -> None:
         self.stopped = True
         FakeBacklogSession.stop_calls.append(self.vod_id)
-        self.source.kwargs["store"].set_state(
+        self.source.kwargs["videos"].set_state(
             vod_platform_id=self.vod_id,
             video_id=1,
             streamer="alice",
@@ -170,7 +183,7 @@ class FakeLiveSession:
     runs = 0
     stop_calls = 0
 
-    def __init__(self, source, embedder, store, poll_interval):
+    def __init__(self, source, embedder, fingerprints, poll_interval):
         self.source = source
 
     def run(self) -> None:
@@ -182,10 +195,10 @@ class FakeLiveSession:
 
 
 class HybridSessionFactory:
-    def __call__(self, source, embedder, store, poll_interval):
+    def __call__(self, source, embedder, fingerprints, poll_interval):
         if getattr(source, "vod_metadata", None) is not None:
-            return FakeBacklogSession(source, embedder, store, poll_interval)
-        return FakeLiveSession(source, embedder, store, poll_interval)
+            return FakeBacklogSession(source, embedder, fingerprints, poll_interval)
+        return FakeLiveSession(source, embedder, fingerprints, poll_interval)
 
 
 class TestRunHybridIngest:
@@ -210,7 +223,7 @@ class TestRunHybridIngest:
         result = run_hybrid_ingest(
             "alice",
             monitor=monitor,
-            build_store=lambda: {"store": store},
+            build_storage=lambda: FakeRepositories(store),
             build_ingest=lambda: {"embedder": object()},
             historical_source_factory=FakeSource,
             live_source_factory=FakeSource,
@@ -251,7 +264,7 @@ class TestRunHybridIngest:
         result = run_hybrid_ingest(
             "alice",
             monitor=monitor,
-            build_store=lambda: {"store": store},
+            build_storage=lambda: FakeRepositories(store),
             build_ingest=lambda: {"embedder": object()},
             historical_source_factory=FakeSource,
             live_source_factory=FakeSource,
@@ -305,7 +318,7 @@ class TestRunHybridIngest:
         result = run_hybrid_ingest(
             "alice",
             monitor=monitor,
-            build_store=lambda: {"store": store},
+            build_storage=lambda: FakeRepositories(store),
             build_ingest=lambda: {"embedder": object()},
             historical_source_factory=FakeSource,
             live_source_factory=FakeSource,
@@ -396,7 +409,8 @@ class TestRunHybridIngest:
 
         backlog = _build_backlog(
             twitch_monitor=monitor,
-            store=store,
+            videos=store,
+            ingest_states=store,
             user_id="user-1",
             days=30,
             skipped_vods_logged=set(),
@@ -450,7 +464,7 @@ class TestRunHybridIngest:
         result = run_hybrid_ingest(
             "alice",
             monitor=monitor,
-            build_store=lambda: {"store": store},
+            build_storage=lambda: FakeRepositories(store),
             build_ingest=lambda: {"embedder": object()},
             historical_source_factory=FakeSource,
             live_source_factory=FakeSource,
@@ -497,7 +511,8 @@ class TestRunHybridIngest:
 
         backlog = _build_backlog(
             twitch_monitor=monitor,
-            store=store,
+            videos=store,
+            ingest_states=store,
             user_id="user-1",
             days=30,
             skipped_vods_logged=set(),
@@ -536,7 +551,8 @@ class TestRunHybridIngest:
 
         backlog = _build_backlog(
             twitch_monitor=monitor,
-            store=store,
+            videos=store,
+            ingest_states=store,
             user_id="user-1",
             days=30,
             skipped_vods_logged=set(),
@@ -567,7 +583,7 @@ class TestRunHybridIngest:
         result = run_hybrid_ingest(
             "alice",
             monitor=monitor,
-            build_store=lambda: {"store": store},
+            build_storage=lambda: FakeRepositories(store),
             build_ingest=lambda: {"embedder": object()},
             historical_source_factory=FakeSource,
             live_source_factory=FakeSource,
@@ -616,7 +632,7 @@ class TestRunHybridIngest:
         result = run_hybrid_ingest(
             "alice",
             monitor=monitor,
-            build_store=lambda: {"store": store},
+            build_storage=lambda: FakeRepositories(store),
             build_ingest=lambda: {"embedder": object()},
             historical_source_factory=FakeSource,
             live_source_factory=FakeSource,
@@ -649,10 +665,10 @@ class TestRunHybridIngest:
                     time.sleep(0.01)
 
         class StopAwareFactory:
-            def __call__(self, source, embedder, store, poll_interval):
+            def __call__(self, source, embedder, fingerprints, poll_interval):
                 if getattr(source, "vod_metadata", None) is not None:
-                    return FakeBacklogSession(source, embedder, store, poll_interval)
-                return BlockingLiveSession(source, embedder, store, poll_interval)
+                    return FakeBacklogSession(source, embedder, fingerprints, poll_interval)
+                return BlockingLiveSession(source, embedder, fingerprints, poll_interval)
 
         def should_stop() -> bool:
             return stop_flag["done"]
@@ -666,7 +682,7 @@ class TestRunHybridIngest:
         result = run_hybrid_ingest(
             "alice",
             monitor=monitor,
-            build_store=lambda: {"store": store},
+            build_storage=lambda: FakeRepositories(store),
             build_ingest=lambda: {"embedder": object()},
             historical_source_factory=FakeSource,
             live_source_factory=FakeSource,
@@ -702,7 +718,7 @@ class TestRunHybridIngest:
         result = run_hybrid_ingest(
             "alice",
             monitor=monitor,
-            build_store=lambda: {"store": store},
+            build_storage=lambda: FakeRepositories(store),
             build_ingest=lambda: {"embedder": object()},
             historical_source_factory=FakeSource,
             live_source_factory=FakeSource,
@@ -742,7 +758,7 @@ class TestRunHybridIngest:
         result = run_hybrid_ingest(
             "alice",
             monitor=monitor,
-            build_store=lambda: {"store": store},
+            build_storage=lambda: FakeRepositories(store),
             build_ingest=lambda: {"embedder": object()},
             historical_source_factory=FakeSource,
             live_source_factory=FakeSource,
@@ -766,10 +782,10 @@ class TestRunHybridIngest:
                 raise RuntimeError("live-boom")
 
         class FailureAwareFactory:
-            def __call__(self, source, embedder, store, poll_interval):
+            def __call__(self, source, embedder, fingerprints, poll_interval):
                 if getattr(source, "vod_metadata", None) is not None:
-                    return FakeBacklogSession(source, embedder, store, poll_interval)
-                return FailingLiveSession(source, embedder, store, poll_interval)
+                    return FakeBacklogSession(source, embedder, fingerprints, poll_interval)
+                return FailingLiveSession(source, embedder, fingerprints, poll_interval)
 
         monitor = FakeMonitor(live_sequence=[True, False, False], vods=[])
         store = FakeStore()
@@ -783,7 +799,7 @@ class TestRunHybridIngest:
         result = run_hybrid_ingest(
             "alice",
             monitor=monitor,
-            build_store=lambda: {"store": store},
+            build_storage=lambda: FakeRepositories(store),
             build_ingest=lambda: {"embedder": object()},
             historical_source_factory=FakeSource,
             live_source_factory=FakeSource,

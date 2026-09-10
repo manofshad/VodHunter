@@ -50,26 +50,32 @@ def create_public_app(
         @asynccontextmanager
         async def lifespan(app: FastAPI):
             data_dir = Path(ROOT_DIR) / "data"
-            common_state = bootstrap_shared.build_store_state(
+            repositories = bootstrap_shared.build_repositories(
                 database_url=os.getenv("DATABASE_URL", "").strip()
             )
-            search_state = bootstrap_shared.build_search_stack(
-                store=common_state["store"],
+            search_stack = bootstrap_shared.build_search_stack(
+                repositories=repositories,
                 max_duration_seconds=PUBLIC_MAX_DURATION_SECONDS,
                 download_temp_dir=str(data_dir / "temp_search_downloads"),
                 preprocess_temp_dir=str(data_dir / "temp_search"),
             )
             search_job_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="public-search")
             search_job_service = SearchJobService(
-                store=common_state["store"],
-                search_manager=search_state["search_manager"],
+                jobs=repositories.search_jobs,
+                search_manager=search_stack.search_manager,
                 executor=search_job_executor,
             )
             search_job_service.fail_incomplete_public_search_jobs()
 
             for key, value in {
-                **common_state,
-                **search_state,
+                "repositories": repositories,
+                "videos": repositories.videos,
+                "fingerprints": repositories.fingerprints,
+                "ingest_states": repositories.ingest_states,
+                "search_jobs": repositories.search_jobs,
+                "query_embedder": search_stack.query_embedder,
+                "search_service": search_stack.search_service,
+                "search_manager": search_stack.search_manager,
                 "search_job_executor": search_job_executor,
                 "search_job_service": search_job_service,
             }.items():
@@ -79,7 +85,7 @@ def create_public_app(
                 yield
             finally:
                 search_job_executor.shutdown(wait=True, cancel_futures=True)
-                search_state["query_embedder"].close()
+                search_stack.query_embedder.close()
 
         app = FastAPI(title="VodHunter Public API", lifespan=lifespan)
     else:
