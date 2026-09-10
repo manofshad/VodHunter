@@ -22,6 +22,12 @@ from search.models import (
     SearchRequestOutcome,
     SearchResult,
 )
+from storage.records import (
+    SearchableStreamer,
+    VideoRecord,
+    VideoStatus,
+    VodIngestStateRecord,
+)
 
 
 logger = logging.getLogger("uvicorn.error")
@@ -32,16 +38,13 @@ DEFAULT_NMFP_MODEL_VERSION = NMFP_MODEL_VERSION
 DEFAULT_NMFP_PREPROCESSING_VERSION = NMFP_PREPROCESSING_VERSION
 
 
-VIDEO_STATUS_INDEXING = "indexing"
-VIDEO_STATUS_SEARCHABLE = "searchable"
-VIDEO_STATUS_DELETED = "deleted"
-VIDEO_STATUS_REINDEX_REQUESTED = "reindex_requested"
-VIDEO_STATUSES = (
-    VIDEO_STATUS_INDEXING,
-    VIDEO_STATUS_SEARCHABLE,
-    VIDEO_STATUS_DELETED,
-    VIDEO_STATUS_REINDEX_REQUESTED,
-)
+# Keep the existing string constants available to callers while using one
+# source of truth for the persisted lifecycle states.
+VIDEO_STATUS_INDEXING = VideoStatus.INDEXING.value
+VIDEO_STATUS_SEARCHABLE = VideoStatus.SEARCHABLE.value
+VIDEO_STATUS_DELETED = VideoStatus.DELETED.value
+VIDEO_STATUS_REINDEX_REQUESTED = VideoStatus.REINDEX_REQUESTED.value
+VIDEO_STATUSES = tuple(status.value for status in VideoStatus)
 
 
 class VideoMutationError(Exception):
@@ -105,8 +108,12 @@ class VectorStore:
         self._register_vector(conn)
         return conn
 
-    def _normalize_video_status(self, status: str) -> str:
-        normalized_status = str(status).strip().lower()
+    def _normalize_video_status(self, status: str | VideoStatus) -> str:
+        normalized_status = (
+            status.value
+            if isinstance(status, VideoStatus)
+            else str(status).strip().lower()
+        )
         if normalized_status not in VIDEO_STATUSES:
             raise ValueError(f"Invalid video status: {status}")
         return normalized_status
@@ -114,8 +121,45 @@ class VectorStore:
     def _status_from_processed(self, processed: bool) -> str:
         return VIDEO_STATUS_SEARCHABLE if bool(processed) else VIDEO_STATUS_INDEXING
 
-    def _processed_from_status(self, status: str) -> bool:
+    def _processed_from_status(self, status: str | VideoStatus) -> bool:
         return self._normalize_video_status(status) != VIDEO_STATUS_INDEXING
+
+    def _video_from_row(self, row: Any, *, with_creator: bool = False) -> VideoRecord:
+        """Map a video query row before it leaves the storage boundary."""
+
+        creator_name = None
+        creator_profile_image_url = None
+        if with_creator:
+            creator_name = str(row[8]) if row[8] is not None else None
+            creator_profile_image_url = str(row[9]) if row[9] else None
+
+        return VideoRecord(
+            id=int(row[0]),
+            creator_id=int(row[1]),
+            url=str(row[2]),
+            title=str(row[3]),
+            thumbnail_url=str(row[4]) if row[4] else None,
+            status=(
+                VideoStatus(self._normalize_video_status(str(row[5])))
+                if row[5] is not None
+                else None
+            ),
+            processed=bool(row[6]),
+            streamed_at=row[7],
+            creator_name=creator_name,
+            creator_profile_image_url=creator_profile_image_url,
+        )
+
+    @staticmethod
+    def _vod_ingest_state_from_row(row: Any) -> VodIngestStateRecord:
+        return VodIngestStateRecord(
+            vod_platform_id=str(row[0]),
+            video_id=int(row[1]),
+            streamer=str(row[2]),
+            last_ingested_seconds=int(row[3]),
+            last_seen_duration_seconds=int(row[4]),
+            updated_at=row[5],
+        )
 
     def ensure_schema_ready(self) -> None:
         with self._connect() as conn:
@@ -348,12 +392,13 @@ class VectorStore:
             raise RuntimeError("Failed to resolve fingerprint ids")
         return ids
 
-    def get_video_by_url(self, url: str) -> tuple[int, int, str, str, str | None, bool, Any] | None:
+    def get_video_by_url(self, url: str) -> VideoRecord | None:
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT id, creator_id, url, title, thumbnail_url, processed, streamed_at
+                    SELECT id, creator_id, url, title, thumbnail_url,
+                           status, processed, streamed_at
                     FROM videos
                     WHERE url = %s
                     LIMIT 1
@@ -363,7 +408,7 @@ class VectorStore:
                 row = cur.fetchone()
         if row is None:
             return None
-        return int(row[0]), int(row[1]), str(row[2]), str(row[3]), str(row[4]) if row[4] else None, bool(row[5]), row[6]
+        return self._video_from_row(row)
 
     def create_or_get_creator(
         self,
@@ -447,7 +492,7 @@ class VectorStore:
         processed: bool,
         thumbnail_url: str | None = None,
         streamed_at: Any = None,
-        status: str | None = None,
+        status: str | VideoStatus | None = None,
     ) -> int:
         resolved_status = (
             self._normalize_video_status(status)
@@ -478,7 +523,7 @@ class VectorStore:
         thumbnail_url: str | None = None,
         processed: bool | None = None,
         streamed_at: Any = None,
-        status: str | None = None,
+        status: str | VideoStatus | None = None,
     ) -> None:
         assignments: list[str] = []
         values: list[Any] = []
@@ -542,7 +587,7 @@ class VectorStore:
             return None
         return self._normalize_video_status(str(row[0]))
 
-    def update_video_status(self, video_id: int, status: str) -> None:
+    def update_video_status(self, video_id: int, status: str | VideoStatus) -> None:
         resolved_status = self._normalize_video_status(status)
         with self._connect() as conn:
             with conn.cursor() as cur:
@@ -635,7 +680,7 @@ class VectorStore:
     def get_video_with_owner(
         self,
         video_id: int,
-    ) -> tuple[int, int, str, str, str | None, str, bool, Any, str, str | None] | None:
+    ) -> VideoRecord | None:
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -660,20 +705,9 @@ class VectorStore:
                 row = cur.fetchone()
         if row is None:
             return None
-        return (
-            int(row[0]),
-            int(row[1]),
-            str(row[2]),
-            str(row[3]),
-            str(row[4]) if row[4] else None,
-            self._normalize_video_status(str(row[5])),
-            bool(row[6]),
-            row[7],
-            str(row[8]),
-            str(row[9]) if row[9] else None,
-        )
+        return self._video_from_row(row, with_creator=True)
 
-    def get_vod_ingest_state(self, vod_platform_id: str) -> dict | None:
+    def get_vod_ingest_state(self, vod_platform_id: str) -> VodIngestStateRecord | None:
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -689,14 +723,7 @@ class VectorStore:
                 row = cur.fetchone()
         if row is None:
             return None
-        return {
-            "vod_platform_id": str(row[0]),
-            "video_id": int(row[1]),
-            "streamer": str(row[2]),
-            "last_ingested_seconds": int(row[3]),
-            "last_seen_duration_seconds": int(row[4]),
-            "updated_at": str(row[5]),
-        }
+        return self._vod_ingest_state_from_row(row)
 
     def upsert_vod_ingest_state(
         self,
@@ -745,7 +772,7 @@ class VectorStore:
                     (vod_platform_id,),
                 )
 
-    def get_live_ingest_state(self, vod_platform_id: str) -> dict | None:
+    def get_live_ingest_state(self, vod_platform_id: str) -> VodIngestStateRecord | None:
         return self.get_vod_ingest_state(vod_platform_id)
 
     def upsert_live_ingest_state(
@@ -914,21 +941,10 @@ class VectorStore:
             for row in rows
         ]
 
-    def get_video_with_creator(self, video_id: int) -> tuple[int, str, str, str, str | None, str | None] | None:
-        row = self.get_video_with_owner(video_id)
-        if row is None:
-            return None
-        return (
-            int(row[0]),
-            str(row[2]),
-            str(row[3]),
-            str(row[8]),
-            str(row[4]) if row[4] else None,
-            str(row[9]) if row[9] else None,
-        )
+    def get_video_with_creator(self, video_id: int) -> VideoRecord | None:
+        return self.get_video_with_owner(video_id)
 
-
-    def list_searchable_streamers(self) -> list[dict[str, str | None]]:
+    def list_searchable_streamers(self) -> list[SearchableStreamer]:
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -945,10 +961,10 @@ class VectorStore:
                 )
                 rows = cur.fetchall()
         return [
-            {
-                "name": str(r[0]),
-                "profile_image_url": str(r[1]) if r[1] else None,
-            }
+            SearchableStreamer(
+                name=str(r[0]),
+                profile_image_url=str(r[1]) if r[1] else None,
+            )
             for r in rows
         ]
 
@@ -1228,19 +1244,21 @@ class VectorStore:
                 if matched_video_id is not None:
                     video_row = self.get_video_with_creator(int(matched_video_id))
                     if video_row is not None:
-                        video_id, video_url, title, creator_name, thumbnail_url, profile_image_url = video_row
-                        result.streamer = creator_name
-                        result.profile_image_url = profile_image_url
-                        result.video_id = video_id
-                        result.video_url = video_url
-                        result.thumbnail_url = thumbnail_url
-                        result.title = title
+                        result.streamer = video_row.creator_name
+                        result.profile_image_url = video_row.creator_profile_image_url
+                        result.video_id = video_row.id
+                        result.video_url = video_row.url
+                        result.thumbnail_url = video_row.thumbnail_url
+                        result.title = video_row.title
                         cur_timestamp = int(matched_timestamp_seconds) if matched_timestamp_seconds is not None else None
                         result.timestamp_seconds = cur_timestamp
                         if cur_timestamp is not None:
                             from search.twitch_time import build_twitch_timestamp_url
 
-                            result.video_url_at_timestamp = build_twitch_timestamp_url(video_url, cur_timestamp)
+                            result.video_url_at_timestamp = build_twitch_timestamp_url(
+                                video_row.url,
+                                cur_timestamp,
+                            )
                 else:
                     result.profile_image_url = self._get_profile_image_for_streamer(str(streamer) if streamer else None)
 

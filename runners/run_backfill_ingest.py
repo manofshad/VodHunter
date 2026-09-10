@@ -25,6 +25,7 @@ from storage.vector_store import (
     VIDEO_STATUS_REINDEX_REQUESTED,
     VIDEO_STATUS_SEARCHABLE,
 )
+from storage.records import VodIngestStateRecord, VideoRecord
 from sources.historical_archive_vod_source import HistoricalArchiveVODSource
 
 
@@ -46,31 +47,25 @@ class FreshNMFPReindexPreconditionError(RuntimeError):
 
 
 def _get_existing_video_status(
-    store: object,
-    existing_video: tuple[object, ...] | None,
+    existing_video: VideoRecord | None,
 ) -> str | None:
     if existing_video is None:
         return None
-
-    get_video_status = getattr(store, "get_video_status", None)
-    if not callable(get_video_status):
-        return None
-
-    status = get_video_status(int(existing_video[0]))
-    if status is None:
-        return None
-    return str(status).strip().lower() or None
+    return (
+        existing_video.status.value
+        if existing_video.status is not None
+        else None
+    )
 
 
 def _classify_backfill_candidate(
-    store: object,
-    existing_video: tuple[object, ...] | None,
-    existing_state: dict[str, object] | None,
+    existing_video: VideoRecord | None,
+    existing_state: VodIngestStateRecord | None,
 ) -> tuple[bool, str | None, bool]:
     if existing_video is None:
         return True, None, False
 
-    existing_status = _get_existing_video_status(store, existing_video)
+    existing_status = _get_existing_video_status(existing_video)
     if existing_status == VIDEO_STATUS_REINDEX_REQUESTED:
         return True, existing_status, True
     if existing_status == VIDEO_STATUS_INDEXING:
@@ -80,7 +75,7 @@ def _classify_backfill_candidate(
     if existing_status in {VIDEO_STATUS_SEARCHABLE, VIDEO_STATUS_DELETED}:
         return False, existing_status, False
 
-    if bool(existing_video[5]):
+    if existing_video.processed:
         return False, "processed", False
     return True, None, False
 
@@ -110,13 +105,13 @@ def _validate_fresh_nmfp_reindex(
                 problems.append(f"vod={vod_id} status=missing_video has_saved_cursor=true")
             continue
 
-        existing_status = _get_existing_video_status(store, existing_video)
+        existing_status = _get_existing_video_status(existing_video)
         if existing_status in {VIDEO_STATUS_REINDEX_REQUESTED, VIDEO_STATUS_DELETED}:
             continue
 
         fallback_status = existing_status
         if fallback_status is None:
-            fallback_status = "processed" if bool(existing_video[5]) else "unknown"
+            fallback_status = "processed" if existing_video.processed else "unknown"
         problems.append(
             f"vod={vod_id} status={fallback_status} "
             f"has_saved_cursor={'true' if existing_state is not None else 'false'}"
@@ -189,7 +184,6 @@ def run_backfill_ingest(
         existing_video = store.get_video_by_url(str(vod["url"]))
         existing_state = store.get_vod_ingest_state(str(vod["id"]))
         is_eligible, skip_reason, restart_from_scratch = _classify_backfill_candidate(
-            store,
             existing_video,
             existing_state,
         )
@@ -206,10 +200,10 @@ def run_backfill_ingest(
             existing_state = None
 
         starting_cursor = 0
-        if existing_state is not None and int(existing_state.get("last_ingested_seconds", 0)) > 0:
+        if existing_state is not None and existing_state.last_ingested_seconds > 0:
             result.resumed += 1
-            starting_cursor = int(existing_state["last_ingested_seconds"])
-            out(f"resume vod={vod['id']} cursor={existing_state['last_ingested_seconds']}")
+            starting_cursor = existing_state.last_ingested_seconds
+            out(f"resume vod={vod['id']} cursor={existing_state.last_ingested_seconds}")
 
         out(
             f"starting vod {index}/{total_vods} vod={vod['id']} "

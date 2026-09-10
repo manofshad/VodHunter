@@ -10,6 +10,7 @@ from search.models import (
     SearchRequestOutcome,
     SearchResult,
 )
+from storage.records import SearchableStreamer
 from storage.vector_store import VectorStore
 
 
@@ -50,12 +51,12 @@ class StubSearchManager:
 
 
 class StubStore:
-    def __init__(self, streamers: list[dict[str, str | None]] | None = None):
+    def __init__(self, streamers: list[SearchableStreamer] | None = None):
         self.streamers = streamers or [
-            {"name": "xqc", "profile_image_url": "https://cdn/xqc.png"},
-            {"name": "jason", "profile_image_url": None},
+            SearchableStreamer(name="xqc", profile_image_url="https://cdn/xqc.png"),
+            SearchableStreamer(name="jason", profile_image_url=None),
         ]
-    def list_searchable_streamers(self) -> list[dict[str, str | None]]:
+    def list_searchable_streamers(self) -> list[SearchableStreamer]:
         return list(self.streamers)
 
     def get_creator_id_by_name(self, name: str) -> int | None:

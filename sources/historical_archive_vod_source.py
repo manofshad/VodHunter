@@ -13,6 +13,7 @@ import urllib.request
 from pipeline.nmfp_inference import NMFP_HOP_SECONDS, NMFP_SAMPLE_RATE
 from sources.audio_chunk import AudioChunk
 from sources.audio_source import AudioSource
+from storage.records import VideoStatus
 from storage.vector_store import VectorStore
 
 
@@ -250,26 +251,27 @@ class HistoricalArchiveVODSource(AudioSource):
                 thumbnail_url=self._vod_thumbnail_url,
                 processed=False,
                 streamed_at=self._streamed_at,
-                status="indexing",
+                status=VideoStatus.INDEXING.value,
             )
         else:
-            self.video_id = int(existing_video[0])
-            existing_status = None
-            get_video_status = getattr(self.store, "get_video_status", None)
-            if callable(get_video_status):
-                existing_status = get_video_status(self.video_id)
-            if existing_status == "reindex_requested":
+            self.video_id = existing_video.id
+            existing_status = (
+                existing_video.status.value
+                if existing_video.status is not None
+                else None
+            )
+            if existing_status == VideoStatus.REINDEX_REQUESTED.value:
                 self.store.delete_vod_ingest_state(self._vod_platform_id)
             self.store.update_video_metadata(
                 self.video_id,
                 title=self._vod_title,
                 thumbnail_url=self._vod_thumbnail_url,
                 streamed_at=self._streamed_at,
-                status="indexing",
+                status=VideoStatus.INDEXING.value,
             )
 
         state = self.store.get_vod_ingest_state(self._vod_platform_id)
-        self.ingest_cursor_seconds = int(state.get("last_ingested_seconds", 0)) if state else 0
+        self.ingest_cursor_seconds = state.last_ingested_seconds if state else 0
         self._save_ingest_state()
 
     def next_chunk(self) -> Optional[AudioChunk]:
@@ -523,7 +525,7 @@ class HistoricalArchiveVODSource(AudioSource):
         if self.video_id is not None:
             update_video_status = getattr(self.store, "update_video_status", None)
             if callable(update_video_status):
-                update_video_status(self.video_id, "searchable")
+                update_video_status(self.video_id, VideoStatus.SEARCHABLE.value)
             else:
                 self.store.mark_video_processed(self.video_id, processed=True)
         self.store.delete_vod_ingest_state(self._vod_platform_id)

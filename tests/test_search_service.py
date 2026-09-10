@@ -4,6 +4,7 @@ import numpy as np
 from search.models import AlignmentResult, FingerprintCandidate, SearchDateRange, SearchSegment
 from pipeline.nmfp_inference import NMFPExtractionMetrics, NMFPExtractionResult
 from search.search_service import SearchService
+from storage.records import VideoRecord, VideoStatus
 
 class FakePreprocessor:
 
@@ -70,8 +71,30 @@ class FakeStore:
 
     def get_video_with_creator(self, video_id: int):
         if video_id == 888:
-            return (888, 'https://www.twitch.tv/videos/888', 'Second VOD', 'xqc', None, 'https://cdn/xqc.png')
-        return (777, 'https://www.twitch.tv/videos/2699020769', 'Sample title', 'xqc', 'https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg', 'https://cdn/xqc.png')
+            return VideoRecord(
+                id=888,
+                creator_id=12,
+                url='https://www.twitch.tv/videos/888',
+                title='Second VOD',
+                thumbnail_url=None,
+                status=VideoStatus.SEARCHABLE,
+                processed=True,
+                streamed_at=None,
+                creator_name='xqc',
+                creator_profile_image_url='https://cdn/xqc.png',
+            )
+        return VideoRecord(
+            id=777,
+            creator_id=12,
+            url='https://www.twitch.tv/videos/2699020769',
+            title='Sample title',
+            thumbnail_url='https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg',
+            status=VideoStatus.SEARCHABLE,
+            processed=True,
+            streamed_at=None,
+            creator_name='xqc',
+            creator_profile_image_url='https://cdn/xqc.png',
+        )
 
 class TestSearchService:
 

@@ -26,7 +26,7 @@ def _normalize_and_validate_streamer(request: Request, streamer: str | None) -> 
         )
 
     searchable_streamers = request.app.state.store.list_searchable_streamers()
-    searchable_streamer_names = {str(item["name"]).strip().lower() for item in searchable_streamers}
+    searchable_streamer_names = {item.name.strip().lower() for item in searchable_streamers}
     if normalized_streamer not in searchable_streamer_names:
         raise HTTPException(
             status_code=400,
@@ -127,8 +127,8 @@ def list_searchable_streamers(request: Request) -> list[StreamerListItem]:
     streamers = request.app.state.store.list_searchable_streamers()
     return [
         StreamerListItem(
-            name=str(item["name"]),
-            profile_image_url=str(item["profile_image_url"]) if item.get("profile_image_url") else None,
+            name=item.name,
+            profile_image_url=item.profile_image_url,
         )
         for item in streamers
     ]

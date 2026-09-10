@@ -1,7 +1,9 @@
 import threading
 import time
+from datetime import datetime, timezone
 
 from runners.run_hybrid_ingest import _build_backlog, main, run_hybrid_ingest
+from storage.records import VodIngestStateRecord, VideoRecord, VideoStatus
 
 
 class FakeMonitor:
@@ -34,10 +36,52 @@ class FakeMonitor:
 
 class FakeStore:
     def __init__(self):
-        self.videos_by_url: dict[str, tuple[int, int, str, str, str | None, bool]] = {}
-        self.vod_state: dict[str, dict[str, object]] = {}
+        self.videos_by_url: dict[str, VideoRecord] = {}
+        self.vod_state: dict[str, VodIngestStateRecord] = {}
         self.video_status_by_id: dict[int, str | None] = {}
         self.deleted_vod_state_ids: list[str] = []
+
+    def set_video(
+        self,
+        *,
+        video_id: int,
+        creator_id: int,
+        url: str,
+        title: str,
+        processed: bool,
+        status: str | None,
+        thumbnail_url: str | None = None,
+        streamed_at: datetime | None = None,
+    ) -> None:
+        self.videos_by_url[url] = VideoRecord(
+            id=video_id,
+            creator_id=creator_id,
+            url=url,
+            title=title,
+            thumbnail_url=thumbnail_url,
+            status=VideoStatus(status) if status is not None else None,
+            processed=processed,
+            streamed_at=streamed_at,
+        )
+        self.video_status_by_id[video_id] = status
+
+    def set_state(
+        self,
+        *,
+        vod_platform_id: str,
+        video_id: int,
+        streamer: str,
+        last_ingested_seconds: int,
+        last_seen_duration_seconds: int,
+    ) -> None:
+        self.vod_state[vod_platform_id] = VodIngestStateRecord(
+            vod_platform_id=vod_platform_id,
+            video_id=video_id,
+            streamer=streamer,
+            last_ingested_seconds=last_ingested_seconds,
+            last_seen_duration_seconds=last_seen_duration_seconds,
+            updated_at=datetime.now(timezone.utc),
+        )
 
     def get_video_by_url(self, url: str):
         return self.videos_by_url.get(url)
@@ -99,26 +143,27 @@ class FakeBacklogSession:
                         "vod_id": self.vod_id,
                     }
                 )
-            self.source.kwargs["store"].videos_by_url[str(self.source.vod_metadata["url"])] = (
-                1,
-                1,
-                str(self.source.vod_metadata["url"]),
-                "done",
-                None,
-                True,
+            self.source.kwargs["store"].set_video(
+                video_id=1,
+                creator_id=1,
+                url=str(self.source.vod_metadata["url"]),
+                title="done",
+                thumbnail_url=None,
+                processed=True,
+                status="searchable",
             )
             self.source.kwargs["store"].vod_state.pop(self.vod_id, None)
 
     def stop(self) -> None:
         self.stopped = True
         FakeBacklogSession.stop_calls.append(self.vod_id)
-        self.source.kwargs["store"].vod_state[self.vod_id] = {
-            "vod_platform_id": self.vod_id,
-            "video_id": 1,
-            "streamer": "alice",
-            "last_ingested_seconds": 60,
-            "last_seen_duration_seconds": 120,
-        }
+        self.source.kwargs["store"].set_state(
+            vod_platform_id=self.vod_id,
+            video_id=1,
+            streamer="alice",
+            last_ingested_seconds=60,
+            last_seen_duration_seconds=120,
+        )
 
 
 class FakeLiveSession:
@@ -234,21 +279,21 @@ class TestRunHybridIngest:
             ],
         )
         store = FakeStore()
-        store.videos_by_url["https://www.twitch.tv/videos/processed"] = (
-            2,
-            1,
-            "https://www.twitch.tv/videos/processed",
-            "done",
-            None,
-            True,
+        store.set_video(
+            video_id=2,
+            creator_id=1,
+            url="https://www.twitch.tv/videos/processed",
+            title="done",
+            processed=True,
+            status=None,
         )
-        store.vod_state["resume"] = {
-            "vod_platform_id": "resume",
-            "video_id": 1,
-            "streamer": "alice",
-            "last_ingested_seconds": 90,
-            "last_seen_duration_seconds": 120,
-        }
+        store.set_state(
+            vod_platform_id="resume",
+            video_id=1,
+            streamer="alice",
+            last_ingested_seconds=90,
+            last_seen_duration_seconds=120,
+        )
         logs: list[str] = []
         stop_flag = {"done": False}
 
@@ -292,70 +337,60 @@ class TestRunHybridIngest:
             ]
         )
         store = FakeStore()
-        store.videos_by_url["https://www.twitch.tv/videos/reindex"] = (
-            1,
-            1,
-            "https://www.twitch.tv/videos/reindex",
-            "Needs reindex",
-            None,
-            True,
-            None,
+        store.set_video(
+            video_id=1,
+            creator_id=1,
+            url="https://www.twitch.tv/videos/reindex",
+            title="Needs reindex",
+            processed=True,
+            status="reindex_requested",
         )
-        store.video_status_by_id[1] = "reindex_requested"
-        store.vod_state["reindex"] = {
-            "vod_platform_id": "reindex",
-            "video_id": 1,
-            "streamer": "alice",
-            "last_ingested_seconds": 90,
-            "last_seen_duration_seconds": 120,
-        }
-        store.videos_by_url["https://www.twitch.tv/videos/deleted"] = (
-            2,
-            1,
-            "https://www.twitch.tv/videos/deleted",
-            "Deleted",
-            None,
-            True,
-            None,
+        store.set_state(
+            vod_platform_id="reindex",
+            video_id=1,
+            streamer="alice",
+            last_ingested_seconds=90,
+            last_seen_duration_seconds=120,
         )
-        store.video_status_by_id[2] = "deleted"
-        store.videos_by_url["https://www.twitch.tv/videos/searchable"] = (
-            3,
-            1,
-            "https://www.twitch.tv/videos/searchable",
-            "Searchable",
-            None,
-            True,
-            None,
+        store.set_video(
+            video_id=2,
+            creator_id=1,
+            url="https://www.twitch.tv/videos/deleted",
+            title="Deleted",
+            processed=True,
+            status="deleted",
         )
-        store.video_status_by_id[3] = "searchable"
-        store.videos_by_url["https://www.twitch.tv/videos/indexing"] = (
-            4,
-            1,
-            "https://www.twitch.tv/videos/indexing",
-            "Indexing",
-            None,
-            False,
-            None,
+        store.set_video(
+            video_id=3,
+            creator_id=1,
+            url="https://www.twitch.tv/videos/searchable",
+            title="Searchable",
+            processed=True,
+            status="searchable",
         )
-        store.video_status_by_id[4] = "indexing"
-        store.videos_by_url["https://www.twitch.tv/videos/legacy-processed"] = (
-            5,
-            1,
-            "https://www.twitch.tv/videos/legacy-processed",
-            "Legacy processed",
-            None,
-            True,
-            None,
+        store.set_video(
+            video_id=4,
+            creator_id=1,
+            url="https://www.twitch.tv/videos/indexing",
+            title="Indexing",
+            processed=False,
+            status="indexing",
         )
-        store.videos_by_url["https://www.twitch.tv/videos/legacy-unprocessed"] = (
-            6,
-            1,
-            "https://www.twitch.tv/videos/legacy-unprocessed",
-            "Legacy unprocessed",
-            None,
-            False,
-            None,
+        store.set_video(
+            video_id=5,
+            creator_id=1,
+            url="https://www.twitch.tv/videos/legacy-processed",
+            title="Legacy processed",
+            processed=True,
+            status=None,
+        )
+        store.set_video(
+            video_id=6,
+            creator_id=1,
+            url="https://www.twitch.tv/videos/legacy-unprocessed",
+            title="Legacy unprocessed",
+            processed=False,
+            status=None,
         )
         logs: list[str] = []
 
@@ -389,23 +424,21 @@ class TestRunHybridIngest:
             ],
         )
         store = FakeStore()
-        store.videos_by_url["https://www.twitch.tv/videos/reindex"] = (
-            7,
-            1,
-            "https://www.twitch.tv/videos/reindex",
-            "Needs reindex",
-            None,
-            True,
-            None,
+        store.set_video(
+            video_id=7,
+            creator_id=1,
+            url="https://www.twitch.tv/videos/reindex",
+            title="Needs reindex",
+            processed=True,
+            status="reindex_requested",
         )
-        store.video_status_by_id[7] = "reindex_requested"
-        store.vod_state["reindex"] = {
-            "vod_platform_id": "reindex",
-            "video_id": 7,
-            "streamer": "alice",
-            "last_ingested_seconds": 90,
-            "last_seen_duration_seconds": 120,
-        }
+        store.set_state(
+            vod_platform_id="reindex",
+            video_id=7,
+            streamer="alice",
+            last_ingested_seconds=90,
+            last_seen_duration_seconds=120,
+        )
         logs: list[str] = []
         stop_flag = {"done": False}
 
@@ -445,22 +478,21 @@ class TestRunHybridIngest:
             ]
         )
         store = FakeStore()
-        store.videos_by_url["https://www.twitch.tv/videos/legacy-processed"] = (
-            8,
-            1,
-            "https://www.twitch.tv/videos/legacy-processed",
-            "Legacy processed",
-            None,
-            True,
-            None,
+        store.set_video(
+            video_id=8,
+            creator_id=1,
+            url="https://www.twitch.tv/videos/legacy-processed",
+            title="Legacy processed",
+            processed=True,
+            status=None,
         )
-        store.vod_state["legacy-processed"] = {
-            "vod_platform_id": "legacy-processed",
-            "video_id": 8,
-            "streamer": "alice",
-            "last_ingested_seconds": 90,
-            "last_seen_duration_seconds": 120,
-        }
+        store.set_state(
+            vod_platform_id="legacy-processed",
+            video_id=8,
+            streamer="alice",
+            last_ingested_seconds=90,
+            last_seen_duration_seconds=120,
+        )
         logs: list[str] = []
 
         backlog = _build_backlog(
@@ -485,23 +517,21 @@ class TestRunHybridIngest:
             ]
         )
         store = FakeStore()
-        store.videos_by_url["https://www.twitch.tv/videos/resume-indexing"] = (
-            9,
-            1,
-            "https://www.twitch.tv/videos/resume-indexing",
-            "Resume indexing",
-            None,
-            False,
-            None,
+        store.set_video(
+            video_id=9,
+            creator_id=1,
+            url="https://www.twitch.tv/videos/resume-indexing",
+            title="Resume indexing",
+            processed=False,
+            status="indexing",
         )
-        store.video_status_by_id[9] = "indexing"
-        store.vod_state["resume-indexing"] = {
-            "vod_platform_id": "resume-indexing",
-            "video_id": 9,
-            "streamer": "alice",
-            "last_ingested_seconds": 45,
-            "last_seen_duration_seconds": 120,
-        }
+        store.set_state(
+            vod_platform_id="resume-indexing",
+            video_id=9,
+            streamer="alice",
+            last_ingested_seconds=45,
+            last_seen_duration_seconds=120,
+        )
         logs: list[str] = []
 
         backlog = _build_backlog(
@@ -555,7 +585,7 @@ class TestRunHybridIngest:
         assert FakeLiveSession.runs == 1
         assert result.handoffs_to_live == 1
         assert result.handoffs_to_backlog == 1
-        assert store.vod_state["vod-1"]["last_ingested_seconds"] == 60
+        assert store.vod_state["vod-1"].last_ingested_seconds == 60
         assert any(line == "processing vod=vod-1 chunk=0-30 progress=25.0% backlog=1" for line in logs)
         assert any(line == "handoff_requested event=backlog_to_live vod=vod-1" for line in logs)
         assert any(line == "handoff event=backlog_to_live streamer=alice vod=vod-1" for line in logs)

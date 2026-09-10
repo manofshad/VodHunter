@@ -1,8 +1,11 @@
 import os
 import tempfile
 import numpy as np
+from dataclasses import replace
+from datetime import datetime, timezone
 from pipeline.nmfp_inference import segment_audio_windows
 from sources.live_archive_vod_source import LiveArchiveVODSource
+from storage.records import VodIngestStateRecord, VideoRecord, VideoStatus
 
 class FakeMonitor:
 
@@ -53,8 +56,8 @@ class FakeStore:
         self._creator_id = 0
         self._video_id = 0
         self.creators: dict[str, tuple[int, str, str, str | None]] = {}
-        self.videos_by_url: dict[str, tuple[int, int, str, str, str | None, bool]] = {}
-        self.vod_state: dict[str, dict] = {}
+        self.videos_by_url: dict[str, VideoRecord] = {}
+        self.vod_state: dict[str, VodIngestStateRecord] = {}
         self.video_status_by_id: dict[int, str | None] = {}
         self.metadata_updates: list[dict[str, object]] = []
         self.creator_metadata_updates: list[dict[str, object]] = []
@@ -92,15 +95,33 @@ class FakeStore:
 
     def create_video(self, creator_id: int, url: str, title: str, processed: bool, thumbnail_url: str | None=None, streamed_at=None, status: str | None = None) -> int:
         self._video_id += 1
-        row = (self._video_id, int(creator_id), url, title, thumbnail_url, bool(processed), streamed_at)
+        resolved_status = VideoStatus(status) if status is not None else (
+            VideoStatus.SEARCHABLE if bool(processed) else VideoStatus.INDEXING
+        )
+        row = VideoRecord(
+            id=self._video_id,
+            creator_id=int(creator_id),
+            url=url,
+            title=title,
+            thumbnail_url=thumbnail_url,
+            status=resolved_status,
+            processed=resolved_status != VideoStatus.INDEXING,
+            streamed_at=streamed_at,
+        )
         self.videos_by_url[url] = row
-        self.video_status_by_id[self._video_id] = status
+        self.video_status_by_id[self._video_id] = resolved_status.value
         return self._video_id
 
     def mark_video_processed(self, video_id: int, processed: bool=True) -> None:
         for url, row in list(self.videos_by_url.items()):
-            if int(row[0]) == int(video_id):
-                self.videos_by_url[url] = (row[0], row[1], row[2], row[3], row[4], bool(processed), row[6])
+            if row.id == int(video_id):
+                resolved_status = VideoStatus.SEARCHABLE if processed else VideoStatus.INDEXING
+                self.videos_by_url[url] = replace(
+                    row,
+                    processed=bool(processed),
+                    status=resolved_status,
+                )
+                self.video_status_by_id[int(video_id)] = resolved_status.value
                 return
 
     def update_video_metadata(self, video_id: int, *, title: str | None=None, thumbnail_url: str | None=None, processed: bool | None=None, streamed_at=None, status: str | None = None) -> None:
@@ -114,21 +135,22 @@ class FakeStore:
             }
         )
         for url, row in list(self.videos_by_url.items()):
-            if int(row[0]) != int(video_id):
+            if row.id != int(video_id):
                 continue
             if status is not None:
                 self.video_status_by_id[int(video_id)] = status
-            resolved_processed = bool(processed) if processed is not None else row[5]
+                resolved_status = VideoStatus(status)
+            else:
+                resolved_status = row.status
+            resolved_processed = bool(processed) if processed is not None else row.processed
             if status is not None:
                 resolved_processed = status != 'indexing'
-            self.videos_by_url[url] = (
-                row[0],
-                row[1],
-                row[2],
-                title if title is not None else row[3],
-                thumbnail_url if thumbnail_url is not None else row[4],
-                resolved_processed,
-                row[6],
+            self.videos_by_url[url] = replace(
+                row,
+                title=title if title is not None else row.title,
+                thumbnail_url=thumbnail_url if thumbnail_url is not None else row.thumbnail_url,
+                processed=resolved_processed,
+                status=resolved_status,
             )
             return
 
@@ -139,15 +161,26 @@ class FakeStore:
         self.video_status_by_id[int(video_id)] = status
         processed = status != 'indexing'
         for url, row in list(self.videos_by_url.items()):
-            if int(row[0]) == int(video_id):
-                self.videos_by_url[url] = (row[0], row[1], row[2], row[3], row[4], processed, row[6])
+            if row.id == int(video_id):
+                self.videos_by_url[url] = replace(
+                    row,
+                    processed=processed,
+                    status=VideoStatus(status),
+                )
                 return
 
     def get_vod_ingest_state(self, vod_platform_id: str):
         return self.vod_state.get(vod_platform_id)
 
     def upsert_vod_ingest_state(self, vod_platform_id: str, video_id: int, streamer: str, last_ingested_seconds: int, last_seen_duration_seconds: int) -> None:
-        self.vod_state[vod_platform_id] = {'vod_platform_id': vod_platform_id, 'video_id': int(video_id), 'streamer': streamer, 'last_ingested_seconds': int(last_ingested_seconds), 'last_seen_duration_seconds': int(last_seen_duration_seconds), 'updated_at': 'now'}
+        self.vod_state[vod_platform_id] = VodIngestStateRecord(
+            vod_platform_id=vod_platform_id,
+            video_id=int(video_id),
+            streamer=streamer,
+            last_ingested_seconds=int(last_ingested_seconds),
+            last_seen_duration_seconds=int(last_seen_duration_seconds),
+            updated_at=datetime.now(timezone.utc),
+        )
 
     def delete_vod_ingest_state(self, vod_platform_id: str) -> None:
         self.vod_state.pop(vod_platform_id, None)
@@ -216,8 +249,8 @@ class TestLiveArchiveVODSource:
             row = source.store.get_video_by_url('https://www.twitch.tv/videos/vod-1')
             assert row is not None
             assert row is not None
-            assert row[4] == 'https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg'
-            assert row[5]
+            assert row.thumbnail_url == 'https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg'
+            assert row.processed
             assert source.store.get_video_status(source.video_id) == 'searchable'
 
     def test_existing_video_metadata_is_refreshed(self) -> None:
@@ -229,16 +262,16 @@ class TestLiveArchiveVODSource:
                 url='https://www.twitch.tv/videos/vod-1',
                 title='Old title',
                 thumbnail_url=None,
-                processed=True,
-                status=None,
+                processed=False,
+                status='indexing',
             )
             source.start()
             row = source.store.get_video_by_url('https://www.twitch.tv/videos/vod-1')
             assert row is not None
             assert row is not None
-            assert row[3] == 'Live stream'
-            assert row[4] == 'https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg'
-            assert not row[5]
+            assert row.title == 'Live stream'
+            assert row.thumbnail_url == 'https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg'
+            assert not row.processed
             assert source.store.metadata_updates == [
                 {
                     'video_id': source.video_id,
@@ -411,13 +444,13 @@ class TestLiveArchiveVODSource:
             source.start()
             row = source.store.get_video_by_url('https://www.twitch.tv/videos/vod-1')
             assert row is not None
-            assert row[4] is None
+            assert row.thumbnail_url is None
 
             source.next_chunk()
 
             row = source.store.get_video_by_url('https://www.twitch.tv/videos/vod-1')
             assert row is not None
-            assert row[4] == 'https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg'
+            assert row.thumbnail_url == 'https://static-cdn.jtvnw.net/cf_vods/thumb-320x180.jpg'
             assert source.store.metadata_updates == [
                 {
                     'video_id': source.video_id,
@@ -498,7 +531,7 @@ class TestLiveArchiveVODSource:
 
             row = source.store.get_video_by_url('https://www.twitch.tv/videos/vod-1')
             assert row is not None
-            assert row[3] == 'Updated live title'
+            assert row.title == 'Updated live title'
             assert source.store.metadata_updates == [
                 {
                     'video_id': source.video_id,
@@ -516,8 +549,8 @@ class TestLiveArchiveVODSource:
             chunk = source.next_chunk()
 
             assert chunk is not None
-            assert source.store.vod_state['vod-1']['last_ingested_seconds'] == 0
+            assert source.store.vod_state['vod-1'].last_ingested_seconds == 0
 
             source.stop()
 
-            assert source.store.vod_state['vod-1']['last_ingested_seconds'] == 0
+            assert source.store.vod_state['vod-1'].last_ingested_seconds == 0
