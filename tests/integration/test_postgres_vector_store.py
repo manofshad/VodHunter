@@ -72,7 +72,7 @@ def test_migrated_schema_accepts_real_nmfp_vector_round_trip(store, database_sco
     assert all(candidate.similarity > 0.99 for candidate in candidates)
 
     streamers = store.list_searchable_streamers()
-    assert {item["name"] for item in streamers} >= {database_scope.streamer, f"{database_scope.streamer}-other"}
+    assert {item.name for item in streamers} >= {database_scope.streamer, f"{database_scope.streamer}-other"}
 
 
 @pytest.mark.integration

@@ -1,3 +1,6 @@
+from datetime import datetime, timezone
+
+from storage.records import SearchableStreamer, VideoRecord, VideoStatus, VodIngestStateRecord
 from storage.vector_store import VectorStore
 
 class FakeCursor:
@@ -42,6 +45,74 @@ class FakeConnection:
 
 class TestVectorStoreStreamerScope:
 
+    def test_get_video_by_url_returns_named_record(self) -> None:
+        streamed_at = datetime(2026, 9, 9, 12, 0, tzinfo=timezone.utc)
+        cursor = FakeCursor()
+        cursor._fetchone_results = [
+            (17, 3, 'https://www.twitch.tv/videos/17', 'A VOD', 'https://cdn/thumb.jpg', 'searchable', True, streamed_at)
+        ]
+        store = VectorStore.__new__(VectorStore)
+        store._connect = lambda: FakeConnection(cursor)
+
+        record = store.get_video_by_url('https://www.twitch.tv/videos/17')
+
+        assert record == VideoRecord(
+            id=17,
+            creator_id=3,
+            url='https://www.twitch.tv/videos/17',
+            title='A VOD',
+            thumbnail_url='https://cdn/thumb.jpg',
+            status=VideoStatus.SEARCHABLE,
+            processed=True,
+            streamed_at=streamed_at,
+        )
+        assert 'status, processed, streamed_at' in cursor.executed[0][0]
+
+    def test_get_video_with_creator_returns_enriched_named_record(self) -> None:
+        cursor = FakeCursor()
+        cursor._fetchone_results = [
+            (
+                17,
+                3,
+                'https://www.twitch.tv/videos/17',
+                'A VOD',
+                'https://cdn/thumb.jpg',
+                'searchable',
+                True,
+                None,
+                'xqc',
+                'https://cdn/xqc.png',
+            )
+        ]
+        store = VectorStore.__new__(VectorStore)
+        store._connect = lambda: FakeConnection(cursor)
+
+        record = store.get_video_with_creator(17)
+
+        assert record is not None
+        assert record.id == 17
+        assert record.creator_name == 'xqc'
+        assert record.creator_profile_image_url == 'https://cdn/xqc.png'
+        assert record.status == VideoStatus.SEARCHABLE
+
+    def test_get_vod_ingest_state_returns_named_record(self) -> None:
+        updated_at = datetime(2026, 9, 9, 12, 0, tzinfo=timezone.utc)
+        cursor = FakeCursor()
+        cursor._fetchone_results = [('vod-17', 17, 'xqc', 120, 180, updated_at)]
+        store = VectorStore.__new__(VectorStore)
+        store._connect = lambda: FakeConnection(cursor)
+
+        record = store.get_vod_ingest_state('vod-17')
+
+        assert record == VodIngestStateRecord(
+            vod_platform_id='vod-17',
+            video_id=17,
+            streamer='xqc',
+            last_ingested_seconds=120,
+            last_seen_duration_seconds=180,
+            updated_at=updated_at,
+        )
+
     def test_get_creator_id_by_name_normalizes_input(self) -> None:
         cursor = FakeCursor()
         cursor._fetchone_results = [(7,)]
@@ -66,8 +137,8 @@ class TestVectorStoreStreamerScope:
         store._connect = lambda: FakeConnection(cursor)
         names = store.list_searchable_streamers()
         assert names == [
-            {'name': 'Jason', 'profile_image_url': 'https://cdn/jason.png'},
-            {'name': 'ronaldo', 'profile_image_url': None},
+            SearchableStreamer(name='Jason', profile_image_url='https://cdn/jason.png'),
+            SearchableStreamer(name='ronaldo', profile_image_url=None),
         ]
         assert 'SELECT c.name, c.profile_image_url' in cursor.executed[0][0]
         assert 'GROUP BY c.name, c.profile_image_url' in cursor.executed[0][0]
