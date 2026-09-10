@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Form, HTTPException, Request, status
 
-from backend.routers.admin_search import _normalize_and_validate_streamer, _resolve_creator_id
 from backend.search_date_range import parse_search_date_range
 from backend.schemas import (
     ErrorResponse,
@@ -13,6 +12,38 @@ from backend.schemas import (
 from backend.services.remote_clip_downloader import InvalidTikTokUrlError, validate_tiktok_url
 
 router = APIRouter(prefix="/api", tags=["search"])
+
+
+def _normalize_and_validate_streamer(request: Request, streamer: str | None) -> str:
+    normalized_streamer = (streamer or "").strip().lower()
+    if not normalized_streamer:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "INVALID_STREAMER",
+                "message": "streamer is required",
+            },
+        )
+
+    searchable_streamers = request.app.state.store.list_searchable_streamers()
+    searchable_streamer_names = {str(item["name"]).strip().lower() for item in searchable_streamers}
+    if normalized_streamer not in searchable_streamer_names:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "INVALID_STREAMER",
+                "message": f"Streamer is not searchable: {normalized_streamer}",
+            },
+        )
+
+    return normalized_streamer
+
+
+def _resolve_creator_id(request: Request, streamer: str | None) -> int | None:
+    normalized_streamer = (streamer or "").strip().lower()
+    if not normalized_streamer:
+        return None
+    return request.app.state.store.get_creator_id_by_name(normalized_streamer)
 
 
 @router.post(

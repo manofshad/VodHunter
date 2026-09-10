@@ -10,44 +10,6 @@ class ErrorResponse(BaseModel):
     message: str
 
 
-class LiveStartRequest(BaseModel):
-    streamer: str = Field(min_length=1, max_length=100)
-
-
-class LiveStatusResponse(BaseModel):
-    state: Literal["idle", "polling", "ingesting", "error"]
-    streamer: str | None
-    is_live: bool | None
-    started_at: str | None
-    last_check_at: str | None
-    last_error: str | None
-    current_video_id: int | None
-    current_vod_url: str | None
-    ingest_cursor_seconds: int | None
-    lag_seconds: int | None
-    eventsub_enabled: bool | None = None
-    eventsub_health: Literal["healthy", "degraded", "unsubscribed"] | None = None
-    eventsub_last_event_at: str | None = None
-    eventsub_last_error: str | None = None
-
-
-class LiveStartResponse(BaseModel):
-    status: LiveStatusResponse
-
-
-class LiveStopResponse(BaseModel):
-    stopped: bool
-    status: LiveStatusResponse
-
-
-class LiveSessionItem(BaseModel):
-    video_id: int
-    creator_name: str
-    url: str
-    title: str
-    processed: bool
-
-
 class SearchResponse(BaseModel):
     found: bool
     streamer: str | None = None

@@ -1,9 +1,7 @@
-import io
 from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
 
-from backend.apps.admin import create_admin_app
 from backend.apps.public import create_public_app
 from search.models import (
     SearchDateRange,
@@ -17,41 +15,10 @@ from storage.vector_store import VectorStore
 
 class StubSearchManager:
     def __init__(self):
-        self.upload_calls = 0
         self.url_calls = 0
         self.last_streamer: str | None = None
-        self.last_upload_filename: str | None = None
         self.last_date_range: SearchDateRange | None = None
-        self.raise_upload: Exception | None = None
         self.raise_url: Exception | None = None
-
-    def search_upload(
-        self,
-        file,
-        streamer: str,
-        date_range: SearchDateRange | None = None,
-        on_stage_change=None,
-    ) -> SearchRequestOutcome:
-        self.upload_calls += 1
-        self.last_streamer = streamer
-        self.last_upload_filename = file.filename
-        self.last_date_range = date_range
-        if self.raise_upload is not None:
-            raise self.raise_upload
-        return SearchRequestOutcome(
-            result=SearchResult(
-                found=False,
-                streamer=streamer,
-                profile_image_url="https://cdn/profile.png",
-                reason="upload test",
-                thumbnail_url=None,
-                video_url_at_timestamp=None,
-            ),
-            execution_metadata=SearchExecutionMetadata(result_reason="upload test", found_match=False),
-            input_type="file",
-            clip_filename=file.filename,
-            date_range=date_range,
-        )
 
     def search_tiktok_url(
         self,
@@ -88,8 +55,6 @@ class StubStore:
             {"name": "xqc", "profile_image_url": "https://cdn/xqc.png"},
             {"name": "jason", "profile_image_url": None},
         ]
-        self.logged_requests = []
-
     def list_searchable_streamers(self) -> list[dict[str, str | None]]:
         return list(self.streamers)
 
@@ -97,10 +62,6 @@ class StubStore:
         normalized_name = (name or "").strip().lower()
         mapping = {"xqc": 1, "jason": 2}
         return mapping.get(normalized_name)
-
-    def log_search_request(self, log) -> None:
-        self.logged_requests.append(log)
-
 
 class StubSearchJobService:
     def __init__(self):
@@ -157,7 +118,6 @@ def test_public_search_endpoint_accepts_tiktok_url_only() -> None:
             "date_range": None,
         }
     ]
-    assert len(app.state.store.logged_requests) == 0
 
 
 def test_public_search_endpoint_accepts_tiktok_short_share_url() -> None:
@@ -187,14 +147,13 @@ def test_public_search_endpoint_rejects_profile_url_before_queueing() -> None:
     assert app.state.search_job_service.created_jobs == []
 
 
-def test_public_search_endpoint_rejects_file_upload() -> None:
+def test_public_search_endpoint_requires_tiktok_url() -> None:
     app, client = build_client(create_public_app)
 
     with client:
         response = client.post(
             "/api/search/clip",
             data={"streamer": "xqc"},
-            files={"file": ("clip.mp4", io.BytesIO(b"video"), "video/mp4")},
         )
 
     assert response.status_code == 400
@@ -375,159 +334,6 @@ def test_public_search_job_endpoint_returns_404_for_unknown_job() -> None:
 
     assert response.status_code == 404
     assert response.json()["detail"]["code"] == "SEARCH_NOT_FOUND"
-
-
-def test_admin_search_endpoint_accepts_tiktok_url() -> None:
-    app, client = build_client(create_admin_app)
-
-    with client:
-        response = client.post(
-            "/api/search/clip",
-            data={"tiktok_url": "https://www.tiktok.com/@u/video/1", "streamer": "jason"},
-        )
-
-    assert response.status_code == 200
-    assert app.state.search_manager.url_calls == 1
-    assert app.state.search_manager.upload_calls == 0
-    assert app.state.store.logged_requests[0].source_app == "admin"
-    assert app.state.store.logged_requests[0].download_source == "tiktok"
-    assert app.state.store.logged_requests[0].creator_id == 2
-
-
-def test_admin_search_endpoint_rejects_profile_url_before_downloading() -> None:
-    app, client = build_client(create_admin_app)
-
-    with client:
-        response = client.post(
-            "/api/search/clip",
-            data={"tiktok_url": "https://www.tiktok.com/@jasontheween", "streamer": "jason"},
-        )
-
-    assert response.status_code == 400
-    assert response.json()["detail"]["code"] == "INVALID_TIKTOK_URL"
-    assert app.state.search_manager.url_calls == 0
-    assert app.state.store.logged_requests[0].error_code == "INVALID_TIKTOK_URL"
-
-
-def test_admin_search_endpoint_accepts_date_range_for_tiktok_url() -> None:
-    app, client = build_client(create_admin_app)
-
-    with client:
-        response = client.post(
-            "/api/search/clip",
-            data={
-                "tiktok_url": "https://www.tiktok.com/@u/video/1",
-                "streamer": "jason",
-                "streamed_from": "2026-04-01",
-                "streamed_to": "2026-04-07",
-            },
-        )
-
-    assert response.status_code == 200
-    assert app.state.search_manager.last_date_range == SearchDateRange(
-        streamed_from=datetime(2026, 4, 1, tzinfo=timezone.utc),
-        streamed_to=datetime(2026, 4, 8, tzinfo=timezone.utc),
-    )
-    assert app.state.store.logged_requests[0].streamed_from == datetime(2026, 4, 1, tzinfo=timezone.utc)
-    assert app.state.store.logged_requests[0].streamed_to == datetime(2026, 4, 8, tzinfo=timezone.utc)
-
-
-def test_admin_search_endpoint_accepts_file_upload() -> None:
-    app, client = build_client(create_admin_app)
-
-    with client:
-        response = client.post(
-            "/api/search/clip",
-            data={"streamer": "xqc"},
-            files={"file": ("clip.mp4", io.BytesIO(b"video"), "video/mp4")},
-        )
-
-    assert response.status_code == 200
-    assert app.state.search_manager.upload_calls == 1
-    assert app.state.search_manager.url_calls == 0
-    assert app.state.search_manager.last_upload_filename == "clip.mp4"
-    assert app.state.search_manager.last_streamer == "xqc"
-    assert app.state.store.logged_requests[0].clip_filename == "clip.mp4"
-    assert app.state.store.logged_requests[0].input_type == "file"
-    assert app.state.store.logged_requests[0].creator_id == 1
-
-
-def test_admin_search_endpoint_accepts_date_range_for_uploads() -> None:
-    app, client = build_client(create_admin_app)
-
-    with client:
-        response = client.post(
-            "/api/search/clip",
-            data={"streamer": "xqc", "streamed_from": "2026-04-01"},
-            files={"file": ("clip.mp4", io.BytesIO(b"video"), "video/mp4")},
-        )
-
-    assert response.status_code == 200
-    assert app.state.search_manager.upload_calls == 1
-    assert app.state.search_manager.last_date_range == SearchDateRange(
-        streamed_from=datetime(2026, 4, 1, tzinfo=timezone.utc),
-        streamed_to=None,
-    )
-
-
-def test_admin_search_endpoint_rejects_invalid_date_range() -> None:
-    app, client = build_client(create_admin_app)
-
-    with client:
-        response = client.post(
-            "/api/search/clip",
-            data={
-                "tiktok_url": "https://www.tiktok.com/@u/video/1",
-                "streamer": "jason",
-                "streamed_from": "bad-date",
-            },
-        )
-
-    assert response.status_code == 400
-    assert response.json()["detail"]["code"] == "INVALID_DATE_RANGE"
-    assert app.state.search_manager.url_calls == 0
-
-
-def test_admin_search_endpoint_rejects_both_file_and_url() -> None:
-    app, client = build_client(create_admin_app)
-
-    with client:
-        response = client.post(
-            "/api/search/clip",
-            data={"tiktok_url": "https://www.tiktok.com/@u/video/1", "streamer": "xqc"},
-            files={"file": ("clip.mp4", io.BytesIO(b"video"), "video/mp4")},
-        )
-
-    assert response.status_code == 400
-    assert response.json()["detail"]["code"] == "INVALID_SEARCH_INPUT"
-    assert app.state.store.logged_requests[0].input_type == "both"
-
-
-def test_admin_search_endpoint_rejects_neither_file_nor_url() -> None:
-    app, client = build_client(create_admin_app)
-
-    with client:
-        response = client.post("/api/search/clip", data={"streamer": "xqc"})
-
-    assert response.status_code == 400
-    assert response.json()["detail"]["code"] == "INVALID_SEARCH_INPUT"
-    assert app.state.store.logged_requests[0].input_type is None
-
-
-def test_admin_search_endpoint_validates_streamer_for_uploads() -> None:
-    app, client = build_client(create_admin_app)
-
-    with client:
-        response = client.post(
-            "/api/search/clip",
-            data={"streamer": "ronaldo"},
-            files={"file": ("clip.mp4", io.BytesIO(b"video"), "video/mp4")},
-        )
-
-    assert response.status_code == 400
-    assert response.json()["detail"]["code"] == "INVALID_STREAMER"
-    assert app.state.store.logged_requests[0].clip_filename == "clip.mp4"
-    assert app.state.store.logged_requests[0].error_code == "INVALID_STREAMER"
 
 
 class FakeCursor:

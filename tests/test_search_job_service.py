@@ -5,6 +5,7 @@ import pytest
 
 from backend.services.search_jobs import SearchJobService
 from backend.services.remote_clip_downloader import DownloadError, InvalidTikTokUrlError
+from backend.services.search_manager import SearchInputError
 from search.models import SearchDateRange, SearchExecutionMetadata, SearchRequestOutcome, SearchResult
 
 
@@ -148,6 +149,22 @@ def test_search_job_service_fails_job_for_handled_error() -> None:
 
     assert store.completed == []
     assert store.failed == [(7, "DOWNLOAD_ERROR", "download failed", 400, None)]
+
+
+def test_search_job_service_reports_invalid_search_input() -> None:
+    store = StubStore()
+    manager = StubSearchManager()
+    manager.raise_error = SearchInputError("Could not determine input video duration")
+    service = SearchJobService(store=store, search_manager=manager, executor=InlineExecutor())
+
+    service.create_public_search_job(
+        tiktok_url="https://www.tiktok.com/@u/video/1",
+        streamer="jason",
+        creator_id=2,
+    )
+
+    assert store.completed == []
+    assert store.failed == [(7, "INVALID_SEARCH_INPUT", "Could not determine input video duration", 400, None)]
 
 
 def test_search_job_service_marks_incomplete_jobs_failed_on_restart() -> None:

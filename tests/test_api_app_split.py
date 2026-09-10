@@ -6,7 +6,6 @@ import sys
 from types import SimpleNamespace
 from unittest.mock import patch
 from fastapi.testclient import TestClient
-from backend.apps import admin as admin_app_module
 from backend.apps import public as public_app_module
 
 
@@ -24,15 +23,6 @@ def _route_paths(routes) -> set[str]:
         if nested_routes is not None:
             paths.update(_route_paths(nested_routes))
     return paths
-
-
-class StubMonitorManager:
-
-    def __init__(self):
-        self.stop_calls = 0
-
-    def stop(self) -> None:
-        self.stop_calls += 1
 
 
 class StubQueryEmbedder:
@@ -79,28 +69,17 @@ import backend.bootstrap_shared
         assert main_module.app is public_app_module.app
         assert main_module.create_public_app is public_app_module.create_public_app
 
-    def test_public_and_admin_route_boundaries(self) -> None:
+    def test_public_route_boundaries(self) -> None:
         public_app = public_app_module.create_public_app(enable_lifespan=False)
-        admin_app = admin_app_module.create_admin_app(enable_lifespan=False)
         public_paths = _route_paths(public_app.routes)
-        admin_paths = _route_paths(admin_app.routes)
         assert '/api/health' in public_paths
         assert '/api/search/clip' in public_paths
         assert '/internal/videos/{video_id}/delete-index' in public_paths
         assert '/internal/videos/{video_id}/request-reindex' in public_paths
         assert '/api/live/status' not in public_paths
         assert '/api/twitch/eventsub' not in public_paths
-        assert '/api/health' in admin_paths
-        assert '/api/search/clip' in admin_paths
-        assert '/internal/videos/{video_id}/delete-index' in admin_paths
-        assert '/internal/videos/{video_id}/request-reindex' in admin_paths
-        assert '/api/live/status' in admin_paths
-        assert '/api/live/start' in admin_paths
-        assert '/api/live/stop' in admin_paths
-        assert '/api/live/sessions' in admin_paths
-        assert '/api/twitch/eventsub' in admin_paths
 
-    def test_public_returns_404_for_admin_only_routes(self) -> None:
+    def test_public_returns_404_for_retired_admin_routes(self) -> None:
         app = public_app_module.create_public_app(enable_lifespan=False)
         with TestClient(app) as client:
             assert client.get('/api/live/status').status_code == 404
@@ -140,36 +119,6 @@ import backend.bootstrap_shared
                     assert hasattr(app.state, 'store')
                     assert hasattr(app.state, 'search_manager')
                     assert not hasattr(app.state, 'embedder')
-                    assert not hasattr(app.state, 'monitor_manager')
             asyncio.run(run_lifespan())
             prepare_dirs.assert_called_once()
             assert query_embedder.close_calls == 1
-
-    def test_public_import_does_not_require_admin_bootstrap(self) -> None:
-        sys.modules.pop('backend.apps.public', None)
-
-        def fail_build_monitor_stack(*args, **kwargs):
-            raise AssertionError('public app imported admin bootstrap')
-        with patch('backend.bootstrap_admin.build_monitor_stack', side_effect=fail_build_monitor_stack):
-            module = importlib.import_module('backend.apps.public')
-        app = module.create_public_app(enable_lifespan=False)
-        assert app.title == 'VodHunter Public API'
-
-    def test_admin_lifespan_stops_monitor_manager(self) -> None:
-        app = admin_app_module.create_admin_app(enable_lifespan=True)
-        monitor = StubMonitorManager()
-        query_embedder = StubQueryEmbedder()
-        ingest_embedder = object()
-        with patch('backend.bootstrap_shared.prepare_admin_runtime_dirs') as prepare_dirs, patch('backend.bootstrap_shared.build_store_state', return_value={'store': object()}), patch('backend.bootstrap_ingest.build_ingest_state', return_value={'embedder': ingest_embedder}), patch('backend.bootstrap_shared.build_search_stack', return_value={'query_embedder': query_embedder, 'search_service': object(), 'search_manager': object()}) as build_search_stack, patch('backend.bootstrap_admin.build_monitor_stack', return_value={'monitor_manager': monitor, 'eventsub_handler': object(), 'session_query': object()}):
-
-            async def run_lifespan() -> None:
-                async with app.router.lifespan_context(app):
-                    assert hasattr(app.state, 'embedder')
-                    assert hasattr(app.state, 'monitor_manager')
-                    assert hasattr(app.state, 'eventsub_handler')
-                    assert hasattr(app.state, 'session_query')
-            asyncio.run(run_lifespan())
-            prepare_dirs.assert_called_once()
-            assert monitor.stop_calls == 1
-            assert query_embedder.close_calls == 1
-            assert build_search_stack.call_args.kwargs['embedder'] is ingest_embedder
