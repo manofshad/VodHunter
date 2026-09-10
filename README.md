@@ -80,10 +80,26 @@ Production records audio normalization, cold model startup, fingerprint preproce
 Run the Python suite with:
 
 ```bash
-python3 -m pytest
+python3 -m pytest -m "not integration"
 ```
 
-The frontend packages have their own build/test commands under `web-public` and `web-admin`.
+The public frontend tests and production build can be run with:
+
+```bash
+(cd web-public && npm ci && npm test && npm run build)
+```
+
+Integration tests use a disposable PostgreSQL/pgvector database. Start the local
+test database with:
+
+```bash
+docker compose -f compose.test.yaml up -d
+DATABASE_URL=postgresql://vodhunter:vodhunter@localhost:55432/vodhunter_test alembic upgrade head
+VODHUNTER_TEST_DATABASE_URL=postgresql://vodhunter:vodhunter@localhost:55432/vodhunter_test python3 -m pytest -m integration
+docker compose -f compose.test.yaml down
+```
+
+The production stack is never used by these tests.
 
 ## Third-party licensing status
 
