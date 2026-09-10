@@ -32,32 +32,13 @@ def build_store_state() -> dict[str, object]:
     return {"store": store}
 
 
-def build_modal_query_embedder() -> ModalQueryEmbedder:
-    from search.modal_embedding_client import ModalEmbeddingClient
-    from search.modal_query_embedder import ModalQueryEmbedder
-
-    config.validate_modal_search_config()
-    config.validate_nmfp_config()
-    client = ModalEmbeddingClient(
-        app_name=config.MODAL_SEARCH_APP_NAME,
-        function_name=config.MODAL_SEARCH_FUNCTION_NAME,
-        timeout_seconds=config.MODAL_SEARCH_TIMEOUT_SECONDS,
-    )
-    return ModalQueryEmbedder(
-        client=client,
-        vector_dim=config.VECTOR_DIM,
-        model_version=config.NMFP_MODEL_VERSION,
-        preprocessing_version=config.NMFP_PREPROCESSING_VERSION,
-    )
-
-
-def build_local_query_embedder(embedder=None):
+def build_local_query_embedder():
     from pipeline.embedder import Embedder
     from pipeline.nmfp_inference import model_artifact_identity
     from search.local_query_embedder import LocalQueryEmbedder
 
     config.validate_nmfp_config()
-    local_embedder = embedder or Embedder()
+    local_embedder = Embedder()
     if local_embedder.embedding_dim != config.VECTOR_DIM:
         raise ValueError(
             f"Local NMFP embedding dimension {local_embedder.embedding_dim} "

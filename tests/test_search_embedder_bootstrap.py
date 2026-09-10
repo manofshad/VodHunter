@@ -21,7 +21,8 @@ class TestSearchEmbedderBootstrap:
         )
         embedder.load.return_value = 41
         with patch.object(config, 'VECTOR_DIM', 128):
-            query_embedder = bootstrap_shared.build_local_query_embedder(embedder=embedder)
+            with patch('pipeline.embedder.Embedder', return_value=embedder):
+                query_embedder = bootstrap_shared.build_local_query_embedder()
         try:
             assert isinstance(query_embedder, LocalQueryEmbedder)
             assert query_embedder.embedder is embedder
@@ -36,8 +37,9 @@ class TestSearchEmbedderBootstrap:
             preprocessing_version=config.NMFP_PREPROCESSING_VERSION,
         )
         with patch.object(config, 'VECTOR_DIM', 128):
-            with pytest.raises(ValueError, match='embedding dimension'):
-                bootstrap_shared.build_local_query_embedder(embedder=embedder)
+            with patch('pipeline.embedder.Embedder', return_value=embedder):
+                with pytest.raises(ValueError, match='embedding dimension'):
+                    bootstrap_shared.build_local_query_embedder()
 
     def test_nmfp_config_rejects_model_or_preprocessing_index_mismatch(self) -> None:
         with patch.object(config, 'NMFP_MODEL_VERSION', 'different-model'):

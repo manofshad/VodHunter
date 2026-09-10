@@ -1,8 +1,8 @@
 from datetime import datetime, timezone
-from types import SimpleNamespace
 
 import numpy as np
 from search.models import AlignmentResult, FingerprintCandidate, SearchDateRange, SearchSegment
+from pipeline.nmfp_inference import NMFPExtractionMetrics, NMFPExtractionResult
 from search.search_service import SearchService
 
 class FakePreprocessor:
@@ -26,6 +26,7 @@ class FakeQueryEmbedder:
     def __init__(self, embeddings: np.ndarray, timestamps: np.ndarray):
         self.embeddings = embeddings
         self.timestamps = timestamps
+        self.last_result = None
 
     def embed(self, wav_path: str):
         return (self.embeddings, self.timestamps)
@@ -206,15 +207,21 @@ class TestSearchService:
             embeddings=np.array([[0.1, 0.2]], dtype=np.float32),
             timestamps=np.array([0.0], dtype=np.float32),
         )
-        embedder.last_response = SimpleNamespace(
-            duration_seconds=1.0,
-            cold_start=True,
-            model_load_duration_ms=1200,
-            preprocessing_duration_ms=14,
-            inference_duration_ms=26,
-            total_duration_ms=1240,
+        embedder.last_result = NMFPExtractionResult(
+            embeddings=embedder.embeddings,
+            timestamps=embedder.timestamps,
             model_version="nmfp-model",
             preprocessing_version="nmfp-preprocessing",
+            embedding_dim=2,
+            metrics=NMFPExtractionMetrics(
+                cold_start=True,
+                model_load_duration_ms=1200,
+                preprocessing_duration_ms=14,
+                inference_duration_ms=26,
+                total_duration_ms=1240,
+                audio_duration_seconds=1.0,
+                fingerprint_count=1,
+            ),
         )
         service = SearchService(
             store=store,
