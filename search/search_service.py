@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 import logging
 import time
-from typing import Any, Callable
+from typing import Callable
 
 import numpy as np
 
@@ -31,44 +31,32 @@ def _duration_ms(seconds: float | None) -> int | None:
     return max(int(round(seconds * 1000.0)), 0)
 
 
-def _read_attr(source: object | None, *names: str) -> Any:
-    for name in names:
-        value = getattr(source, name, None)
-        if value is not None:
-            return value
-    return None
+def _embedding_observation(query_embedder: QueryEmbedder) -> dict[str, object | None]:
+    """Read timing and identity from the local NMFP extraction result."""
 
+    extraction = query_embedder.last_result
+    if extraction is None:
+        return {
+            "duration_seconds": None,
+            "cold_start": None,
+            "model_startup_duration_ms": None,
+            "fingerprint_preprocessing_duration_ms": None,
+            "fingerprint_inference_duration_ms": None,
+            "fingerprint_duration_ms": None,
+            "model_version": None,
+            "preprocessing_version": None,
+        }
 
-def _embedding_observation(query_embedder: QueryEmbedder) -> dict[str, Any]:
-    """Normalize local and Modal NMFP timing/version observations."""
-
-    local_result = getattr(query_embedder, "last_result", None)
-    response = getattr(query_embedder, "last_response", None)
-    nested_embedder = getattr(query_embedder, "embedder", None)
-    extraction = getattr(nested_embedder, "last_result", None)
-    source = local_result or response or extraction
-    metrics = getattr(source, "metrics", source)
-
-    model_version = _read_attr(source, "model_version") or _read_attr(
-        query_embedder, "model_version"
-    ) or _read_attr(nested_embedder, "model_version")
-    preprocessing_version = _read_attr(source, "preprocessing_version") or _read_attr(
-        query_embedder, "preprocessing_version"
-    ) or _read_attr(nested_embedder, "preprocessing_version")
+    metrics = extraction.metrics
     return {
-        "duration_seconds": _read_attr(source, "duration_seconds")
-        or _read_attr(metrics, "audio_duration_seconds"),
-        "cold_start": _read_attr(metrics, "cold_start"),
-        "model_startup_duration_ms": _read_attr(
-            metrics, "model_load_duration_ms", "model_startup_duration_ms"
-        ),
-        "fingerprint_preprocessing_duration_ms": _read_attr(
-            metrics, "preprocessing_duration_ms"
-        ),
-        "fingerprint_inference_duration_ms": _read_attr(metrics, "inference_duration_ms"),
-        "fingerprint_duration_ms": _read_attr(metrics, "total_duration_ms"),
-        "model_version": model_version,
-        "preprocessing_version": preprocessing_version,
+        "duration_seconds": metrics.audio_duration_seconds,
+        "cold_start": metrics.cold_start,
+        "model_startup_duration_ms": metrics.model_load_duration_ms,
+        "fingerprint_preprocessing_duration_ms": metrics.preprocessing_duration_ms,
+        "fingerprint_inference_duration_ms": metrics.inference_duration_ms,
+        "fingerprint_duration_ms": metrics.total_duration_ms,
+        "model_version": extraction.model_version,
+        "preprocessing_version": extraction.preprocessing_version,
     }
 
 

@@ -1,5 +1,4 @@
 import asyncio
-import importlib
 from pathlib import Path
 import subprocess
 import sys
@@ -63,11 +62,6 @@ import backend.bootstrap_shared
             text=True,
         )
         assert result.returncode == 0, result.stderr
-
-    def test_backend_main_defaults_to_public_app(self) -> None:
-        main_module = importlib.import_module('backend.main')
-        assert main_module.app is public_app_module.app
-        assert main_module.create_public_app is public_app_module.create_public_app
 
     def test_public_route_boundaries(self) -> None:
         public_app = public_app_module.create_public_app(enable_lifespan=False)

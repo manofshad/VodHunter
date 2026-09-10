@@ -12,6 +12,8 @@ class FakePreprocessor:
 
 class FakeQueryEmbedder:
 
+    last_result = None
+
     def embed(self, wav_path: str):
         return (np.array([[0.1, 0.2]], dtype=np.float32), np.array([0.0], dtype=np.float32))
 

@@ -28,9 +28,6 @@ MONITOR_RETRY_SECONDS = 5.0
 LIVE_ARCHIVE_LAG_SECONDS = 120
 LIVE_ARCHIVE_POLL_SECONDS = 15.0
 LIVE_ARCHIVE_FINALIZE_CHECKS = 3
-MODAL_SEARCH_APP_NAME = os.getenv("MODAL_SEARCH_APP_NAME", "").strip()
-MODAL_SEARCH_FUNCTION_NAME = os.getenv("MODAL_SEARCH_FUNCTION_NAME", "").strip()
-MODAL_SEARCH_TIMEOUT_SECONDS = float(os.getenv("MODAL_SEARCH_TIMEOUT_SECONDS", "120"))
 INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY", "").strip()
 
 NMFP_CANONICAL_MODEL_VERSION = (
@@ -86,16 +83,3 @@ def validate_nmfp_config() -> None:
         raise ValueError("NMFP_WINDOW_SECONDS must be 1.0 for the pinned model")
     if NMFP_HOP_SECONDS != 0.5:
         raise ValueError("NMFP_HOP_SECONDS must be 0.5 for the production index")
-
-
-def validate_modal_search_config() -> None:
-    if not MODAL_SEARCH_APP_NAME:
-        raise ValueError("MODAL_SEARCH_APP_NAME is required")
-    if not MODAL_SEARCH_FUNCTION_NAME:
-        raise ValueError("MODAL_SEARCH_FUNCTION_NAME is required")
-    if MODAL_SEARCH_TIMEOUT_SECONDS <= 0:
-        raise ValueError("MODAL_SEARCH_TIMEOUT_SECONDS must be greater than 0")
-    if not os.getenv("MODAL_TOKEN_ID", "").strip():
-        raise ValueError("MODAL_TOKEN_ID is required")
-    if not os.getenv("MODAL_TOKEN_SECRET", "").strip():
-        raise ValueError("MODAL_TOKEN_SECRET is required")
