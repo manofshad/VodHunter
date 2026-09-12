@@ -23,7 +23,7 @@ class PostgresDatabase:
         database_url: str,
         *,
         vector_dim: int = NMFP_EMBEDDING_DIM,
-        hnsw_ef_search: int = 40,
+        hnsw_ef_search: int = 100,
         model_version: str = NMFP_MODEL_VERSION,
         preprocessing_version: str = NMFP_PREPROCESSING_VERSION,
     ) -> None:
