@@ -49,6 +49,34 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
+  alloy:
+    image: grafana/alloy:v1.19.0
+    environment:
+      GRAFANA_CLOUD_PROMETHEUS_URL: ${GRAFANA_CLOUD_PROMETHEUS_URL:?GRAFANA_CLOUD_PROMETHEUS_URL must be set in .env}
+      GRAFANA_CLOUD_PROMETHEUS_USER: ${GRAFANA_CLOUD_PROMETHEUS_USER:?GRAFANA_CLOUD_PROMETHEUS_USER must be set in .env}
+      GRAFANA_CLOUD_LOKI_URL: ${GRAFANA_CLOUD_LOKI_URL:?GRAFANA_CLOUD_LOKI_URL must be set in .env}
+      GRAFANA_CLOUD_LOKI_USER: ${GRAFANA_CLOUD_LOKI_USER:?GRAFANA_CLOUD_LOKI_USER must be set in .env}
+      GRAFANA_CLOUD_API_TOKEN: ${GRAFANA_CLOUD_API_TOKEN:?GRAFANA_CLOUD_API_TOKEN must be set in .env}
+      VODHUNTER_ENVIRONMENT: ${VODHUNTER_ENVIRONMENT:-production}
+    command:
+      [
+        "run",
+        "--server.http.listen-addr=0.0.0.0:12345",
+        "--storage.path=/var/lib/alloy/data",
+        "--disable-reporting",
+        "/etc/alloy/config.alloy"
+      ]
+    expose:
+      - "12345"
+    volumes:
+      - alloy_data:/var/lib/alloy/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
   worker:
     build:
       context: .
@@ -118,3 +146,5 @@ volumes:
     # Keep the existing shared runtime volume when Coolify deploys this stack.
     name: vodhunter_runtime_data
     external: true
+  alloy_data:
+    name: vodhunter_alloy_data

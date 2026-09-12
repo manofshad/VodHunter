@@ -1,0 +1,95 @@
+// Grafana Cloud pipeline for the first VodHunter observability slice.
+// Credentials are injected by Compose/Coolify and are intentionally not
+// committed to the repository.
+
+prometheus.scrape "vodhunter_api" {
+  targets = [{
+    __address__ = "api:8000",
+  }]
+  metrics_path    = "/internal/metrics"
+  scrape_interval = "15s"
+  scrape_timeout  = "10s"
+  forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
+}
+
+prometheus.remote_write "grafana_cloud" {
+  endpoint {
+    url = sys.env("GRAFANA_CLOUD_PROMETHEUS_URL")
+
+    basic_auth {
+      username = sys.env("GRAFANA_CLOUD_PROMETHEUS_USER")
+      password = sys.env("GRAFANA_CLOUD_API_TOKEN")
+    }
+  }
+}
+
+discovery.docker "vodhunter" {
+  host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "vodhunter_api" {
+  targets = discovery.docker.vodhunter.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    regex         = "api"
+    action        = "keep"
+  }
+}
+
+loki.source.docker "vodhunter_api" {
+  host    = "unix:///var/run/docker.sock"
+  targets = discovery.relabel.vodhunter_api.output
+  labels = {
+    service_name = "vodhunter-api",
+    environment  = sys.env("VODHUNTER_ENVIRONMENT"),
+  }
+  forward_to = [loki.process.vodhunter_api.receiver]
+}
+
+loki.process "vodhunter_api" {
+  // The API emits one raw JSON search_finished line per terminal search.
+  // Other API logs remain available as ordinary log lines for diagnosis.
+  stage.json {
+    expressions = {
+      event                    = "event",
+      outcome                  = "outcome",
+      search_id                = "search_id",
+      streamer                 = "streamer",
+      result_link              = "result_link",
+      result_timestamp_seconds = "result_timestamp_seconds",
+    }
+  }
+
+  stage.labels {
+    values = {
+      event   = "",
+      outcome = "",
+    }
+  }
+
+  // IDs and URLs are intentionally structured metadata rather than Loki
+  // stream labels: they are useful for lookup but have unbounded cardinality.
+  stage.structured_metadata {
+    values = {
+      search_id                = "",
+      streamer                 = "",
+      result_link              = "",
+      result_timestamp_seconds = "",
+    }
+  }
+
+  forward_to = [loki.write.grafana_cloud.receiver]
+}
+
+loki.write "grafana_cloud" {
+  endpoint {
+    url = sys.env("GRAFANA_CLOUD_LOKI_URL")
+
+    basic_auth {
+      username = sys.env("GRAFANA_CLOUD_LOKI_USER")
+      password = sys.env("GRAFANA_CLOUD_API_TOKEN")
+    }
+  }
+}
+
