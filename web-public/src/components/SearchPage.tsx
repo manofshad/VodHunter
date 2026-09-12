@@ -1,3 +1,7 @@
+import { RefObject, useRef, useState } from "react";
+import { History as HistoryIcon } from "lucide-react";
+
+import { HistoryDrawer } from "./search/HistoryDrawer";
 import { SearchFeedback } from "./search/SearchFeedback";
 import { SearchForm } from "./search/SearchForm";
 import { useSearchPage } from "./search/useSearchPage";
@@ -6,7 +10,13 @@ export { DateRangePicker } from "./search/DateRangePicker";
 export { SearchResultCard } from "./search/SearchResults";
 export { formatTimelineTime, isSupportedTikTokUrl } from "./search/searchUtils";
 
-function Header() {
+interface HeaderProps {
+  historyOpen: boolean;
+  historyButtonRef: RefObject<HTMLButtonElement>;
+  onOpenHistory: () => void;
+}
+
+function Header({ historyOpen, historyButtonRef, onOpenHistory }: HeaderProps) {
   return (
     <header className="border-b border-gray-700 bg-gray-900 px-6 py-4">
       <div className="mx-auto flex max-w-7xl items-center justify-between">
@@ -16,7 +26,20 @@ function Header() {
             <span className="font-bold text-[#fb2844]">Hunter</span>
           </span>
         </div>
-        <nav className="hidden items-center gap-8 md:flex" />
+        <nav>
+          <button
+            ref={historyButtonRef}
+            type="button"
+            aria-label="History"
+            aria-expanded={historyOpen}
+            aria-controls="vodhunter-history-drawer"
+            onClick={onOpenHistory}
+            className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-gray-300 transition hover:bg-gray-800 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#fb2844]"
+          >
+            <HistoryIcon aria-hidden="true" className="size-5" />
+            <span className="hidden sm:inline">History</span>
+          </button>
+        </nav>
       </div>
     </header>
   );
@@ -57,10 +80,24 @@ function FeatureGrid() {
 
 export default function SearchPage() {
   const page = useSearchPage();
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const historyButtonRef = useRef<HTMLButtonElement>(null);
 
   return (
     <div className="min-h-screen bg-gray-900">
-      <Header />
+      <Header
+        historyOpen={historyOpen}
+        historyButtonRef={historyButtonRef}
+        onOpenHistory={() => setHistoryOpen(true)}
+      />
+
+      <HistoryDrawer
+        open={historyOpen}
+        entries={page.historyEntries}
+        returnFocusRef={historyButtonRef}
+        onClose={() => setHistoryOpen(false)}
+        onClear={page.onClearHistory}
+      />
 
       <main>
         <div
