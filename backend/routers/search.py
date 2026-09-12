@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Form, HTTPException, Request, status
+from fastapi import APIRouter, Form, HTTPException, Request, Response, status
 
 from backend.search_date_range import parse_search_date_range
 from backend.schemas import (
@@ -12,6 +12,7 @@ from backend.schemas import (
 from backend.services.remote_clip_downloader import InvalidTikTokUrlError, validate_tiktok_url
 
 router = APIRouter(prefix="/api", tags=["search"])
+STREAMER_LIST_CACHE_CONTROL = "public, max-age=300, stale-while-revalidate=3600"
 
 
 def _normalize_and_validate_streamer(request: Request, streamer: str | None) -> str:
@@ -123,7 +124,8 @@ def get_search_clip_job(request: Request, search_id: int) -> SearchJobResponse:
 
 
 @router.get("/search/streamers", response_model=list[StreamerListItem])
-def list_searchable_streamers(request: Request) -> list[StreamerListItem]:
+def list_searchable_streamers(request: Request, response: Response) -> list[StreamerListItem]:
+    response.headers["Cache-Control"] = STREAMER_LIST_CACHE_CONTROL
     streamers = request.app.state.videos.list_searchable_streamers()
     return [
         StreamerListItem(
