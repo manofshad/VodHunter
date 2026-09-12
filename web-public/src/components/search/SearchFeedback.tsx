@@ -24,7 +24,7 @@ export function SearchFeedback({
   }
 
   return (
-    <div className="mt-8 space-y-6">
+    <div className="mt-0 space-y-6">
       {requestError ? (
         <div className="mx-auto max-w-4xl rounded-xl border border-red-400/20 bg-gray-900 p-5 text-left shadow-lg">
           <div className="flex items-start gap-3">

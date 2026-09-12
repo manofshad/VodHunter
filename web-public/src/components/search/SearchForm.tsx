@@ -101,7 +101,7 @@ export function SearchForm({
         />
       </div>
 
-      <div className="min-h-6 text-left">
+      <div className="min-h-0 text-left">
         {streamerError ? (
           <p id="streamer-error" className="flex items-center gap-2 text-sm font-medium text-white">
             <TriangleAlert className="size-4" />
