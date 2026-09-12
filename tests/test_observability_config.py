@@ -29,6 +29,24 @@ def test_production_compose_has_private_alloy_sidecar() -> None:
     assert '"12345"' in compose
 
 
+def test_production_compose_leaves_database_lifecycle_outside_the_app_stack() -> None:
+    compose = (ROOT / "compose.production.yaml").read_text()
+
+    assert "\n  db:\n" not in compose
+    assert "postgres_data" not in compose
+    assert "DATABASE_URL" in compose
+    assert "db:\n        condition: service_healthy" not in compose
+
+
+def test_deployment_environment_uses_standalone_database_url() -> None:
+    env_example = (ROOT / "deploy/.env.example").read_text()
+
+    assert "POSTGRES_DB" not in env_example
+    assert "POSTGRES_USER" not in env_example
+    assert "POSTGRES_PASSWORD" not in env_example
+    assert "@postgres-<coolify-resource-id>:5432/vodhunter" in env_example
+
+
 def test_dashboard_export_is_valid_json_and_has_metrics_and_logs_panels() -> None:
     dashboard = json.loads(
         (ROOT / "observability/grafana/vodhunter-search-overview.json").read_text()

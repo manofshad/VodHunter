@@ -56,7 +56,7 @@ files. The pinned upstream repository and checkpoint must be present before
 startup; the public Docker image bakes them in and verifies their immutable
 identities.
 
-For the self-hosted VPS stack, see [VPS deployment](docs/vps-deployment.md). It provides PostgreSQL/pgvector, the public API, the polling worker, and the public site. Production HTTPS and public routing are supplied by the hosting platform.
+For the self-hosted VPS stack, see [VPS deployment](docs/vps-deployment.md). It uses a standalone Coolify PostgreSQL/pgvector resource alongside the public API, polling worker, and public site. Production HTTPS and public routing are supplied by the hosting platform.
 
 The stack also includes a separate daily VOD retention service. Both the
 retention setting (`VOD_RETENTION_DAYS`) and the worker's independent
