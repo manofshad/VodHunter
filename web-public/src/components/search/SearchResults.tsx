@@ -175,7 +175,6 @@ function SearchSourceBlock({ source, fallbackStreamer, fallbackProfileImageUrl }
 
 export function SearchResultCard({ result, lastSubmittedUrl }: SearchResultCardProps) {
   const sources = getSearchSources(result);
-  const unmatchedRanges = result.unmatched_ranges ?? [];
 
   return (
     <section className="mx-auto max-w-4xl rounded-xl border border-gray-700 bg-gray-900 p-5 text-left shadow-lg">
@@ -203,22 +202,6 @@ export function SearchResultCard({ result, lastSubmittedUrl }: SearchResultCardP
       ) : (
         <h3 className="text-lg font-bold leading-tight text-white md:text-[1.5rem]">No matching Twitch VOD found</h3>
       )}
-
-      {unmatchedRanges.length > 0 ? (
-        <div className="mt-5 border-t border-gray-700 pt-5">
-          <h4 className="text-sm font-semibold uppercase tracking-[0.16em] text-gray-300">Unmatched clip ranges</h4>
-          <ul className="mt-3 flex flex-wrap gap-2">
-            {unmatchedRanges.map((range) => (
-              <li
-                key={`${range.query_start}-${range.query_end}`}
-                className="rounded-full border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm font-medium text-gray-200"
-              >
-                {formatTimelineTime(range.query_start)}–{formatTimelineTime(range.query_end)}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
 
       {lastSubmittedUrl ? (
         <div className="mt-5 border-t border-gray-700 pt-5">
