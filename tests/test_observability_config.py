@@ -13,6 +13,8 @@ def test_alloy_config_scrapes_api_and_keeps_identifiers_out_of_labels() -> None:
     assert 'metrics_path    = "/internal/metrics"' in config
     assert 'loki.source.docker "vodhunter_api"' in config
     assert 'source_labels = ["__meta_docker_container_label_com_docker_compose_service"]' in config
+    assert 'level   = "normalized_level"' in config
+    assert 'legacy_level>TRACE|DEBUG|INFO|WARNING|ERROR|CRITICAL' in config
     assert 'search_id                = ""' in config
     assert 'result_link              = ""' in config
     assert 'GRAFANA_CLOUD_API_TOKEN' in config
@@ -45,6 +47,14 @@ def test_deployment_environment_uses_standalone_database_url() -> None:
     assert "POSTGRES_USER" not in env_example
     assert "POSTGRES_PASSWORD" not in env_example
     assert "@postgres-<coolify-resource-id>:5432/vodhunter" in env_example
+
+
+def test_api_image_uses_json_logging_configuration() -> None:
+    dockerfile = (ROOT / "Dockerfile.api-public").read_text()
+    logging_config = json.loads((ROOT / "backend/logging.json").read_text())
+
+    assert '"--log-config", "/app/backend/logging.json"' in dockerfile
+    assert logging_config["formatters"]["json"]["()"] == "backend.json_logging.JsonFormatter"
 
 
 def test_dashboard_export_is_valid_json_and_has_metrics_and_logs_panels() -> None:
