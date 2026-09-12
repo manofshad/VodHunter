@@ -7,5 +7,6 @@ pydantic==1.10.26
 uvicorn==0.23.2
 python-multipart==0.0.9
 python-dotenv==1.0.1
+prometheus-client==0.21.1
 alembic==1.13.1
 sqlalchemy==2.0.15

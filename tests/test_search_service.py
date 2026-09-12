@@ -102,7 +102,14 @@ class TestSearchService:
         store = FakeStore()
         segment = SearchSegment(0.0, 0.5, 777, 1368.0, 1368.5, 0.9, 1.0, 1368.0, 0.9, 1.0, 1, 1)
         service = SearchService(videos=store, fingerprints=store, preprocessor=FakePreprocessor(), query_embedder=FakeQueryEmbedder(embeddings=np.array([[0.1, 0.2]], dtype=np.float32), timestamps=np.array([0.0], dtype=np.float32)), alignment=FakeAlignment(AlignmentResult(found=True, video_id=777, timestamp_seconds=1368, score=0.9, reason='ok', segments=[segment], query_duration_seconds=0.5)))
-        execution = service.search_file('clip.mp4', 'xQc')
+        stage_timings: list[tuple[str, int]] = []
+        execution = service.search_file(
+            'clip.mp4',
+            'xQc',
+            on_stage_timing=lambda stage, duration_ms: stage_timings.append(
+                (stage, duration_ms)
+            ),
+        )
         result = execution.result
         assert result.found
         assert store.last_streamer == 'xqc'
@@ -117,6 +124,12 @@ class TestSearchService:
         assert result.sources[0].segments[0].video_url_at_timestamp == result.video_url_at_timestamp
         assert execution.metadata.found_match is True
         assert execution.metadata.matched_video_id == 777
+        assert {stage for stage, _ in stage_timings} == {
+            'audio_preprocess',
+            'fingerprint',
+            'vector_retrieval',
+            'alignment',
+        }
 
     def test_groups_segments_by_vod_and_uses_each_vods_strongest_segment(self) -> None:
         store = FakeStore()

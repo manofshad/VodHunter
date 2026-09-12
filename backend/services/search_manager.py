@@ -48,24 +48,46 @@ class SearchManager:
         streamer: str,
         date_range: SearchDateRange | None = None,
         on_stage_change: Callable[[str], None] | None = None,
+        on_stage_timing: Callable[[str, int], None] | None = None,
     ) -> SearchRequestOutcome:
         downloaded_path = ""
         request_started_at = time.perf_counter()
         input_duration_seconds: float | None = None
+        stage_durations_ms: dict[str, int] = {}
         parsed_url = urlparse((url or "").strip())
         try:
             if on_stage_change is not None:
                 on_stage_change("downloading")
-            result = self.remote_downloader.download_tiktok(url)
+            started_at = time.perf_counter()
+            try:
+                result = self.remote_downloader.download_tiktok(url)
+            finally:
+                self._record_stage_timing(
+                    "download",
+                    started_at,
+                    stage_durations_ms,
+                    on_stage_timing,
+                )
             downloaded_path = result.path
-            input_duration_seconds = self._validate_duration(downloaded_path, on_stage_change=on_stage_change)
+            input_duration_seconds = self._validate_duration(
+                downloaded_path,
+                on_stage_change=on_stage_change,
+                on_stage_timing=on_stage_timing,
+                stage_durations_ms=stage_durations_ms,
+            )
             execution_result = self._search_local_file(
                 downloaded_path,
                 streamer,
                 date_range=date_range,
                 on_stage_change=on_stage_change,
+                on_stage_timing=on_stage_timing,
                 query_duration_seconds=input_duration_seconds,
             )
+            for stage, duration_ms in stage_durations_ms.items():
+                if stage == "download":
+                    execution_result.metadata.download_duration_ms = duration_ms
+                elif stage == "probe":
+                    execution_result.metadata.probe_duration_ms = duration_ms
             logger.info(
                 "timing event=search_tiktok_url seconds=%.2f streamer=%s",
                 time.perf_counter() - request_started_at,
@@ -85,7 +107,13 @@ class SearchManager:
             if downloaded_path:
                 self.remote_downloader.cleanup(downloaded_path)
 
-    def _validate_duration(self, path: str, on_stage_change: Callable[[str], None] | None = None) -> float | None:
+    def _validate_duration(
+        self,
+        path: str,
+        on_stage_change: Callable[[str], None] | None = None,
+        on_stage_timing: Callable[[str, int], None] | None = None,
+        stage_durations_ms: dict[str, int] | None = None,
+    ) -> float | None:
         if on_stage_change is not None:
             on_stage_change("probing")
         started_at = time.perf_counter()
@@ -93,6 +121,13 @@ class SearchManager:
             duration_seconds = self.duration_probe(path)
         except MediaDurationError as exc:
             raise SearchInputError(str(exc)) from exc
+        finally:
+            self._record_stage_timing(
+                "probe",
+                started_at,
+                stage_durations_ms,
+                on_stage_timing,
+            )
         logger.info(
             "timing event=duration_probe seconds=%.2f duration_seconds=%.2f path=%s",
             time.perf_counter() - started_at,
@@ -116,15 +151,30 @@ class SearchManager:
         streamer: str,
         date_range: SearchDateRange | None = None,
         on_stage_change: Callable[[str], None] | None = None,
+        on_stage_timing: Callable[[str, int], None] | None = None,
         query_duration_seconds: float | None = None,
     ):
         normalized_streamer = streamer.strip().lower()
         if not normalized_streamer:
             raise SearchInputError("streamer is required")
-        return self.search_service.search_file(
-            path,
-            normalized_streamer,
-            date_range=date_range,
-            on_stage_change=on_stage_change,
-            query_duration_seconds=query_duration_seconds,
-        )
+        search_kwargs = {
+            "date_range": date_range,
+            "on_stage_change": on_stage_change,
+            "query_duration_seconds": query_duration_seconds,
+        }
+        if on_stage_timing is not None:
+            search_kwargs["on_stage_timing"] = on_stage_timing
+        return self.search_service.search_file(path, normalized_streamer, **search_kwargs)
+
+    @staticmethod
+    def _record_stage_timing(
+        stage: str,
+        started_at: float,
+        stage_durations_ms: dict[str, int] | None,
+        on_stage_timing: Callable[[str, int], None] | None,
+    ) -> None:
+        duration_ms = _duration_ms(time.perf_counter() - started_at)
+        if stage_durations_ms is not None:
+            stage_durations_ms[stage] = duration_ms
+        if on_stage_timing is not None:
+            on_stage_timing(stage, duration_ms)

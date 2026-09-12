@@ -150,6 +150,8 @@ class AlignmentResult:
 
 @dataclass
 class SearchExecutionMetadata:
+    download_duration_ms: int | None = None
+    probe_duration_ms: int | None = None
     preprocess_duration_ms: int | None = None
     embed_duration_ms: int | None = None
     model_startup_duration_ms: int | None = None

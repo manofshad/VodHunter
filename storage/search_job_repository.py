@@ -198,6 +198,7 @@ class SearchJobRepository:
         error_message: str,
         http_status: int,
         input_duration_seconds: float | None = None,
+        total_duration_ms: int | None = None,
     ) -> None:
         with self.database.connect() as conn:
             with conn.cursor() as cur:
@@ -209,6 +210,7 @@ class SearchJobRepository:
                         error_code = %s,
                         error_message = %s,
                         input_duration_seconds = COALESCE(%s, input_duration_seconds),
+                        total_duration_ms = COALESCE(%s, total_duration_ms),
                         job_status = 'failed',
                         job_stage = NULL,
                         finished_at = NOW()
@@ -219,6 +221,7 @@ class SearchJobRepository:
                         error_code,
                         error_message,
                         input_duration_seconds,
+                        total_duration_ms,
                         int(search_id),
                     ),
                 )
@@ -329,7 +332,7 @@ class SearchJobRepository:
         *,
         error_code: str,
         error_message: str,
-    ) -> None:
+    ) -> list[tuple[int, str | None]]:
         with self.database.connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -344,9 +347,15 @@ class SearchJobRepository:
                         finished_at = COALESCE(finished_at, NOW())
                     WHERE source_app = 'public'
                       AND job_status IN ('queued', 'running')
+                    RETURNING id, streamer
                     """,
                     (error_code, error_message),
                 )
+                rows = cur.fetchall()
+        return [
+            (int(row[0]), str(row[1]) if row[1] is not None else None)
+            for row in rows
+        ]
 
     @staticmethod
     def _serialize_search_result(result: SearchResult) -> str:

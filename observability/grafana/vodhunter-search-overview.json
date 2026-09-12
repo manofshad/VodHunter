@@ -1,0 +1,130 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_METRICS",
+      "label": "Metrics datasource",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    },
+    {
+      "name": "DS_LOGS",
+      "label": "Logs datasource",
+      "type": "datasource",
+      "pluginId": "loki",
+      "pluginName": "Loki"
+    }
+  ],
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Searches in range",
+      "id": 1,
+      "datasource": { "type": "prometheus", "uid": "${DS_METRICS}" },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(increase(vodhunter_searches_total[$__range]))",
+          "refId": "A",
+          "legendFormat": "searches"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "orientation": "auto", "textMode": "auto", "colorMode": "value" }
+    },
+    {
+      "type": "timeseries",
+      "title": "Search outcomes",
+      "id": 2,
+      "datasource": { "type": "prometheus", "uid": "${DS_METRICS}" },
+      "gridPos": { "h": 8, "w": 9, "x": 6, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(vodhunter_searches_total[$__rate_interval]))",
+          "refId": "A",
+          "legendFormat": "{{outcome}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "lineInterpolation": "linear", "fillOpacity": 15, "showPoints": "never", "spanNulls": false } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "type": "stat",
+      "title": "Match rate",
+      "id": 3,
+      "datasource": { "type": "prometheus", "uid": "${DS_METRICS}" },
+      "gridPos": { "h": 5, "w": 9, "x": 15, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(vodhunter_searches_total{outcome=\"match\"}[$__rate_interval])) / clamp_min(sum(rate(vodhunter_searches_total{outcome=~\"match|no_match\"}[$__rate_interval])), 0.000001)",
+          "refId": "A",
+          "legendFormat": "match rate"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "orientation": "auto", "textMode": "auto", "colorMode": "value" }
+    },
+    {
+      "type": "timeseries",
+      "title": "Total latency p50 / p95",
+      "id": 4,
+      "datasource": { "type": "prometheus", "uid": "${DS_METRICS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(vodhunter_search_duration_seconds_bucket[$__rate_interval])))",
+          "refId": "A",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(vodhunter_search_duration_seconds_bucket[$__rate_interval])))",
+          "refId": "B",
+          "legendFormat": "p95"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineInterpolation": "linear", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Pipeline stage latency p95",
+      "id": 5,
+      "datasource": { "type": "prometheus", "uid": "${DS_METRICS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, stage) (rate(vodhunter_search_stage_duration_seconds_bucket[$__rate_interval])))",
+          "refId": "A",
+          "legendFormat": "{{stage}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineInterpolation": "linear", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "type": "logs",
+      "title": "Recent searches",
+      "id": 6,
+      "datasource": { "type": "loki", "uid": "${DS_LOGS}" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 16 },
+      "targets": [
+        {
+          "expr": "{service_name=\"vodhunter-api\", event=\"search_finished\"} | json",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "options": { "showTime": true, "showLabels": false, "showCommonLabels": false, "wrapLines": false, "prettifyLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending" }
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["vodhunter", "search"],
+  "time": { "from": "now-24h", "to": "now" },
+  "title": "VodHunter Search Overview",
+  "uid": "vodhunter-search-overview",
+  "version": 1
+}
