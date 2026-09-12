@@ -63,7 +63,7 @@ class FakeConnection:
 def build_database(cursor: FakeCursor) -> PostgresDatabase:
     database = PostgresDatabase.__new__(PostgresDatabase)
     database.vector_dim = NMFP_VECTOR_DIM
-    database.hnsw_ef_search = 40
+    database.hnsw_ef_search = 100
     database.model_version = DEFAULT_NMFP_MODEL_VERSION
     database.preprocessing_version = DEFAULT_NMFP_PREPROCESSING_VERSION
     database.connect = lambda: FakeConnection(cursor)
@@ -143,7 +143,7 @@ def test_query_fingerprint_candidates_batches_rows_and_retains_alignment_evidenc
     ]
 
     assert len(cursor.executed) == 2
-    assert "SET LOCAL hnsw.ef_search = 40" in cursor.executed[0][0]
+    assert "SET LOCAL hnsw.ef_search = 100" in cursor.executed[0][0]
     query, params = cursor.executed[1]
     assert "WITH query_fingerprints" in query
     assert "CROSS JOIN LATERAL" in query
