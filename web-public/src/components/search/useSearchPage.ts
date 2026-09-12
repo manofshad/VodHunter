@@ -2,7 +2,9 @@ import { FormEvent, RefObject, useEffect, useMemo, useRef, useState } from "reac
 
 import { createSearchJob, getSearchJob, listSearchableStreamers } from "../../api/client";
 import { SearchJobResponse, SearchResponse, StreamerListItem } from "../../api/types";
+import { createSearchHistoryEntry, SearchHistoryEntry } from "./searchHistory";
 import { isSupportedTikTokUrl } from "./searchUtils";
+import { useSearchHistory } from "./useSearchHistory";
 
 const ACTIVE_SEARCH_STORAGE_KEY = "vodhunter-public-active-search";
 
@@ -63,11 +65,13 @@ export interface SearchPageState {
   hasUrl: boolean;
   searchButtonLabel: string;
   streamerTriggerRef: RefObject<HTMLButtonElement>;
+  historyEntries: SearchHistoryEntry[];
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onUrlChange: (value: string) => void;
   onPaste: () => Promise<void>;
   onSelectStreamer: (value: string) => void;
   onDateRangeChange: (streamedFrom: string, streamedTo: string) => void;
+  onClearHistory: () => void;
 }
 
 export function useSearchPage(): SearchPageState {
@@ -86,6 +90,7 @@ export function useSearchPage(): SearchPageState {
   const [activeSearchStage, setActiveSearchStage] = useState<string | null>(null);
   const [lastSubmittedUrl, setLastSubmittedUrl] = useState("");
   const streamerTriggerRef = useRef<HTMLButtonElement>(null);
+  const { entries: historyEntries, addEntry, clearEntries: onClearHistory } = useSearchHistory();
 
   const hasUrl = tiktokUrl.trim().length > 0;
   const searchButtonLabel = useMemo(() => (submitting ? "Searching..." : "Search"), [submitting]);
@@ -195,6 +200,12 @@ export function useSearchPage(): SearchPageState {
     if (job.status === "completed") {
       setResult(job.result);
       setRequestError(null);
+      if (job.result) {
+        const historyEntry = createSearchHistoryEntry(job.result, lastSubmittedUrl, job.created_at);
+        if (historyEntry) {
+          addEntry(historyEntry);
+        }
+      }
       return;
     }
 
@@ -291,10 +302,12 @@ export function useSearchPage(): SearchPageState {
     hasUrl,
     searchButtonLabel,
     streamerTriggerRef,
+    historyEntries,
     onSubmit,
     onUrlChange,
     onPaste,
     onSelectStreamer,
     onDateRangeChange,
+    onClearHistory,
   };
 }
