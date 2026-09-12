@@ -136,6 +136,9 @@ def observe_terminal_search(
 
     event: dict[str, Any] = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
+        "level": "error" if normalized_outcome == "error" else "info",
+        "logger": "vodhunter.search_event",
+        "message": "Public search reached a terminal state",
         "event": "search_finished",
         "schema_version": 1,
         "search_id": int(search_id),

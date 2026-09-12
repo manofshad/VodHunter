@@ -36,6 +36,15 @@ Alloy scrapes `api:8000/internal/metrics` on the private Compose network and
 tails only the `api` container through the Docker socket. The API metrics path
 is blocked at the public Nginx edge by `nginx.public.conf.template`.
 
+The API writes one JSON object per log line with the canonical fields
+`timestamp`, `level`, `logger`, and `message`. Access logs additionally include
+structured HTTP fields, and exception logs keep the exception type, message,
+and stack trace in the same JSON record. Alloy promotes the bounded `level`,
+`event`, and `outcome` values to Loki labels so Grafana can color and filter
+logs without reporting their severity as `unknown`. Search IDs, request paths,
+and other high-cardinality fields are attached as structured metadata instead
+of labels.
+
 The Docker socket mount is required by `loki.source.docker`; treat the Alloy
 container as a host-operations component and keep its image/configuration
 changes reviewed.
@@ -55,6 +64,8 @@ LogQL:
 ```logql
 {service_name="vodhunter-api", event="search_finished"} | json
 {service_name="vodhunter-api", event="search_finished"} | json | search_id = `1842`
+{service_name="vodhunter-api", level="error"}
+{service_name="vodhunter-api"} | status_code >= 500
 ```
 
 Search IDs, streamers, result URLs, and timestamps are kept as JSON fields or

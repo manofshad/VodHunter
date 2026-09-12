@@ -44,4 +44,4 @@ RUN mkdir -p data/temp_search_downloads data/temp_search
 
 EXPOSE 8000
 
-CMD ["uvicorn", "backend.apps.public:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "backend.apps.public:app", "--host", "0.0.0.0", "--port", "8000", "--log-config", "/app/backend/logging.json"]

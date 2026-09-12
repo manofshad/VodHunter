@@ -48,21 +48,42 @@ loki.source.docker "vodhunter_api" {
 }
 
 loki.process "vodhunter_api" {
-  // The API emits one raw JSON search_finished line per terminal search.
-  // Other API logs remain available as ordinary log lines for diagnosis.
+  // The API emits JSON logs with a canonical lowercase level. Keep the regex
+  // fallback during rolling deployments and for any legacy Uvicorn lines.
   stage.json {
     expressions = {
+      level                    = "level",
+      logger                   = "logger",
       event                    = "event",
       outcome                  = "outcome",
       search_id                = "search_id",
       streamer                 = "streamer",
+      status                   = "status",
+      total_duration_ms        = "total_duration_ms",
       result_link              = "result_link",
       result_timestamp_seconds = "result_timestamp_seconds",
+      score                    = "score",
+      error_code               = "error.code",
+      client_address           = "client_address",
+      http_method              = "http_method",
+      url_path                 = "url_path",
+      http_version             = "http_version",
+      status_code              = "status_code",
     }
+  }
+
+  stage.regex {
+    expression = "^(?P<legacy_level>TRACE|DEBUG|INFO|WARNING|ERROR|CRITICAL):"
+  }
+
+  stage.template {
+    source   = "normalized_level"
+    template = "{{ if .level }}{{ .level | ToLower }}{{ else if .legacy_level }}{{ .legacy_level | ToLower }}{{ end }}"
   }
 
   stage.labels {
     values = {
+      level   = "normalized_level",
       event   = "",
       outcome = "",
     }
@@ -72,10 +93,20 @@ loki.process "vodhunter_api" {
   // stream labels: they are useful for lookup but have unbounded cardinality.
   stage.structured_metadata {
     values = {
+      logger                   = "",
       search_id                = "",
       streamer                 = "",
+      status                   = "",
+      total_duration_ms        = "",
       result_link              = "",
       result_timestamp_seconds = "",
+      score                    = "",
+      error_code               = "",
+      client_address           = "",
+      http_method              = "",
+      url_path                 = "",
+      http_version             = "",
+      status_code              = "",
     }
   }
 
@@ -92,4 +123,3 @@ loki.write "grafana_cloud" {
     }
   }
 }
-

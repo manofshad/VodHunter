@@ -37,6 +37,9 @@ def test_terminal_search_event_contains_result_identity_and_timings(monkeypatch)
     assert len(events) == 1
     event = events[0]
     assert event["event"] == "search_finished"
+    assert event["level"] == "info"
+    assert event["logger"] == "vodhunter.search_event"
+    assert event["message"] == "Public search reached a terminal state"
     assert event["search_id"] == 1842
     assert event["outcome"] == "match"
     assert event["total_duration_ms"] == 8342
@@ -95,6 +98,9 @@ def test_terminal_error_event_has_no_result_and_keeps_error_code(monkeypatch) ->
             "error": {"code": "DOWNLOAD_ERROR", "http_status": 400},
             "event": "search_finished",
             "found_match": None,
+            "level": "error",
+            "logger": "vodhunter.search_event",
+            "message": "Public search reached a terminal state",
             "outcome": "error",
             "result": None,
             "result_link": None,
