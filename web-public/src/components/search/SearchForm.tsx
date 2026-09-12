@@ -49,7 +49,7 @@ export function SearchForm({
   return (
     <form onSubmit={onSubmit} noValidate className="flex flex-col items-stretch gap-3">
       <div className="relative rounded-xl bg-gray-800">
-        <div className="p-1">
+        <div className="p-1 md:pl-0">
           <div className="flex flex-col items-stretch gap-2 md:flex-row md:items-center">
             <StreamerPicker
               streamer={streamer}

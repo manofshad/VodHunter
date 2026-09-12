@@ -335,7 +335,7 @@ describe("DateRangePicker", () => {
 });
 
 describe("StreamerPicker", () => {
-  it("connects the open menu directly to its outlined trigger", () => {
+  it("keeps the trigger seamless while attaching a self-contained menu", () => {
     const triggerRef = createRef<HTMLButtonElement>();
     render(
       <StreamerPicker
@@ -352,9 +352,9 @@ describe("StreamerPicker", () => {
     const trigger = screen.getByRole("button", { name: "Streamer" });
     fireEvent.click(trigger);
 
-    expect(trigger.classList.contains("border-gray-700")).toBe(true);
+    expect(trigger.classList.contains("border-0")).toBe(true);
     expect(screen.getByRole("listbox").classList.contains("top-full")).toBe(true);
-    expect(screen.getByRole("listbox").classList.contains("border-t-0")).toBe(true);
+    expect(screen.getByRole("listbox").classList.contains("border-gray-700")).toBe(true);
   });
 
   it("closes after a selection and returns focus to its trigger", () => {
