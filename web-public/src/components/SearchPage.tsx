@@ -48,17 +48,17 @@ function Header({ historyOpen, historyButtonRef, onOpenHistory }: HeaderProps) {
 function FeatureGrid() {
   const features = [
     {
-      title: "Find The Exact VOD Moment",
-      description: "Paste a TikTok clip link and match it to the exact timestamp inside a Twitch VOD.",
+      title: "Paste the Clip",
+      description: "Add the TikTok link containing the moment you want to find.",
     },
     {
-      title: "Audio-Based Matching",
+      title: "Match the Audio",
       description:
-        "VodHunter uses neural audio fingerprints and timeline alignment, so it can recognize supported moments across edited clips.",
+        "VodHunter compares the clip’s audio against the streamer’s VODs to locate the matching moment.",
     },
     {
-      title: "Search Hours In Seconds",
-      description: "Skip manual scrubbing through long streams and go straight to the source moment.",
+      title: "Jump to the Source",
+      description: "Go straight to the original Twitch VOD at the exact timestamp.",
     },
   ];
 
