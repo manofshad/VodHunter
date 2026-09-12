@@ -153,14 +153,13 @@ describe("SearchResultCard", () => {
     expect(screen.getAllByRole("link", { name: /Open matched segment/ })).toHaveLength(2);
   });
 
-  it("renders every unmatched query range without technical explanation", () => {
+  it("does not render unmatched query ranges", () => {
     render(<SearchResultCard result={multiSegmentResult()} lastSubmittedUrl="https://tiktok.test/clip" />);
 
-    expect(screen.getByRole("heading", { name: "Unmatched clip ranges" })).toBeTruthy();
-    expect(screen.getByText("00:00:00–00:00:07.5")).toBeTruthy();
-    expect(screen.getByText("00:00:11.5–00:00:30")).toBeTruthy();
-    expect(screen.getByText("00:01:06–00:01:10")).toBeTruthy();
-    expect(screen.queryByText(/did not contain enough continuous fingerprint evidence/i)).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Unmatched clip ranges" })).toBeNull();
+    expect(screen.queryByText("00:00:00–00:00:07.5")).toBeNull();
+    expect(screen.queryByText("00:00:11.5–00:00:30")).toBeNull();
+    expect(screen.queryByText("00:01:06–00:01:10")).toBeNull();
   });
 
   it("shows a fully unmatched clip without inventing a segment", () => {
@@ -179,7 +178,8 @@ describe("SearchResultCard", () => {
     render(<SearchResultCard result={result} lastSubmittedUrl="https://tiktok.test/clip" />);
 
     expect(screen.queryByRole("heading", { name: "Matched clip segments" })).toBeNull();
-    expect(screen.getByText("00:00:00–00:01:10")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Unmatched clip ranges" })).toBeNull();
+    expect(screen.queryByText("00:00:00–00:01:10")).toBeNull();
   });
 });
 
