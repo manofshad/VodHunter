@@ -164,6 +164,18 @@ class TestAlembicMigrations:
         assert 'DROP CONSTRAINT IF EXISTS search_requests_matched_video_id_fkey' in combined_sql
         assert 'ON DELETE SET NULL' in combined_sql
 
+    def test_pg_prewarm_revision_enables_cache_preloading(self) -> None:
+        revision = self._load_module(
+            'alembic/versions/20260912_0012_enable_pg_prewarm.py',
+            'vodhunter_alembic_revision_pg_prewarm',
+        )
+        fake_op = FakeOp()
+        with patch.object(revision, 'op', fake_op):
+            revision.upgrade()
+
+        assert revision.down_revision == '20260903_0011'
+        assert fake_op.executed == ['CREATE EXTENSION IF NOT EXISTS pg_prewarm']
+
     def test_nmfp_revision_rebuilds_vectors_and_adds_durable_results(self) -> None:
         revision = self._load_module(
             'alembic/versions/20260824_0010_nmfp_production_schema.py',

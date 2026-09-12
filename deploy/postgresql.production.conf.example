@@ -1,0 +1,14 @@
+# Apply these settings to the standalone Coolify PostgreSQL/PGVector resource.
+# The values are sized for the current 8 GiB production VPS and should be
+# rechecked if the API/worker footprint or database size changes materially.
+
+shared_buffers = '1536MB'
+effective_cache_size = '4GB'
+
+# Restore the hot shared-buffer working set after a PostgreSQL restart.
+shared_preload_libraries = 'pg_prewarm'
+pg_prewarm.autoprewarm = on
+pg_prewarm.autoprewarm_interval = 300
+
+# Make storage waits visible in PostgreSQL diagnostics.
+track_io_timing = on

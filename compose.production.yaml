@@ -1,21 +1,6 @@
 name: vodhunter
 
 services:
-  db:
-    image: pgvector/pgvector:pg16
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-vodhunter}
-      POSTGRES_USER: ${POSTGRES_USER:-vodhunter}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-    restart: unless-stopped
-
   migrate:
     build:
       context: .
@@ -23,9 +8,8 @@ services:
     env_file:
       - .env
     command: ["alembic", "upgrade", "head"]
-    depends_on:
-      db:
-        condition: service_healthy
+    # DATABASE_URL points to the standalone Coolify PostgreSQL/PGVector
+    # resource. Database lifecycle is intentionally outside this stack.
     restart: "no"
 
   api:
@@ -138,10 +122,6 @@ services:
     restart: unless-stopped
 
 volumes:
-  postgres_data:
-    # Keep the existing production database when Coolify deploys this stack.
-    name: vodhunter_postgres_data
-    external: true
   runtime_data:
     # Keep the existing shared runtime volume when Coolify deploys this stack.
     name: vodhunter_runtime_data
