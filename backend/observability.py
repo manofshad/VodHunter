@@ -158,12 +158,10 @@ def observe_terminal_search(
             getattr(result, "timestamp_seconds", None) if result is not None else None
         ),
         "score": _safe_float(getattr(result, "score", None)) if result is not None else None,
-        "error": (
-            {"code": str(error_code), "http_status": http_status}
-            if error_code
-            else None
-        ),
     }
+    if error_code:
+        event["error"] = {"code": str(error_code), "http_status": http_status}
+
     _SEARCH_EVENT_LOGGER.info(
         json.dumps(event, separators=(",", ":"), sort_keys=True, ensure_ascii=False)
     )
