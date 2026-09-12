@@ -73,7 +73,9 @@ export function StreamerPicker({
         aria-expanded={isOpen ? "true" : "false"}
         aria-controls={streamerMenuId}
         onClick={() => setIsOpen((open) => !open)}
-        className="flex h-10 w-full items-center gap-2 border-0 bg-gray-800 px-4 text-sm font-medium text-gray-100 outline-none disabled:cursor-not-allowed disabled:text-gray-500"
+        className={`flex h-10 w-full items-center gap-2 border bg-gray-800 px-4 text-sm font-medium text-gray-100 outline-none disabled:cursor-not-allowed disabled:text-gray-500 ${
+          isOpen ? "border-gray-700" : "border-transparent"
+        }`}
       >
         {streamer ? (
           <AvatarImage
@@ -98,7 +100,7 @@ export function StreamerPicker({
           ref={streamerMenuRef}
           id={streamerMenuId}
           role="listbox"
-          className="absolute top-[calc(100%+8px)] left-0 z-20 w-full overflow-hidden rounded-xl border border-gray-700 bg-gray-800 shadow-xl"
+          className="absolute top-full left-0 z-20 w-full overflow-hidden border border-t-0 border-gray-700 bg-gray-800"
         >
           {streamers.map((item) => {
             const selected = item.name === streamer;

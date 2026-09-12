@@ -335,6 +335,28 @@ describe("DateRangePicker", () => {
 });
 
 describe("StreamerPicker", () => {
+  it("connects the open menu directly to its outlined trigger", () => {
+    const triggerRef = createRef<HTMLButtonElement>();
+    render(
+      <StreamerPicker
+        streamer=""
+        streamers={[{ name: "alice", profile_image_url: null }]}
+        loading={false}
+        disabled={false}
+        error={null}
+        triggerRef={triggerRef}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    const trigger = screen.getByRole("button", { name: "Streamer" });
+    fireEvent.click(trigger);
+
+    expect(trigger.classList.contains("border-gray-700")).toBe(true);
+    expect(screen.getByRole("listbox").classList.contains("top-full")).toBe(true);
+    expect(screen.getByRole("listbox").classList.contains("border-t-0")).toBe(true);
+  });
+
   it("closes after a selection and returns focus to its trigger", () => {
     const onSelect = vi.fn();
     const triggerRef = createRef<HTMLButtonElement>();
