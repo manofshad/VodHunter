@@ -45,7 +45,7 @@ export function SearchFeedback({
         </div>
       ) : null}
 
-      {!submitting && result ? <SearchResultCard result={result} lastSubmittedUrl={lastSubmittedUrl} /> : null}
+      {!submitting && result?.found ? <SearchResultCard result={result} lastSubmittedUrl={lastSubmittedUrl} /> : null}
 
       {!submitting && result && !result.found ? (
         <div className="mx-auto max-w-4xl rounded-xl border border-gray-700 bg-gray-900 p-6 text-center shadow-lg">
