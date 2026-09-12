@@ -403,17 +403,20 @@ class VideoRepository:
         return self._video_from_row(row, with_creator=True)
 
     def list_searchable_streamers(self) -> list[SearchableStreamer]:
+        # An existence check can stop at the first indexed embedding for each
+        # creator instead of aggregating every fingerprint in the catalog.
         with self.database.connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
                     SELECT c.name, c.profile_image_url
                     FROM creators c
-                    JOIN videos v ON v.creator_id = c.id
-                    JOIN fingerprints f ON f.video_id = v.id
-                    JOIN fingerprint_embeddings fe ON fe.fingerprint_id = f.id
                     WHERE c.name IS NOT NULL AND BTRIM(c.name) <> ''
-                    GROUP BY c.name, c.profile_image_url
+                      AND EXISTS (
+                          SELECT 1
+                          FROM fingerprint_embeddings fe
+                          WHERE fe.creator_id = c.id
+                      )
                     ORDER BY LOWER(c.name), c.name
                     """
                 )

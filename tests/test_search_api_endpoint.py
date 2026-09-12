@@ -98,6 +98,22 @@ def build_client(app_factory):
     return app, TestClient(app)
 
 
+def test_searchable_streamers_are_browser_cacheable() -> None:
+    _, client = build_client(create_public_app)
+
+    with client:
+        response = client.get("/api/search/streamers")
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == (
+        "public, max-age=300, stale-while-revalidate=3600"
+    )
+    assert response.json() == [
+        {"name": "xqc", "profile_image_url": "https://cdn/xqc.png"},
+        {"name": "jason", "profile_image_url": None},
+    ]
+
+
 def test_public_search_endpoint_accepts_tiktok_url_only() -> None:
     app, client = build_client(create_public_app)
 
