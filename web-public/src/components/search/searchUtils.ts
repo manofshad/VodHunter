@@ -53,21 +53,21 @@ export function isSupportedTikTokUrl(rawUrl: string): boolean {
 export function getStageMessage(stage: string | null): string {
   switch (stage) {
     case "validating":
-      return "Validating your TikTok URL.";
+      return "Getting your clip ready…";
     case "downloading":
-      return "Downloading the TikTok clip.";
+      return "Loading the TikTok clip…";
     case "probing":
-      return "Checking clip duration.";
+      return "Taking a quick look at the clip…";
     case "preprocessing":
-      return "Preparing the clip audio for search.";
+      return "Listening for the right moment…";
     case "fingerprinting":
-      return "Generating neural audio fingerprints.";
+      return "Picking out the important details…";
     case "retrieving":
-      return "Retrieving candidate VOD fingerprints.";
+      return "Looking through Twitch VODs…";
     case "aligning":
-      return "Building supported clip-to-VOD timeline segments.";
+      return "Piecing together the best match…";
     case "finalizing":
-      return "Finalizing the search result.";
+      return "Almost there…";
     default:
       return "We are matching your TikTok clip against indexed streamer audio.";
   }
