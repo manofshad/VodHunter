@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { SearchResponse } from "../api/types";
 import { StreamerPicker } from "./search/StreamerPicker";
+import { SearchFeedback } from "./search/SearchFeedback";
 import { DateRangePicker, SearchResultCard, formatTimelineTime, isSupportedTikTokUrl } from "./SearchPage";
 
 function multiSegmentResult(): SearchResponse {
@@ -179,6 +180,37 @@ describe("SearchResultCard", () => {
 
     expect(screen.queryByRole("heading", { name: "Matched clip segments" })).toBeNull();
     expect(screen.getByText("00:00:00–00:01:10")).toBeTruthy();
+  });
+});
+
+describe("SearchFeedback", () => {
+  it("shows only the simple no-match card for an unsuccessful search", () => {
+    const result = {
+      ...multiSegmentResult(),
+      found: false,
+      video_id: null,
+      video_url: null,
+      video_url_at_timestamp: null,
+      timestamp_seconds: null,
+      score: null,
+      sources: [],
+      segments: [],
+      unmatched_ranges: [{ query_start: 0, query_end: 70 }],
+    };
+
+    render(
+      <SearchFeedback
+        requestError={null}
+        submitting={false}
+        activeSearchStage={null}
+        result={result}
+        lastSubmittedUrl="https://tiktok.test/clip"
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "No exact match yet" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "No matching Twitch VOD found" })).toBeNull();
+    expect(screen.queryByText("00:00:00–00:01:10")).toBeNull();
   });
 });
 
