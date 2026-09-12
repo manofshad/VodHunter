@@ -45,6 +45,29 @@ def test_terminal_search_event_contains_result_identity_and_timings(monkeypatch)
     assert event["result_timestamp_seconds"] == 3723
     assert event["score"] == 0.91
     assert event["result"]["video_id"] == 417
+    assert "error" not in event
+
+
+def test_terminal_no_match_event_omits_error_field(monkeypatch) -> None:
+    events: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        observability._SEARCH_EVENT_LOGGER,
+        "info",
+        lambda message: events.append(json.loads(message)),
+    )
+
+    observability.observe_terminal_search(
+        search_id=1844,
+        streamer="xqc",
+        outcome="no_match",
+        status="completed",
+        total_duration_ms=420,
+    )
+
+    assert len(events) == 1
+    assert events[0]["outcome"] == "no_match"
+    assert events[0]["found_match"] is False
+    assert "error" not in events[0]
 
 
 def test_terminal_error_event_has_no_result_and_keeps_error_code(monkeypatch) -> None:
