@@ -21,7 +21,7 @@ function historyEntry(overrides: Partial<SearchHistoryEntry> = {}): SearchHistor
 }
 
 describe("HistoryDrawer", () => {
-  it("renders the title, source URL, primary timestamp, and additional-match count", () => {
+  it("links only the title to Twitch and renders the history details outside the link", () => {
     render(
       <HistoryDrawer
         open
@@ -38,9 +38,34 @@ describe("HistoryDrawer", () => {
     expect(screen.getByText("01:02:03")).toBeTruthy();
     expect(screen.getByText("+3 more")).toBeTruthy();
 
-    const link = screen.getByRole("link", { name: "Open Late Night Stream for jasontheween at 01:02:03" });
+    const link = screen.getByRole("link", { name: "Late Night Stream" });
     expect(link.getAttribute("href")).toBe("https://www.twitch.tv/videos/7?t=1h2m3s");
     expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.contains(screen.getByText("tiktok.com/t/abc"))).toBe(false);
+    expect(link.contains(screen.getByText("01:02:03"))).toBe(false);
+  });
+
+  it("copies the original TikTok URL", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+
+    render(
+      <HistoryDrawer
+        open
+        entries={[historyEntry()]}
+        returnFocusRef={createRef<HTMLButtonElement>()}
+        onClose={vi.fn()}
+        onClear={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy TikTok URL" }));
+
+    expect(writeText).toHaveBeenCalledWith("https://www.tiktok.com/t/abc?utm_source=share");
+    expect(await screen.findByRole("button", { name: "TikTok URL copied" })).toBeTruthy();
   });
 
   it("closes from the close button, overlay, and Escape", () => {
