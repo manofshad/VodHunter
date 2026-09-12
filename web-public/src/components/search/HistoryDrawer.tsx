@@ -1,5 +1,5 @@
-import { RefObject, useEffect, useRef } from "react";
-import { ExternalLink, History as HistoryIcon, X } from "lucide-react";
+import { RefObject, useEffect, useRef, useState } from "react";
+import { Check, Copy, ExternalLink, History as HistoryIcon, X } from "lucide-react";
 
 import { AvatarImage } from "./AvatarImage";
 import { formatTimelineTime } from "./searchUtils";
@@ -25,51 +25,79 @@ interface HistoryEntryRowProps {
 
 function HistoryEntryRow({ entry, tabIndex }: HistoryEntryRowProps) {
   const timestamp = formatTimelineTime(entry.timestampSeconds);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyTikTokUrl = async () => {
+    await navigator.clipboard.writeText(entry.tiktokUrl);
+    setCopied(true);
+  };
+
+  useEffect(() => {
+    if (!copied) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => setCopied(false), 2000);
+    return () => window.clearTimeout(timeout);
+  }, [copied]);
 
   return (
-    <li>
-      <a
-        href={entry.twitchUrlAtTimestamp}
-        target="_blank"
-        rel="noreferrer"
-        tabIndex={tabIndex}
-        aria-label={`Open ${entry.streamTitle} for ${entry.streamer} at ${timestamp}`}
-        className="group block rounded-xl border border-gray-700 bg-gray-800/70 p-4 transition hover:border-gray-500 hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#fb2844]"
-      >
-        <div className="flex min-w-0 items-start gap-3">
-          <AvatarImage
-            src={entry.profileImageUrl}
-            alt={`${entry.streamer} avatar`}
-            className="size-10 shrink-0 rounded-full border border-gray-700 object-cover"
-          />
+    <li className="rounded-xl border border-gray-700 bg-gray-800/70 p-4">
+      <div className="flex min-w-0 items-start gap-3">
+        <AvatarImage
+          src={entry.profileImageUrl}
+          alt={`${entry.streamer} avatar`}
+          className="size-10 shrink-0 rounded-full border border-gray-700 object-cover"
+        />
 
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-xs font-semibold uppercase tracking-[0.16em] text-[#fb2844]">
-              {entry.streamer}
-            </p>
-            <div className="mt-1 flex min-w-0 items-start gap-2">
-              <h3 className="min-w-0 flex-1 break-words text-base font-bold leading-tight text-white transition group-hover:text-gray-100">
-                {entry.streamTitle}
-              </h3>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-xs font-semibold uppercase tracking-[0.16em] text-[#fb2844]">
+            {entry.streamer}
+          </p>
+          <h3 className="mt-1 min-w-0 break-words text-base font-bold leading-tight text-white">
+            <a
+              href={entry.twitchUrlAtTimestamp}
+              target="_blank"
+              rel="noreferrer"
+              tabIndex={tabIndex}
+              title={`Open on Twitch at ${timestamp}`}
+              className="group rounded-sm transition hover:text-gray-200 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#fb2844]"
+            >
+              {entry.streamTitle}
               <ExternalLink
                 aria-hidden="true"
-                className="mt-0.5 size-4 shrink-0 text-gray-400 transition group-hover:text-[#fb2844]"
+                className="ml-1 inline size-4 align-[-0.125em] text-gray-400 transition group-hover:text-[#fb2844]"
               />
-            </div>
-            <p className="mt-1 truncate text-sm text-gray-400" title={entry.tiktokUrl}>
+            </a>
+          </h3>
+          <div className="mt-1 flex min-w-0 items-center gap-1">
+            <p className="min-w-0 truncate text-sm text-gray-400" title={entry.tiktokUrl}>
               {displayTikTokUrl(entry.tiktokUrl)}
             </p>
+            <button
+              type="button"
+              tabIndex={tabIndex}
+              onClick={handleCopyTikTokUrl}
+              aria-label={copied ? "TikTok URL copied" : "Copy TikTok URL"}
+              className="flex size-7 shrink-0 items-center justify-center rounded-md text-gray-400 transition hover:bg-gray-700 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#fb2844]"
+            >
+              {copied ? (
+                <Check aria-hidden="true" className="size-3.5 text-emerald-400" />
+              ) : (
+                <Copy aria-hidden="true" className="size-3.5" />
+              )}
+            </button>
           </div>
         </div>
+      </div>
 
-        <div className="mt-4 flex flex-wrap items-baseline gap-x-2 gap-y-1 border-t border-gray-700/80 pt-3">
-          <span className="font-mono text-sm font-semibold text-white">{timestamp}</span>
-          {entry.additionalMatchCount > 0 ? (
-            <span className="text-sm text-gray-400">+{entry.additionalMatchCount} more</span>
-          ) : null}
-          <span className="ml-auto text-xs text-gray-500">{formatHistoryTime(entry.searchedAt)}</span>
-        </div>
-      </a>
+      <div className="mt-4 flex flex-wrap items-baseline gap-x-2 gap-y-1 border-t border-gray-700/80 pt-3">
+        <span className="font-mono text-sm font-semibold text-white">{timestamp}</span>
+        {entry.additionalMatchCount > 0 ? (
+          <span className="text-sm text-gray-400">+{entry.additionalMatchCount} more</span>
+        ) : null}
+        <span className="ml-auto text-xs text-gray-500">{formatHistoryTime(entry.searchedAt)}</span>
+      </div>
     </li>
   );
 }
