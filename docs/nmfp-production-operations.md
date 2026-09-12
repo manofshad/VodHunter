@@ -197,6 +197,36 @@ Production emits and persists the following independently:
 | `model_version`, `preprocessing_version` | identity used for this search |
 | `result_payload` | durable primary result, segments, and unmatched ranges |
 
+The API also exposes the focused search telemetry surface at the private
+`/internal/metrics` endpoint. Grafana Alloy scrapes it and forwards the
+following application metrics to Grafana Cloud:
+
+- `vodhunter_searches_total{outcome="match|no_match|error"}`
+- `vodhunter_search_duration_seconds`
+- `vodhunter_search_stage_duration_seconds{stage="..."}`
+- `vodhunter_search_failures_total{error_code="..."}`
+
+The bounded stage names are `download`, `probe`, `audio_preprocess`,
+`fingerprint`, `vector_retrieval`, `alignment`, and `persist`.
+
+After each accepted asynchronous search reaches a terminal state, the API
+writes one raw JSON `search_finished` event to stdout. The event contains the
+`search_id`, normalized streamer, outcome, total latency (from acceptance
+through terminal persistence), stage timings, model
+diagnostics, and (when found) the Twitch result URL, timestamp, video ID, and
+score. Search IDs, streamers, and result links remain JSON fields/structured
+metadata in Loki rather than stream labels. Jobs recovered as
+`WORKER_RESTARTED` on API startup emit the same terminal event shape with an
+error outcome.
+
+The sidecar configuration lives in `observability/alloy/config.alloy`; its
+Grafana Cloud credentials must be supplied through the VPS/Coolify secret
+store. The versioned dashboard is
+`observability/grafana/vodhunter-search-overview.json`. Validate the Compose
+interpolation and Alloy configuration before deployment, then confirm one
+Loki event and one metric observation for a known match, no-match, and
+controlled failure.
+
 For production baselines, report separate cold and warm distributions. Cold measurement must include `model_cold_start=true`, model startup, feature preprocessing, inference, vector retrieval, alignment, and total time. Warm query extraction must use `model_cold_start=false`; do not omit extraction time just because the model is resident.
 
 ## Tests and rollout order

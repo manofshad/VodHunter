@@ -136,6 +136,16 @@ def test_public_search_endpoint_accepts_tiktok_url_only() -> None:
     ]
 
 
+def test_internal_metrics_endpoint_is_available_to_private_api_clients() -> None:
+    _, client = build_client(create_public_app)
+
+    with client:
+        response = client.get("/internal/metrics")
+
+    assert response.status_code == 200
+    assert "vodhunter_searches_total" in response.text
+
+
 def test_public_search_endpoint_accepts_tiktok_short_share_url() -> None:
     app, client = build_client(create_public_app)
 

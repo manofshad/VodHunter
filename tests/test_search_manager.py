@@ -22,6 +22,7 @@ class FakeSearchService:
         streamer: str,
         date_range: SearchDateRange | None = None,
         on_stage_change=None,
+        on_stage_timing=None,
         query_duration_seconds: float | None = None,
     ) -> SearchExecutionResult:
         self.searched_paths.append((path, streamer))
@@ -61,12 +62,22 @@ class TestSearchManager:
                 remote_downloader=downloader,
                 duration_probe=lambda _: 1.0,
             )
-            outcome = manager.search_tiktok_url("https://www.tiktok.com/@user/video/1", "xqc")
+            stage_timings: list[tuple[str, int]] = []
+            outcome = manager.search_tiktok_url(
+                "https://www.tiktok.com/@user/video/1",
+                "xqc",
+                on_stage_timing=lambda stage, duration_ms: stage_timings.append(
+                    (stage, duration_ms)
+                ),
+            )
             assert downloader.download_calls == ["https://www.tiktok.com/@user/video/1"]
             assert service.searched_paths == [(clip_path, "xqc")]
             assert downloader.cleaned_paths == [clip_path]
             assert outcome.download_source == "tiktok"
             assert outcome.download_host == "www.tiktok.com"
+            assert {stage for stage, _ in stage_timings} >= {"download", "probe"}
+            assert outcome.execution_metadata.download_duration_ms is not None
+            assert outcome.execution_metadata.probe_duration_ms is not None
 
     def test_search_tiktok_url_forwards_date_range(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

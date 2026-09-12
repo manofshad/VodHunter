@@ -6,6 +6,7 @@ The production stack is defined in `compose.production.yaml`. It runs:
 - the public FastAPI API with the pinned local NMFP model
 - the hybrid Twitch polling worker for the configured streamer
 - a daily local VOD retention service
+- the Grafana Alloy telemetry sidecar for search metrics and API logs
 - the public React site
 - a Coolify-managed Traefik proxy for HTTPS at `vodhunter.com` and `www.vodhunter.com`
 
@@ -28,6 +29,12 @@ deployment. Do not commit the production `.env` file or secrets to GitHub.
 The `postgres_data` and `runtime_data` volumes are deliberately external and
 must already exist on the production server; this prevents Coolify from
 silently creating an empty database volume during the migration.
+
+The Alloy sidecar additionally requires the five `GRAFANA_CLOUD_*` variables
+and `VODHUNTER_ENVIRONMENT` shown in `deploy/.env.example`. Keep the access
+token in Coolify's secret store. Alloy has no public route; it scrapes the API
+over the private Compose network and tails only the API container's Docker
+logs.
 
 The `migrate` service runs `alembic upgrade head` after PostgreSQL is healthy.
 The API, worker, and retention service do not start unless that migration
@@ -57,6 +64,7 @@ docker compose -f compose.production.yaml up -d --force-recreate vod-retention
 ```bash
 curl --fail https://vodhunter.com/api/health
 docker compose -f compose.production.yaml logs --tail=100 api worker
+docker compose -f compose.production.yaml logs --tail=100 alloy
 ```
 
 The API health response should report the pinned 128-dimensional NMFP runtime.

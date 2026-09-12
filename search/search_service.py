@@ -61,6 +61,15 @@ def _duration_ms(seconds: float | None) -> int | None:
     return max(int(round(seconds * 1000.0)), 0)
 
 
+def _record_stage_timing(
+    stage: str,
+    started_at: float,
+    on_stage_timing: Callable[[str, int], None] | None,
+) -> None:
+    if on_stage_timing is not None:
+        on_stage_timing(stage, _duration_ms(time.perf_counter() - started_at) or 0)
+
+
 def _embedding_observation(query_embedder: QueryEmbedder) -> dict[str, object | None]:
     """Read timing and identity from the local NMFP extraction result."""
 
@@ -119,10 +128,10 @@ class SearchService:
         streamer: str,
         date_range: SearchDateRange | None = None,
         on_stage_change: Callable[[str], None] | None = None,
+        on_stage_timing: Callable[[str, int], None] | None = None,
         query_duration_seconds: float | None = None,
     ) -> SearchExecutionResult:
         prepared_wav = None
-        total_started_at = time.perf_counter()
         metadata = SearchExecutionMetadata()
         try:
             normalized_streamer = streamer.strip().lower()
@@ -132,19 +141,25 @@ class SearchService:
             if on_stage_change is not None:
                 on_stage_change("preprocessing")
             started_at = time.perf_counter()
-            if query_duration_seconds is None:
-                prepared_wav = self.preprocessor.prepare(clip_path)
-            else:
-                prepared_wav = self.preprocessor.prepare(
-                    clip_path,
-                    duration_limit_seconds=query_duration_seconds,
-                )
+            try:
+                if query_duration_seconds is None:
+                    prepared_wav = self.preprocessor.prepare(clip_path)
+                else:
+                    prepared_wav = self.preprocessor.prepare(
+                        clip_path,
+                        duration_limit_seconds=query_duration_seconds,
+                    )
+            finally:
+                _record_stage_timing("audio_preprocess", started_at, on_stage_timing)
             metadata.preprocess_duration_ms = _duration_ms(time.perf_counter() - started_at)
 
             if on_stage_change is not None:
                 on_stage_change("fingerprinting")
             started_at = time.perf_counter()
-            query_embeddings, query_timestamps = self.query_embedder.embed(prepared_wav)
+            try:
+                query_embeddings, query_timestamps = self.query_embedder.embed(prepared_wav)
+            finally:
+                _record_stage_timing("fingerprint", started_at, on_stage_timing)
             metadata.embed_duration_ms = _duration_ms(time.perf_counter() - started_at)
             metadata.query_fingerprint_count = int(len(query_timestamps))
 
@@ -178,50 +193,57 @@ class SearchService:
                     "No fingerprints generated for query clip",
                     resolved_duration,
                     metadata,
-                    total_started_at,
                 )
 
             if on_stage_change is not None:
                 on_stage_change("retrieving")
-            creator_id = self.videos.get_creator_id_by_name(normalized_streamer)
-            if creator_id is None:
-                return self._finish_not_found(
-                    normalized_streamer,
-                    f"No indexed clips found for streamer: {normalized_streamer}",
-                    resolved_duration,
-                    metadata,
-                    total_started_at,
-                )
-
-            top_k = self.top_k
-            logger.info(
-                "timing event=search_creator_lookup streamer=%s creator_id=%d "
-                "query_fingerprint_count=%d top_k=%d",
-                normalized_streamer,
-                creator_id,
-                int(query_embeddings.shape[0]),
-                top_k,
-            )
             started_at = time.perf_counter()
-            candidates = self.fingerprints.query_fingerprint_candidates(
-                query_embeddings=query_embeddings,
-                query_timestamps=query_timestamps,
-                top_k=top_k,
-                creator_id=creator_id,
-                model_version=metadata.model_version,
-                preprocessing_version=metadata.preprocessing_version,
-                date_range=date_range,
+            try:
+                creator_id = self.videos.get_creator_id_by_name(normalized_streamer)
+                if creator_id is None:
+                    return self._finish_not_found(
+                        normalized_streamer,
+                        f"No indexed clips found for streamer: {normalized_streamer}",
+                        resolved_duration,
+                        metadata,
+                    )
+
+                top_k = self.top_k
+                logger.info(
+                    "timing event=search_creator_lookup streamer=%s creator_id=%d "
+                    "query_fingerprint_count=%d top_k=%d",
+                    normalized_streamer,
+                    creator_id,
+                    int(query_embeddings.shape[0]),
+                    top_k,
+                )
+                query_started_at = time.perf_counter()
+                candidates = self.fingerprints.query_fingerprint_candidates(
+                    query_embeddings=query_embeddings,
+                    query_timestamps=query_timestamps,
+                    top_k=top_k,
+                    creator_id=creator_id,
+                    model_version=metadata.model_version,
+                    preprocessing_version=metadata.preprocessing_version,
+                    date_range=date_range,
+                )
+            finally:
+                _record_stage_timing("vector_retrieval", started_at, on_stage_timing)
+            metadata.vector_query_duration_ms = _duration_ms(
+                time.perf_counter() - query_started_at
             )
-            metadata.vector_query_duration_ms = _duration_ms(time.perf_counter() - started_at)
             metadata.candidate_count = len(candidates)
 
             if on_stage_change is not None:
                 on_stage_change("aligning")
             started_at = time.perf_counter()
-            alignment = self.alignment.align_candidates(
-                candidates,
-                query_duration_seconds=resolved_duration,
-            )
+            try:
+                alignment = self.alignment.align_candidates(
+                    candidates,
+                    query_duration_seconds=resolved_duration,
+                )
+            finally:
+                _record_stage_timing("alignment", started_at, on_stage_timing)
             metadata.alignment_duration_ms = _duration_ms(time.perf_counter() - started_at)
             metadata.segment_count = len(alignment.segments)
 
@@ -231,7 +253,6 @@ class SearchService:
                     alignment.reason or "No aligned match found",
                     resolved_duration,
                     metadata,
-                    total_started_at,
                     score=alignment.score,
                     unmatched_ranges=alignment.unmatched_ranges,
                 )
@@ -252,7 +273,6 @@ class SearchService:
                     "Aligned video metadata not found",
                     resolved_duration,
                     metadata,
-                    total_started_at,
                     score=alignment.score,
                     unmatched_ranges=alignment.unmatched_ranges,
                 )
@@ -350,7 +370,6 @@ class SearchService:
             metadata.matched_video_id = result.video_id
             metadata.matched_timestamp_seconds = result.timestamp_seconds
             metadata.score = result.score
-            self._log_completion(total_started_at, normalized_streamer, metadata, "found")
             return SearchExecutionResult(result=result, metadata=metadata)
         finally:
             if prepared_wav is not None:
@@ -368,7 +387,6 @@ class SearchService:
         reason: str,
         query_duration_seconds: float,
         metadata: SearchExecutionMetadata,
-        total_started_at: float,
         *,
         score: float | None = None,
         unmatched_ranges: list[UnmatchedRange] | None = None,
@@ -393,37 +411,4 @@ class SearchService:
             metadata.candidate_count = 0
         if metadata.segment_count is None:
             metadata.segment_count = 0
-        self._log_completion(total_started_at, streamer, metadata, "not_found")
         return SearchExecutionResult(result=result, metadata=metadata)
-
-    @staticmethod
-    def _log_completion(
-        total_started_at: float,
-        streamer: str,
-        metadata: SearchExecutionMetadata,
-        result: str,
-    ) -> None:
-        logger.info(
-            "timing event=search_pipeline total_ms=%d audio_preprocess_ms=%s "
-            "query_fingerprint_wall_ms=%s model_startup_ms=%s fingerprint_preprocess_ms=%s "
-            "fingerprint_inference_ms=%s fingerprint_worker_total_ms=%s vector_retrieval_ms=%s "
-            "alignment_ms=%s query_fingerprint_count=%s candidate_count=%s segment_count=%s "
-            "cold_start=%s result=%s streamer=%s model_version=%s preprocessing_version=%s",
-            _duration_ms(time.perf_counter() - total_started_at),
-            metadata.preprocess_duration_ms,
-            metadata.embed_duration_ms,
-            metadata.model_startup_duration_ms,
-            metadata.fingerprint_preprocessing_duration_ms,
-            metadata.fingerprint_inference_duration_ms,
-            metadata.fingerprint_duration_ms,
-            metadata.vector_query_duration_ms,
-            metadata.alignment_duration_ms,
-            metadata.query_fingerprint_count,
-            metadata.candidate_count,
-            metadata.segment_count,
-            metadata.model_cold_start,
-            result,
-            streamer,
-            metadata.model_version,
-            metadata.preprocessing_version,
-        )

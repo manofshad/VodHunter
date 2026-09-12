@@ -65,6 +65,10 @@ the retained search history.
 
 The production schema migration is destructive to incompatible fingerprint data by design. The old production database no longer exists, so rollout assumes a fresh database or a complete rebuild rather than a zero-downtime vector conversion. Apply migrations and run the guarded first backfill as described in [NMFP production operations](docs/nmfp-production-operations.md). That guide also covers resumability, version checks, metrics, and rollback boundaries.
 
+The focused Grafana Cloud search telemetry setup, Alloy configuration, secret
+names, dashboard, and smoke-test queries are documented in
+[search observability](observability/README.md).
+
 No application deployment or external database creation is performed by repository commands unless an operator explicitly runs the relevant external tooling.
 
 ## Latency measurements
