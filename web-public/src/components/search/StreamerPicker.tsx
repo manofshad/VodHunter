@@ -1,4 +1,5 @@
-import { RefObject, useEffect, useId, useRef, useState } from "react";
+import { KeyboardEvent, RefObject, useState } from "react";
+import * as Select from "@radix-ui/react-select";
 import { Check, ChevronDown } from "lucide-react";
 
 import { StreamerListItem } from "../../api/types";
@@ -23,107 +24,88 @@ export function StreamerPicker({
   triggerRef,
   onSelect,
 }: StreamerPickerProps) {
-  const [isOpen, setIsOpen] = useState(false);
-  const streamerMenuRef = useRef<HTMLDivElement | null>(null);
-  const streamerMenuId = useId();
-
-  useEffect(() => {
-    if (!isOpen) {
-      return;
-    }
-
-    const onPointerDown = (event: MouseEvent) => {
-      const target = event.target as Node;
-      if (triggerRef.current?.contains(target) || streamerMenuRef.current?.contains(target)) {
-        return;
-      }
-      setIsOpen(false);
-    };
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setIsOpen(false);
-        triggerRef.current?.focus();
-      }
-    };
-
-    window.addEventListener("mousedown", onPointerDown);
-    window.addEventListener("keydown", onKeyDown);
-
-    return () => {
-      window.removeEventListener("mousedown", onPointerDown);
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [isOpen]);
-
-  const selectStreamer = (value: string) => {
-    onSelect(value);
-    setIsOpen(false);
-    triggerRef.current?.focus();
-  };
+  const [keyboardNavigation, setKeyboardNavigation] = useState(false);
+  const placeholder = loading
+    ? "Loading streamers..."
+    : streamers.length === 0
+      ? "No searchable streamers"
+      : "Streamer";
 
   return (
-    <div className="relative md:w-[180px] md:shrink-0">
-      <button
-        ref={triggerRef}
-        type="button"
+    <div className="min-w-0 md:self-stretch">
+      <Select.Root
+        value={streamer}
         disabled={disabled || loading || streamers.length === 0}
-        aria-invalid={error ? "true" : "false"}
-        aria-describedby={error ? "streamer-error" : undefined}
-        aria-expanded={isOpen ? "true" : "false"}
-        aria-controls={streamerMenuId}
-        onClick={() => setIsOpen((open) => !open)}
-        className="flex h-10 w-full items-center gap-2 border-0 bg-gray-800 px-4 text-sm font-medium text-gray-100 outline-none disabled:cursor-not-allowed disabled:text-gray-500"
+        onValueChange={onSelect}
+        onOpenChange={(open) => {
+          if (!open) {
+            setKeyboardNavigation(false);
+          }
+        }}
       >
-        {streamer ? (
-          <AvatarImage
-            src={streamers.find((item) => item.name === streamer)?.profile_image_url}
-            alt=""
-            className="size-6 rounded-full object-cover"
-            decorative
-          />
-        ) : null}
-        <span className={streamer ? "text-gray-100" : "text-gray-400"}>
-          {loading
-            ? "Loading streamers..."
-            : streamers.length === 0
-              ? "No searchable streamers"
-              : streamer || "Streamer"}
-        </span>
-        <ChevronDown className="ml-auto size-4 text-gray-500" />
-      </button>
-
-      {isOpen && !loading && streamers.length > 0 ? (
-        <div
-          ref={streamerMenuRef}
-          id={streamerMenuId}
-          role="listbox"
-          className="absolute top-[calc(100%+8px)] left-0 z-20 w-full overflow-hidden rounded-xl border border-gray-700 bg-gray-800 shadow-xl"
+        <Select.Trigger
+          ref={triggerRef}
+          aria-label="Streamer"
+          aria-invalid={error ? "true" : "false"}
+          aria-describedby={error ? "streamer-error" : undefined}
+          onPointerDown={() => setKeyboardNavigation(false)}
+          onKeyDown={(event) => {
+            if (["ArrowDown", "ArrowUp", "Enter", " "].includes(event.key)) {
+              setKeyboardNavigation(true);
+            }
+          }}
+          className="group flex h-10 w-full items-center gap-2 border-0 bg-transparent px-4 text-sm font-medium text-gray-100 outline-none disabled:cursor-not-allowed disabled:text-gray-500 md:h-12"
         >
-          {streamers.map((item) => {
-            const selected = item.name === streamer;
-            return (
-              <button
-                key={item.name}
-                type="button"
-                role="option"
-                aria-selected={selected}
-                onClick={() => selectStreamer(item.name)}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-gray-100 transition hover:bg-gray-700"
-              >
-                <AvatarImage
-                  src={item.profile_image_url}
-                  alt=""
-                  className="size-6 rounded-full object-cover"
-                  decorative
-                />
-                <span className="flex-1">{item.name}</span>
-                {selected ? <Check className="size-4 text-[#fb2844]" /> : null}
-              </button>
-            );
-          })}
-        </div>
-      ) : null}
+          <Select.Value placeholder={placeholder} />
+          <Select.Icon asChild>
+            <ChevronDown className="ml-auto size-4 shrink-0 text-gray-500 transition-transform group-data-[state=open]:rotate-180" />
+          </Select.Icon>
+        </Select.Trigger>
+
+        <Select.Portal>
+          <Select.Content
+            position="popper"
+            side="bottom"
+            sideOffset={0}
+            align="start"
+            collisionPadding={8}
+            onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
+              if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+                setKeyboardNavigation(true);
+              }
+            }}
+            className="z-20 max-h-60 w-[var(--radix-select-trigger-width)] overflow-hidden rounded-b-xl border border-gray-700 bg-gray-800"
+          >
+            <Select.Viewport className="max-h-60 overflow-y-auto">
+              {streamers.map((item) => (
+                <Select.Item
+                  key={item.name}
+                  value={item.name}
+                  onPointerMove={() => setKeyboardNavigation(false)}
+                  className={`relative flex min-h-10 w-full cursor-default select-none items-center gap-2 px-4 py-2 text-left text-sm text-gray-100 outline-none hover:bg-gray-700 ${
+                    keyboardNavigation ? "data-[highlighted]:bg-gray-700" : ""
+                  }`}
+                >
+                  <Select.ItemText>
+                    <span className="flex min-w-0 items-center gap-2">
+                      <AvatarImage
+                        src={item.profile_image_url}
+                        alt=""
+                        className="size-6 shrink-0 rounded-full object-cover"
+                        decorative
+                      />
+                      <span className="truncate">{item.name}</span>
+                    </span>
+                  </Select.ItemText>
+                  <Select.ItemIndicator asChild>
+                    <Check className="ml-auto size-4 shrink-0 text-[#fb2844]" />
+                  </Select.ItemIndicator>
+                </Select.Item>
+              ))}
+            </Select.Viewport>
+          </Select.Content>
+        </Select.Portal>
+      </Select.Root>
     </div>
   );
 }

@@ -48,49 +48,47 @@ export function SearchForm({
 }: SearchFormProps) {
   return (
     <form onSubmit={onSubmit} noValidate className="flex flex-col items-stretch gap-3">
-      <div className="relative rounded-xl bg-gray-800">
-        <div className="p-1">
-          <div className="flex flex-col items-stretch gap-2 md:flex-row md:items-center">
-            <StreamerPicker
-              streamer={streamer}
-              streamers={streamers}
-              loading={loadingStreamers}
+      <div className="relative rounded-xl bg-gray-800 ring-1 ring-inset ring-gray-700">
+        <div className="grid grid-cols-1 items-stretch gap-2 p-1 md:grid-cols-[184px_1px_minmax(0,1fr)_auto] md:items-center md:gap-0 md:p-0">
+          <StreamerPicker
+            streamer={streamer}
+            streamers={streamers}
+            loading={loadingStreamers}
+            disabled={submitting}
+            error={streamerError}
+            triggerRef={streamerTriggerRef}
+            onSelect={onSelectStreamer}
+          />
+
+          <div className="hidden self-stretch bg-gray-700 md:block" aria-hidden="true" />
+
+          <div className="relative min-w-0 flex-1">
+            <input
+              type="url"
+              placeholder="Paste TikTok URL here"
+              value={tiktokUrl}
               disabled={submitting}
-              error={streamerError}
-              triggerRef={streamerTriggerRef}
-              onSelect={onSelectStreamer}
+              onChange={(event) => onUrlChange(event.target.value)}
+              className="h-10 w-full border-0 bg-transparent px-4 pr-12 text-sm text-gray-100 outline-none placeholder:text-gray-400 disabled:cursor-not-allowed disabled:text-gray-500 md:h-12"
             />
-
-            <div className="hidden h-10 w-px bg-gray-700 md:block" aria-hidden="true" />
-
-            <div className="relative min-w-0 flex-1">
-              <input
-                type="url"
-                placeholder="Paste TikTok URL here"
-                value={tiktokUrl}
-                disabled={submitting}
-                onChange={(event) => onUrlChange(event.target.value)}
-                className="h-10 w-full border-0 bg-gray-800 px-4 pr-12 text-sm text-gray-100 outline-none placeholder:text-gray-400 disabled:cursor-not-allowed disabled:text-gray-500"
-              />
-              <button
-                type="button"
-                onClick={onPaste}
-                disabled={submitting}
-                className="absolute top-1/2 right-1 flex size-8 -translate-y-1/2 items-center justify-center rounded-md text-pink-400 transition hover:bg-gray-700 hover:text-pink-300 disabled:cursor-not-allowed disabled:text-gray-500"
-                aria-label="Paste TikTok URL from clipboard"
-              >
-                <Clipboard className="size-4" style={{ color: "#fb2844" }} />
-              </button>
-            </div>
-
             <button
-              type="submit"
-              disabled={submitting || !hasUrl}
-              className="inline-flex h-10 items-center justify-center rounded-xl border-2 border-[#fb2844] bg-[#fb2844] px-8 text-base font-semibold text-white transition hover:border-[#f55b70] hover:bg-[#f55b70] disabled:border-gray-600 disabled:bg-gray-700 disabled:text-gray-400"
+              type="button"
+              onClick={onPaste}
+              disabled={submitting}
+              className="absolute top-1/2 right-1 flex size-8 -translate-y-1/2 items-center justify-center rounded-md text-pink-400 transition hover:bg-gray-700 hover:text-pink-300 disabled:cursor-not-allowed disabled:text-gray-500"
+              aria-label="Paste TikTok URL from clipboard"
             >
-              {searchButtonLabel}
+              <Clipboard className="size-4" style={{ color: "#fb2844" }} />
             </button>
           </div>
+
+          <button
+            type="submit"
+            disabled={submitting || !hasUrl}
+            className="inline-flex h-10 items-center justify-center rounded-xl border-2 border-[#fb2844] bg-[#fb2844] px-8 text-base font-semibold text-white transition hover:border-[#f55b70] hover:bg-[#f55b70] disabled:border-gray-600 disabled:bg-gray-700 disabled:text-gray-400 md:m-1"
+          >
+            {searchButtonLabel}
+          </button>
         </div>
 
         <DateRangePicker

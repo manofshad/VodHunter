@@ -335,6 +335,57 @@ describe("DateRangePicker", () => {
 });
 
 describe("StreamerPicker", () => {
+  it("keeps the trigger seamless while attaching a self-contained menu", () => {
+    const triggerRef = createRef<HTMLButtonElement>();
+    render(
+      <StreamerPicker
+        streamer=""
+        streamers={[{ name: "alice", profile_image_url: null }]}
+        loading={false}
+        disabled={false}
+        error={null}
+        triggerRef={triggerRef}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    const trigger = screen.getByRole("combobox", { name: "Streamer" });
+    fireEvent.click(trigger);
+
+    expect(trigger.classList.contains("border-0")).toBe(true);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByRole("listbox")).toBeTruthy();
+    expect(screen.getByRole("option", { name: "alice" }).classList.contains("hover:bg-gray-700")).toBe(true);
+    expect(screen.getByRole("option", { name: "alice" }).classList.contains("data-[highlighted]:bg-gray-700")).toBe(
+      false,
+    );
+  });
+
+  it("opens from the keyboard with ArrowDown", () => {
+    const triggerRef = createRef<HTMLButtonElement>();
+    render(
+      <StreamerPicker
+        streamer=""
+        streamers={[{ name: "alice", profile_image_url: null }]}
+        loading={false}
+        disabled={false}
+        error={null}
+        triggerRef={triggerRef}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    const trigger = screen.getByRole("combobox", { name: "Streamer" });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByRole("listbox")).toBeTruthy();
+    expect(screen.getByRole("option", { name: "alice" }).classList.contains("data-[highlighted]:bg-gray-700")).toBe(
+      true,
+    );
+  });
+
   it("closes after a selection and returns focus to its trigger", () => {
     const onSelect = vi.fn();
     const triggerRef = createRef<HTMLButtonElement>();
@@ -353,7 +404,7 @@ describe("StreamerPicker", () => {
       />,
     );
 
-    const trigger = screen.getByRole("button", { name: "Streamer" });
+    const trigger = screen.getByRole("combobox", { name: "Streamer" });
     fireEvent.click(trigger);
     expect(screen.getByRole("listbox")).toBeTruthy();
 
@@ -378,9 +429,9 @@ describe("StreamerPicker", () => {
       />,
     );
 
-    const trigger = screen.getByRole("button", { name: "Streamer" });
+    const trigger = screen.getByRole("combobox", { name: "Streamer" });
     fireEvent.click(trigger);
-    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.keyDown(document.activeElement ?? window, { key: "Escape" });
 
     expect(screen.queryByRole("listbox")).toBeNull();
     expect(document.activeElement).toBe(trigger);
