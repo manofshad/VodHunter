@@ -64,6 +64,9 @@ def build_database(cursor: FakeCursor) -> PostgresDatabase:
     database = PostgresDatabase.__new__(PostgresDatabase)
     database.vector_dim = NMFP_VECTOR_DIM
     database.hnsw_ef_search = 100
+    database.hnsw_iterative_scan = "strict_order"
+    database.hnsw_max_scan_tuples = 20_000
+    database.hnsw_scan_mem_multiplier = 1.0
     database.model_version = DEFAULT_NMFP_MODEL_VERSION
     database.preprocessing_version = DEFAULT_NMFP_PREPROCESSING_VERSION
     database.connect = lambda: FakeConnection(cursor)
@@ -97,6 +100,7 @@ def test_append_vectors_persists_exact_nmfp_versions() -> None:
     assert "model_version" in query
     assert "preprocessing_version" in query
     assert "model_name" not in query
+    assert "ON CONFLICT (creator_id, fingerprint_id)" in query
     assert params[-2:] == [DEFAULT_NMFP_MODEL_VERSION, DEFAULT_NMFP_PREPROCESSING_VERSION]
 
 
@@ -142,9 +146,12 @@ def test_query_fingerprint_candidates_batches_rows_and_retains_alignment_evidenc
         (7, 100.5, 0.93, 0),
     ]
 
-    assert len(cursor.executed) == 2
+    assert len(cursor.executed) == 5
     assert "SET LOCAL hnsw.ef_search = 100" in cursor.executed[0][0]
-    query, params = cursor.executed[1]
+    assert cursor.executed[1][0] == "SET LOCAL hnsw.iterative_scan = 'strict_order'"
+    assert cursor.executed[2][0] == "SET LOCAL hnsw.max_scan_tuples = 20000"
+    assert cursor.executed[3][0] == "SET LOCAL hnsw.scan_mem_multiplier = 1"
+    query, params = cursor.executed[4]
     assert "WITH query_fingerprints" in query
     assert "CROSS JOIN LATERAL" in query
     assert query.count("%s::vector") == 2
@@ -166,6 +173,23 @@ def test_query_fingerprint_candidates_batches_rows_and_retains_alignment_evidenc
         datetime(2026, 4, 8, tzinfo=timezone.utc),
         10,
     )
+
+
+def test_query_fingerprint_candidates_can_disable_iterative_scan_for_older_pgvector() -> None:
+    cursor = FakeCursor(rows=[])
+    store = build_fingerprint_repository(cursor)
+    store.database.hnsw_iterative_scan = "off"
+
+    assert store.query_fingerprint_candidates(
+        query_embeddings=np.ones((1, NMFP_VECTOR_DIM), dtype=np.float32),
+        query_timestamps=np.array([0.0], dtype=np.float32),
+        top_k=3,
+        creator_id=9,
+    ) == []
+
+    assert len(cursor.executed) == 2
+    assert cursor.executed[0][0] == "SET LOCAL hnsw.ef_search = 100"
+    assert "hnsw.iterative_scan" not in cursor.executed[1][0]
 
 
 class SchemaCursor(FakeCursor):

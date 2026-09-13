@@ -37,6 +37,16 @@ for tiny sections, silence, completely overlaid source audio, or strongly
 transformed audio; it returns those portions in `unmatched_ranges` when
 evidence is insufficient.
 
+The vector repository enables pgvector iterative HNSW scans by default. This
+is required for searches that filter the approximate index by creator, video
+status, or date range; without iterative scanning, an approximate scan can
+finish before it has found enough qualifying neighbors. The deployment values
+are `HNSW_EF_SEARCH` (default `100`), `HNSW_ITERATIVE_SCAN` (default
+`strict_order`), `HNSW_MAX_SCAN_TUPLES` (default `20000`), and
+`HNSW_SCAN_MEM_MULTIPLIER` (default `1`). Iterative scans require pgvector
+0.8.0 or newer. Keep `strict_order` while validating the existing alignment
+contract; `relaxed_order` is available for a later recall/latency experiment.
+
 ## Fresh schema and index
 
 Database creation is an operator-controlled external action. Once an approved empty target exists and `DATABASE_URL` points to it, inspect the target before migrating:

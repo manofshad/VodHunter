@@ -285,7 +285,7 @@ def test_delete_video_index_purges_related_rows_before_marking_deleted() -> None
     assert "FOR UPDATE" in cursor.executed[0][0]
     assert cursor.executed[0][1] == (55,)
     assert "DELETE FROM fingerprint_embeddings" in cursor.executed[1][0]
-    assert cursor.executed[1][1] == (55,)
+    assert cursor.executed[1][1] == (99, 55)
     assert "DELETE FROM fingerprints WHERE video_id = %s" in cursor.executed[2][0]
     assert cursor.executed[2][1] == (55,)
     assert "DELETE FROM vod_ingest_state WHERE video_id = %s" in cursor.executed[3][0]

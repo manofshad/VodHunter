@@ -17,6 +17,9 @@ or discard its hot buffer working set.
 The worker uses Twitch Helix polling and defaults to a 30-day scan window. The
 retention service is configured for the same 30-day window, so the worker can
 catch up the full retained history without leaving a one-day boundary gap.
+The API and worker use the pgvector iterative-scan settings from `.env`; keep
+`HNSW_ITERATIVE_SCAN=strict_order` while creator/date-filtered searches are
+validated.
 
 ## Standalone database
 

@@ -9,7 +9,7 @@ from backend.db_url import normalize_database_url
 
 
 RETENTION_CANDIDATE_SQL = """
-SELECT v.id
+SELECT v.id, v.creator_id
 FROM videos AS v
 WHERE v.streamed_at IS NOT NULL
   AND v.streamed_at < NOW() - make_interval(days => %s)
@@ -91,6 +91,7 @@ def purge_expired_vods(
 
             for row in candidate_rows:
                 video_id = int(row[0])
+                creator_id = row[1]
 
                 # Keep historical search rows, but remove their video pointer
                 # before deleting the referenced video.
@@ -102,17 +103,32 @@ def purge_expired_vods(
                     """,
                     (video_id,),
                 )
-                cursor.execute(
-                    """
-                    DELETE FROM fingerprint_embeddings
-                    WHERE fingerprint_id IN (
-                        SELECT id
-                        FROM fingerprints
-                        WHERE video_id = %s
+                if creator_id is None:
+                    cursor.execute(
+                        """
+                        DELETE FROM fingerprint_embeddings
+                        WHERE creator_id IS NULL
+                          AND fingerprint_id IN (
+                            SELECT id
+                            FROM fingerprints
+                            WHERE video_id = %s
+                        )
+                        """,
+                        (video_id,),
                     )
-                    """,
-                    (video_id,),
-                )
+                else:
+                    cursor.execute(
+                        """
+                        DELETE FROM fingerprint_embeddings
+                        WHERE creator_id = %s
+                          AND fingerprint_id IN (
+                            SELECT id
+                            FROM fingerprints
+                            WHERE video_id = %s
+                        )
+                        """,
+                        (int(creator_id), video_id),
+                    )
                 cursor.execute(
                     "DELETE FROM fingerprints WHERE video_id = %s",
                     (video_id,),

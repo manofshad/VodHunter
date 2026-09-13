@@ -88,7 +88,7 @@ class FakeCursor:
     def __init__(self, database: FakeDatabase):
         self.database = database
         self.executed: list[tuple[str, tuple | None]] = []
-        self.rows: list[tuple[int]] = []
+        self.rows: list[tuple[int, int | None]] = []
         self.rowcount = -1
 
     def __enter__(self) -> "FakeCursor":
@@ -122,7 +122,10 @@ class FakeCursor:
                     video_id,
                 )
             )
-            self.rows = [(video_id,) for video_id in candidate_ids]
+            self.rows = [
+                (video_id, self.database.videos[video_id]["creator_id"])
+                for video_id in candidate_ids
+            ]
             return
 
         if normalized_query.startswith("UPDATE search_requests"):
@@ -138,11 +141,17 @@ class FakeCursor:
 
         if normalized_query.startswith("DELETE FROM fingerprint_embeddings"):
             self._fail_if_requested("fingerprint_embeddings")
-            video_id = int(params[0])
+            if "creator_id IS NULL" in normalized_query:
+                creator_id = None
+                video_id = int(params[0])
+            else:
+                creator_id = int(params[0])
+                video_id = int(params[1])
             fingerprint_ids = {
                 fingerprint_id
                 for fingerprint_id, fingerprint in self.database.fingerprints.items()
                 if fingerprint["video_id"] == video_id
+                and self.database.videos[video_id]["creator_id"] == creator_id
             }
             before = len(self.database.embeddings)
             self.database.embeddings.difference_update(fingerprint_ids)
@@ -188,19 +197,19 @@ class FakeCursor:
         if self.database.fail_on == operation:
             raise RuntimeError(f"injected {operation} failure")
 
-    def fetchall(self) -> list[tuple[int]]:
+    def fetchall(self) -> list[tuple[int, int | None]]:
         return list(self.rows)
 
 
 def _build_database(now: datetime) -> FakeDatabase:
     database = FakeDatabase(now=now)
     database.videos = {
-        1: {"streamed_at": now - timedelta(days=31), "status": "searchable"},
-        2: {"streamed_at": now - timedelta(days=29), "status": "searchable"},
-        3: {"streamed_at": now - timedelta(days=30), "status": "searchable"},
-        4: {"streamed_at": None, "status": "searchable"},
-        5: {"streamed_at": now - timedelta(days=31), "status": "indexing"},
-        6: {"streamed_at": now - timedelta(days=31), "status": "searchable"},
+        1: {"creator_id": 7, "streamed_at": now - timedelta(days=31), "status": "searchable"},
+        2: {"creator_id": 7, "streamed_at": now - timedelta(days=29), "status": "searchable"},
+        3: {"creator_id": 7, "streamed_at": now - timedelta(days=30), "status": "searchable"},
+        4: {"creator_id": 7, "streamed_at": None, "status": "searchable"},
+        5: {"creator_id": 7, "streamed_at": now - timedelta(days=31), "status": "indexing"},
+        6: {"creator_id": 7, "streamed_at": now - timedelta(days=31), "status": "searchable"},
     }
     database.fingerprints = {
         101: {"video_id": 1},
@@ -263,6 +272,7 @@ def test_purges_only_strictly_older_non_active_vods_and_preserves_unrelated_rows
     assert "NOW()" in candidate_query
     assert "v.streamed_at IS NOT NULL" in candidate_query
     assert "v.streamed_at < NOW()" in candidate_query
+    assert "v.creator_id" in candidate_query
     assert "FOR UPDATE OF v SKIP LOCKED" in candidate_query
     assert candidate_params == (30,)
 
@@ -283,6 +293,29 @@ def test_rolls_back_all_changes_when_a_dependency_delete_fails() -> None:
     assert database.snapshot() == before
     assert database.commits == 0
     assert database.rollbacks == 1
+
+
+def test_purges_expired_vod_with_legacy_null_creator_id() -> None:
+    now = datetime(2026, 9, 3, 12, 0, tzinfo=UTC)
+    database = _build_database(now)
+    database.videos[7] = {
+        "creator_id": None,
+        "streamed_at": now - timedelta(days=31),
+        "status": "searchable",
+    }
+    database.fingerprints[107] = {"video_id": 7}
+    database.embeddings.add(107)
+
+    result = purge_expired_vods(
+        "postgresql://example/vodhunter",
+        30,
+        connect=database.connect,
+    )
+
+    assert result.deleted_video_ids == (1, 7)
+    assert 7 not in database.videos
+    assert 107 not in database.fingerprints
+    assert 107 not in database.embeddings
 
 
 def test_repeated_retention_pass_is_idempotent() -> None:

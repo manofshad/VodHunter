@@ -176,6 +176,29 @@ class TestAlembicMigrations:
         assert revision.down_revision == '20260903_0011'
         assert fake_op.executed == ['CREATE EXTENSION IF NOT EXISTS pg_prewarm']
 
+    def test_embedding_partition_compat_revision_adds_composite_unique_index(self) -> None:
+        revision = self._load_module(
+            'alembic/versions/20260913_0013_prepare_embedding_partition_compat.py',
+            'vodhunter_alembic_revision_embedding_partition_compat',
+        )
+        fake_op = FakeOp()
+        with patch.object(revision, 'op', fake_op):
+            revision.upgrade()
+
+        assert revision.down_revision == '20260912_0012'
+        assert len(fake_op.executed) == 1
+        assert 'CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS' in fake_op.executed[0]
+        assert 'idx_fingerprint_embeddings_creator_fingerprint' in fake_op.executed[0]
+        assert '(creator_id, fingerprint_id)' in fake_op.executed[0]
+
+        fake_op = FakeOp()
+        with patch.object(revision, 'op', fake_op):
+            revision.downgrade()
+
+        assert len(fake_op.executed) == 1
+        assert 'DROP INDEX CONCURRENTLY IF EXISTS' in fake_op.executed[0]
+        assert 'idx_fingerprint_embeddings_creator_fingerprint' in fake_op.executed[0]
+
     def test_nmfp_revision_rebuilds_vectors_and_adds_durable_results(self) -> None:
         revision = self._load_module(
             'alembic/versions/20260824_0010_nmfp_production_schema.py',
