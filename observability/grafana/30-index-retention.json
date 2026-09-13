@@ -1,0 +1,549 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_POSTGRES",
+      "label": "Reporting datasource",
+      "type": "datasource",
+      "pluginId": "grafana-postgresql-datasource",
+      "pluginName": "PostgreSQL"
+    },
+    {
+      "name": "DS_LOGS",
+      "label": "Logs datasource",
+      "type": "datasource",
+      "pluginId": "loki",
+      "pluginName": "Loki"
+    }
+  ],
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [
+    {
+      "asDropdown": true,
+      "icon": "external link",
+      "includeVars": true,
+      "keepTime": true,
+      "tags": [
+        "vodhunter"
+      ],
+      "targetBlank": false,
+      "title": "VodHunter dashboards",
+      "type": "dashboards"
+    }
+  ],
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Estimated embeddings",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${DS_POSTGRES}"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COALESCE(SUM(estimated_embeddings), 0)::double precision AS value FROM grafana_index_partitions WHERE ('${streamer}' = '.*' OR streamer = '${streamer}')",
+          "refId": "A",
+          "sql": {
+            "columns": [],
+            "groupBy": []
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "id": 1
+    },
+    {
+      "type": "stat",
+      "title": "Index storage",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${DS_POSTGRES}"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 5,
+        "y": 0
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COALESCE(SUM(total_bytes), 0)::double precision AS value FROM grafana_index_partitions WHERE ('${streamer}' = '.*' OR streamer = '${streamer}')",
+          "refId": "A",
+          "sql": {
+            "columns": [],
+            "groupBy": []
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "id": 2
+    },
+    {
+      "type": "stat",
+      "title": "Missing HNSW indexes",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${DS_POSTGRES}"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 10,
+        "y": 0
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_index_partitions WHERE ('${streamer}' = '.*' OR streamer = '${streamer}') AND NOT has_hnsw_index",
+          "refId": "A",
+          "sql": {
+            "columns": [],
+            "groupBy": []
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "id": 3
+    },
+    {
+      "type": "stat",
+      "title": "Expiring in 7 days",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${DS_POSTGRES}"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 15,
+        "y": 0
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_retention_inventory WHERE ('${streamer}' = '.*' OR streamer = '${streamer}') AND age_days >= $retention_days - 7 AND age_days < $retention_days AND status <> 'indexing' AND NOT has_active_cursor",
+          "refId": "A",
+          "sql": {
+            "columns": [],
+            "groupBy": []
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "id": 4
+    },
+    {
+      "type": "stat",
+      "title": "Expired but protected",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${DS_POSTGRES}"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 20,
+        "y": 0
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_retention_inventory WHERE ('${streamer}' = '.*' OR streamer = '${streamer}') AND age_days >= $retention_days AND (status = 'indexing' OR has_active_cursor)",
+          "refId": "A",
+          "sql": {
+            "columns": [],
+            "groupBy": []
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "id": 5
+    },
+    {
+      "type": "table",
+      "title": "Creator index partitions",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${DS_POSTGRES}"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 15,
+        "x": 0,
+        "y": 5
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT streamer AS \"Streamer\", partition_name AS \"Partition\",\n                   estimated_embeddings AS \"Estimated embeddings\", total_bytes AS \"Storage bytes\",\n                   has_hnsw_index AS \"HNSW ready\", embedding_dim AS \"Dimensions\",\n                   model_version AS \"Model\", preprocessing_version AS \"Preprocessing\",\n                   metadata_updated_at AS \"Metadata updated\"\n            FROM grafana_index_partitions WHERE ('${streamer}' = '.*' OR streamer = '${streamer}')\n            ORDER BY streamer",
+          "refId": "A",
+          "sql": {
+            "columns": [],
+            "groupBy": []
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true
+      },
+      "id": 6
+    },
+    {
+      "type": "piechart",
+      "title": "VOD lifecycle",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${DS_POSTGRES}"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 9,
+        "x": 15,
+        "y": 5
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT status AS metric, COUNT(*)::double precision AS value FROM grafana_vod_inventory WHERE ('${streamer}' = '.*' OR streamer = '${streamer}') GROUP BY status ORDER BY status",
+          "refId": "A",
+          "sql": {
+            "columns": [],
+            "groupBy": []
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "displayLabels": [
+          "name",
+          "percent"
+        ],
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "pieType": "donut",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": true
+        }
+      },
+      "id": 7
+    },
+    {
+      "type": "table",
+      "title": "Index consistency checks",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${DS_POSTGRES}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 9,
+        "x": 0,
+        "y": 15
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT check_name AS \"Check\", affected AS \"Affected\"\n            FROM (\n                SELECT 'Indexing VOD without cursor' AS check_name, COUNT(*)::BIGINT AS affected\n                FROM grafana_vod_inventory WHERE ('${streamer}' = '.*' OR streamer = '${streamer}') AND status = 'indexing' AND last_ingest_update IS NULL\n                UNION ALL\n                SELECT 'Stalled ingest cursor', COUNT(*)::BIGINT\n                FROM grafana_vod_inventory WHERE ('${streamer}' = '.*' OR streamer = '${streamer}') AND operational_status = 'stalled'\n                UNION ALL\n                SELECT 'Creator partition missing HNSW', COUNT(*)::BIGINT\n                FROM grafana_index_partitions WHERE ('${streamer}' = '.*' OR streamer = '${streamer}') AND NOT has_hnsw_index\n            ) AS checks ORDER BY check_name",
+          "refId": "A",
+          "sql": {
+            "columns": [],
+            "groupBy": []
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true
+      },
+      "id": 8
+    },
+    {
+      "type": "table",
+      "title": "Upcoming retention candidates",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${DS_POSTGRES}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 15,
+        "x": 9,
+        "y": 15
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT streamer AS \"Streamer\", title AS \"VOD\", vod_url AS \"VOD URL\",\n                   streamed_at AS \"Streamed at\", ROUND(age_days::numeric, 1) AS \"Age days\",\n                   ROUND(($retention_days - age_days)::numeric, 1) AS \"Days remaining\", status AS \"Status\"\n            FROM grafana_retention_inventory\n            WHERE ('${streamer}' = '.*' OR streamer = '${streamer}') AND age_days >= $retention_days - 7\n              AND status <> 'indexing' AND NOT has_active_cursor\n            ORDER BY age_days DESC LIMIT 200",
+          "refId": "A",
+          "sql": {
+            "columns": [],
+            "groupBy": []
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true
+      },
+      "id": 9
+    },
+    {
+      "type": "logs",
+      "title": "Retention service activity",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOGS}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 23
+      },
+      "targets": [
+        {
+          "expr": "{service_name=\"vodhunter-retention\"}",
+          "refId": "A",
+          "queryType": "range"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "enableLogDetails": true,
+        "prettifyLogMessage": true,
+        "showCommonLabels": false,
+        "showLabels": false,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLines": false
+      },
+      "id": 10
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": [
+    "vodhunter",
+    "index",
+    "retention"
+  ],
+  "templating": {
+    "list": [
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "${DS_POSTGRES}"
+        },
+        "definition": "SELECT streamer AS __text, streamer AS __value FROM grafana_streamer_summary ORDER BY streamer",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Streamer",
+        "multi": false,
+        "name": "streamer",
+        "options": [],
+        "query": "SELECT streamer AS __text, streamer AS __value FROM grafana_streamer_summary ORDER BY streamer",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "30",
+          "value": "30"
+        },
+        "hide": 0,
+        "label": "Retention days",
+        "name": "retention_days",
+        "options": [
+          {
+            "selected": true,
+            "text": "30",
+            "value": "30"
+          }
+        ],
+        "query": "30",
+        "skipUrlSync": false,
+        "type": "constant"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "30 - Index & Retention",
+  "uid": "vodhunter-index-retention",
+  "version": 1
+}
