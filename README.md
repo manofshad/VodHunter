@@ -63,6 +63,20 @@ retention setting (`VOD_RETENTION_DAYS`) and the worker's independent
 `HYBRID_INGEST_DAYS` setting default to 30 days, keeping ingestion aligned with
 the retained search history.
 
+The ingest worker has a code-owned default roster of `jasontheween` and
+`stableronaldo`. One process loads NMFP once, runs an independent controller
+for each streamer, and serializes model inference through a priority queue so
+live chunks run before queued backlog chunks. Repeat `--streamer` (or use
+`--streamers` with a comma-separated list) to override the roster for a manual
+run. Streamer names and HNSW scan tuning are intentionally not environment
+settings.
+
+`fingerprint_embeddings` is LIST-partitioned by `creator_id`; every creator has
+its own HNSW index. Search still uses the same repository API and always
+includes the creator predicate, allowing PostgreSQL to prune unrelated
+partitions before vector search. Ingest provisioning creates a missing creator
+partition before any vectors are written.
+
 The production schema migration is destructive to incompatible fingerprint data by design. The old production database no longer exists, so rollout assumes a fresh database or a complete rebuild rather than a zero-downtime vector conversion. Apply migrations and run the guarded first backfill as described in [NMFP production operations](docs/nmfp-production-operations.md). That guide also covers resumability, version checks, metrics, and rollback boundaries.
 
 The focused Grafana Cloud search telemetry setup, Alloy configuration, secret

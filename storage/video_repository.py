@@ -324,13 +324,14 @@ class VideoRepository:
                 cur.execute(
                     """
                     DELETE FROM fingerprint_embeddings
-                    WHERE fingerprint_id IN (
+                    WHERE creator_id = %s
+                      AND fingerprint_id IN (
                         SELECT id
                         FROM fingerprints
                         WHERE video_id = %s
                     )
                     """,
-                    (int(video_id),),
+                    (int(owner_creator_id), int(video_id)),
                 )
                 cur.execute(
                     "DELETE FROM fingerprints WHERE video_id = %s",

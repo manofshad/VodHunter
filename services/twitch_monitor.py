@@ -4,6 +4,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
+from threading import Lock
+import time
 from typing import Any, Optional
 
 
@@ -132,6 +134,22 @@ class TwitchMonitor:
 
         data = self._helix_get("streams", {"user_login": streamer})
         return bool(data.get("data"))
+
+    def get_live_streamers(self, streamers: list[str]) -> set[str]:
+        normalized = sorted(
+            {streamer.strip().lower() for streamer in streamers if streamer.strip()}
+        )
+        if not normalized:
+            return set()
+        if len(normalized) > 100:
+            raise ValueError("Twitch Get Streams accepts at most 100 streamers")
+
+        data = self._helix_get("streams", {"user_login": normalized, "first": "100"})
+        return {
+            str(row.get("user_login") or "").strip().lower()
+            for row in data.get("data") or []
+            if str(row.get("user_login") or "").strip()
+        }
 
     def get_user_id(self, streamer: str) -> str:
         profile = self.get_user_profile(streamer)
@@ -292,3 +310,44 @@ class TwitchMonitor:
                 number = ""
 
         return total
+
+
+class CachedMultiStreamerTwitchMonitor:
+    """Share one batched live-status result across streamer controllers."""
+
+    def __init__(
+        self,
+        monitor: TwitchMonitor,
+        streamers: list[str],
+        *,
+        cache_seconds: float = 15.0,
+    ) -> None:
+        self.monitor = monitor
+        self.streamers = sorted(
+            {streamer.strip().lower() for streamer in streamers if streamer.strip()}
+        )
+        if not self.streamers:
+            raise ValueError("at least one streamer is required")
+        if len(self.streamers) > 100:
+            raise ValueError("one monitor supports at most 100 streamers")
+        self.cache_seconds = max(0.0, float(cache_seconds))
+        self._lock = Lock()
+        self._live_streamers: set[str] = set()
+        self._refreshed_at: float | None = None
+
+    def is_live(self, streamer: str) -> bool:
+        normalized = streamer.strip().lower()
+        if normalized not in self.streamers:
+            raise ValueError(f"streamer is not monitored: {normalized}")
+        now = time.monotonic()
+        with self._lock:
+            if (
+                self._refreshed_at is None
+                or now - self._refreshed_at >= self.cache_seconds
+            ):
+                self._live_streamers = self.monitor.get_live_streamers(self.streamers)
+                self._refreshed_at = time.monotonic()
+            return normalized in self._live_streamers
+
+    def __getattr__(self, name: str):
+        return getattr(self.monitor, name)

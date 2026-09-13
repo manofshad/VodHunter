@@ -26,6 +26,8 @@ class LiveArchiveVODSource(AudioSource):
         poll_seconds: float = 15.0,
         finalize_checks: int = 3,
         temp_dir: str = "temp_live_chunks",
+        extract_timeout_seconds: float = 180.0,
+        metadata_timeout_seconds: float = 30.0,
     ):
         self.streamer = streamer.strip().lower()
         self.videos = videos
@@ -36,6 +38,8 @@ class LiveArchiveVODSource(AudioSource):
         self.poll_seconds = float(poll_seconds)
         self.finalize_checks = int(finalize_checks)
         self.temp_dir = temp_dir
+        self.extract_timeout_seconds = max(1.0, float(extract_timeout_seconds))
+        self.metadata_timeout_seconds = max(1.0, float(metadata_timeout_seconds))
 
         self.video_id: int | None = None
         self._creator_id: int | None = None
@@ -350,13 +354,33 @@ class LiveArchiveVODSource(AudioSource):
             output_path,
         ]
 
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=self.extract_timeout_seconds,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                f"ffmpeg timed out after {self.extract_timeout_seconds:.1f}s"
+            ) from exc
         if result.returncode != 0:
             self._media_url = None
             self._media_url_resolved_at = 0.0
             media_url = self._resolve_media_url()
             cmd[6] = media_url
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            try:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=self.extract_timeout_seconds,
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise RuntimeError(
+                    f"ffmpeg timed out after {self.extract_timeout_seconds:.1f}s"
+                ) from exc
             if result.returncode != 0:
                 message = result.stderr.strip() or "ffmpeg failed"
                 raise RuntimeError(f"Failed to extract VOD chunk: {message}")
@@ -375,7 +399,17 @@ class LiveArchiveVODSource(AudioSource):
             return self._media_url
 
         cmd = ["yt-dlp", "-g", self.current_vod_url]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=self.metadata_timeout_seconds,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                f"yt-dlp timed out after {self.metadata_timeout_seconds:.1f}s"
+            ) from exc
         if result.returncode != 0:
             raise RuntimeError(f"yt-dlp failed: {result.stderr.strip()}")
 

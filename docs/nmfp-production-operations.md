@@ -101,11 +101,38 @@ After the initial rebuild, the long-running live/backlog worker is resumable:
 
 ```bash
 python3 -m runners.run_hybrid_ingest \
-  --streamer STREAMER_LOGIN \
   --days DAYS_TO_KEEP_CAUGHT_UP
 ```
 
+With no streamer flags, this starts the code-owned roster (`jasontheween` and
+`stableronaldo`) in one process and loads NMFP once. For a targeted run, repeat
+`--streamer`:
+
+```bash
+python3 -m runners.run_hybrid_ingest \
+  --streamer jasontheween \
+  --streamer stableronaldo \
+  --days DAYS_TO_KEEP_CAUGHT_UP
+```
+
+The controllers download and track VODs independently. Their inference calls
+share one FIFO priority queue: live chunks have priority over queued backlog
+chunks, while an inference already running is allowed to finish. A failure in
+one streamer controller is logged without stopping the other controller.
+
 Hybrid backlog selection also clears saved state for `reindex_requested` VODs before starting them. It preserves a cursor only for an `indexing` VOD, which represents interrupted work under the current index identity. Do not run the hybrid worker against a database that has not passed schema readiness.
+
+Before a targeted Ronaldo backfill, migrations must be at head. The backfill
+runner creates Ronaldo's creator row and embedding partition idempotently, then
+processes oldest retained VODs first:
+
+```bash
+python3 -m runners.provision_streamer --streamer stableronaldo
+python3 -m runners.run_backfill_ingest --streamer stableronaldo --days 30
+```
+
+Do not run that one-shot backfill concurrently with the hybrid worker for the
+same streamer. Normal cursor persistence makes a stopped run resumable.
 
 ## Backfill verification
 
@@ -117,6 +144,7 @@ After a run, verify:
 psql "$DATABASE_URL" -c 'select status, count(*) from videos group by status order by status;'
 psql "$DATABASE_URL" -c 'select model_version, preprocessing_version, count(*) from fingerprint_embeddings group by model_version, preprocessing_version;'
 psql "$DATABASE_URL" -c 'select min(vector_dims(embedding)), max(vector_dims(embedding)) from fingerprint_embeddings;'
+psql "$DATABASE_URL" -c "select inhrelid::regclass as partition from pg_inherits where inhparent = 'fingerprint_embeddings'::regclass order by 1;"
 ```
 
 Expected searchable rows have only the pinned model/preprocessing pair and dimension 128. Investigate any failed VOD before declaring the backfill complete.

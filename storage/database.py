@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from backend.db_url import normalize_database_url
 from pipeline.nmfp_inference import (
     NMFP_EMBEDDING_DIM,
@@ -24,6 +26,9 @@ class PostgresDatabase:
         *,
         vector_dim: int = NMFP_EMBEDDING_DIM,
         hnsw_ef_search: int = 100,
+        hnsw_iterative_scan: str = "strict_order",
+        hnsw_max_scan_tuples: int = 20_000,
+        hnsw_scan_mem_multiplier: float = 1.0,
         model_version: str = NMFP_MODEL_VERSION,
         preprocessing_version: str = NMFP_PREPROCESSING_VERSION,
     ) -> None:
@@ -36,6 +41,22 @@ class PostgresDatabase:
             raise ValueError(f"NMFP storage requires vector_dim={NMFP_EMBEDDING_DIM}")
 
         self.hnsw_ef_search = max(int(hnsw_ef_search), 1)
+        self.hnsw_iterative_scan = str(hnsw_iterative_scan).strip().lower()
+        if self.hnsw_iterative_scan not in {"strict_order", "relaxed_order"}:
+            raise ValueError(
+                "hnsw_iterative_scan must be strict_order or relaxed_order"
+            )
+        self.hnsw_max_scan_tuples = int(hnsw_max_scan_tuples)
+        if self.hnsw_max_scan_tuples < 1:
+            raise ValueError("hnsw_max_scan_tuples must be >= 1")
+        self.hnsw_scan_mem_multiplier = float(hnsw_scan_mem_multiplier)
+        if (
+            not math.isfinite(self.hnsw_scan_mem_multiplier)
+            or self.hnsw_scan_mem_multiplier <= 0
+        ):
+            raise ValueError(
+                "hnsw_scan_mem_multiplier must be a finite number > 0"
+            )
         self.model_version = str(model_version).strip()
         self.preprocessing_version = str(preprocessing_version).strip()
         if not self.model_version:
@@ -109,6 +130,23 @@ class PostgresDatabase:
                     raise RuntimeError(
                         "Database schema is incomplete; run Alembic migrations "
                         f"(missing tables: {', '.join(missing_tables)})"
+                    )
+
+                cur.execute(
+                    """
+                    SELECT relation.relkind
+                    FROM pg_class AS relation
+                    JOIN pg_namespace AS namespace
+                      ON namespace.oid = relation.relnamespace
+                    WHERE namespace.nspname = current_schema()
+                      AND relation.relname = 'fingerprint_embeddings'
+                    LIMIT 1
+                    """
+                )
+                embeddings_relation = cur.fetchone()
+                if not embeddings_relation or str(embeddings_relation[0]) != "p":
+                    raise RuntimeError(
+                        "fingerprint_embeddings is not LIST-partitioned; run Alembic migrations"
                     )
 
                 required_columns = (

@@ -64,6 +64,9 @@ def build_database(cursor: FakeCursor) -> PostgresDatabase:
     database = PostgresDatabase.__new__(PostgresDatabase)
     database.vector_dim = NMFP_VECTOR_DIM
     database.hnsw_ef_search = 100
+    database.hnsw_iterative_scan = "strict_order"
+    database.hnsw_max_scan_tuples = 20_000
+    database.hnsw_scan_mem_multiplier = 1.0
     database.model_version = DEFAULT_NMFP_MODEL_VERSION
     database.preprocessing_version = DEFAULT_NMFP_PREPROCESSING_VERSION
     database.connect = lambda: FakeConnection(cursor)
@@ -97,6 +100,7 @@ def test_append_vectors_persists_exact_nmfp_versions() -> None:
     assert "model_version" in query
     assert "preprocessing_version" in query
     assert "model_name" not in query
+    assert "ON CONFLICT (creator_id, fingerprint_id)" in query
     assert params[-2:] == [DEFAULT_NMFP_MODEL_VERSION, DEFAULT_NMFP_PREPROCESSING_VERSION]
 
 
@@ -142,9 +146,12 @@ def test_query_fingerprint_candidates_batches_rows_and_retains_alignment_evidenc
         (7, 100.5, 0.93, 0),
     ]
 
-    assert len(cursor.executed) == 2
+    assert len(cursor.executed) == 5
     assert "SET LOCAL hnsw.ef_search = 100" in cursor.executed[0][0]
-    query, params = cursor.executed[1]
+    assert "SET LOCAL hnsw.iterative_scan = 'strict_order'" in cursor.executed[1][0]
+    assert "SET LOCAL hnsw.max_scan_tuples = 20000" in cursor.executed[2][0]
+    assert "SET LOCAL hnsw.scan_mem_multiplier = 1" in cursor.executed[3][0]
+    query, params = cursor.executed[4]
     assert "WITH query_fingerprints" in query
     assert "CROSS JOIN LATERAL" in query
     assert query.count("%s::vector") == 2
@@ -195,6 +202,8 @@ class SchemaCursor(FakeCursor):
             return (True,)
         if "FROM information_schema.columns" in self.last_query:
             return (True,)
+        if "relation.relkind" in self.last_query:
+            return ("p",)
         if "SELECT format_type" in self.last_query:
             return (self.vector_type,)
         if "FROM fingerprint_index_metadata" in self.last_query:
@@ -210,6 +219,23 @@ def test_schema_readiness_verifies_nmfp_width_and_versions() -> None:
 
     assert any("SELECT format_type" in query for query, _ in cursor.executed)
     assert any("FROM fingerprint_index_metadata" in query for query, _ in cursor.executed)
+
+
+def test_schema_readiness_requires_partitioned_embedding_parent() -> None:
+    cursor = SchemaCursor()
+    database = build_database(cursor)
+
+    original_fetchone = cursor.fetchone
+
+    def fetchone():
+        if "relation.relkind" in cursor.last_query:
+            return ("r",)
+        return original_fetchone()
+
+    cursor.fetchone = fetchone  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError, match="not LIST-partitioned"):
+        database.ensure_schema_ready()
 
 
 @pytest.mark.parametrize(

@@ -158,9 +158,22 @@ def run_backfill_ingest(
 
     twitch_monitor = monitor or TwitchMonitor.from_env()
     creator_metadata = twitch_monitor.get_user_profile(normalized_streamer)
+    partition_repository = getattr(repositories, "embedding_partitions", None)
+    if partition_repository is not None:
+        creator_id = videos.create_or_get_creator(
+            normalized_streamer,
+            f"https://twitch.tv/{normalized_streamer}",
+            profile_image_url=creator_metadata.get("profile_image_url"),
+        )
+        partition_repository.ensure_creator_partition(creator_id)
     user_id = str(creator_metadata["id"])
     cutoff = datetime.now(timezone.utc) - timedelta(days=int(days))
     vods = twitch_monitor.list_archive_vods_since(user_id=user_id, created_after=cutoff)
+    vods.sort(
+        key=lambda vod: TwitchMonitor.parse_twitch_datetime(
+            str(vod.get("created_at") or "")
+        )
+    )
 
     if fresh_nmfp_reindex:
         _validate_fresh_nmfp_reindex(videos, ingest_states, vods)
@@ -222,7 +235,7 @@ def run_backfill_ingest(
             videos=videos,
             ingest_states=ingest_states,
             chunk_seconds=INGEST_CHUNK_SECONDS,
-            temp_dir=BACKFILL_TEMP_DIR,
+            temp_dir=str(Path(BACKFILL_TEMP_DIR) / normalized_streamer / str(vod["id"])),
             progress_callback=emit_progress,
         )
 

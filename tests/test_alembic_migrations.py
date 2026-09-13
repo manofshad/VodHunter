@@ -176,6 +176,41 @@ class TestAlembicMigrations:
         assert revision.down_revision == '20260903_0011'
         assert fake_op.executed == ['CREATE EXTENSION IF NOT EXISTS pg_prewarm']
 
+    def test_embedding_partition_revision_preserves_copy_and_builds_per_creator_hnsw(self) -> None:
+        revision = self._load_module(
+            'alembic/versions/20260913_0013_partition_embeddings_by_creator.py',
+            'vodhunter_alembic_revision_embedding_partitions',
+        )
+        fake_op = FakeOp()
+        with patch.object(revision, 'op', fake_op):
+            revision.upgrade()
+
+        combined_sql = '\n'.join(fake_op.executed)
+        assert revision.down_revision == '20260912_0012'
+        assert 'LOCK TABLE fingerprint_embeddings IN ACCESS EXCLUSIVE MODE' in combined_sql
+        assert 'RENAME TO fingerprint_embeddings_unpartitioned_backup' in combined_sql
+        assert 'PARTITION BY LIST (creator_id)' in combined_sql
+        assert 'PRIMARY KEY (creator_id, fingerprint_id)' in combined_sql
+        assert 'PARTITION OF fingerprint_embeddings' in combined_sql
+        assert 'INSERT INTO fingerprint_embeddings' in combined_sql
+        assert 'USING hnsw' in combined_sql
+        assert 'source_count <> target_count' in combined_sql
+
+    def test_embedding_partition_revision_downgrade_restores_backup_table(self) -> None:
+        revision = self._load_module(
+            'alembic/versions/20260913_0013_partition_embeddings_by_creator.py',
+            'vodhunter_alembic_revision_embedding_partitions_downgrade',
+        )
+        fake_op = FakeOp()
+        with patch.object(revision, 'op', fake_op):
+            revision.downgrade()
+
+        combined_sql = '\n'.join(fake_op.executed)
+        assert 'INSERT INTO fingerprint_embeddings_unpartitioned_backup' in combined_sql
+        assert 'ON CONFLICT (fingerprint_id) DO UPDATE' in combined_sql
+        assert 'DROP TABLE fingerprint_embeddings CASCADE' in combined_sql
+        assert 'RENAME TO fingerprint_embeddings' in combined_sql
+
     def test_nmfp_revision_rebuilds_vectors_and_adds_durable_results(self) -> None:
         revision = self._load_module(
             'alembic/versions/20260824_0010_nmfp_production_schema.py',

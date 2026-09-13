@@ -2,7 +2,15 @@ import threading
 import time
 from datetime import datetime, timezone
 
-from runners.run_hybrid_ingest import _build_backlog, main, run_hybrid_ingest
+from pipeline.scheduled_embedder import BACKLOG_PRIORITY, LIVE_PRIORITY
+from runners.run_hybrid_ingest import (
+    HybridIngestResult,
+    _build_backlog,
+    _normalize_streamers,
+    main,
+    run_hybrid_ingest,
+    run_multi_streamer_ingest,
+)
 from storage.records import VodIngestStateRecord, VideoRecord, VideoStatus
 
 
@@ -241,12 +249,20 @@ class TestRunHybridIngest:
         assert FakeLiveSession.runs == 0
         assert any(line == "mode=watch streamer=alice backlog=0 is_live=false" for line in logs)
 
-    def test_processes_newest_missing_backlog_first(self) -> None:
+    def test_processes_oldest_missing_backlog_first(self) -> None:
         monitor = FakeMonitor(
             live_sequence=[False, False],
             vods=[
-                {"id": "newest", "url": "https://www.twitch.tv/videos/newest"},
-                {"id": "older", "url": "https://www.twitch.tv/videos/older"},
+                {
+                    "id": "newest",
+                    "url": "https://www.twitch.tv/videos/newest",
+                    "created_at": "2026-09-12T12:00:00Z",
+                },
+                {
+                    "id": "older",
+                    "url": "https://www.twitch.tv/videos/older",
+                    "created_at": "2026-09-10T12:00:00Z",
+                },
             ],
         )
         store = FakeStore()
@@ -258,7 +274,7 @@ class TestRunHybridIngest:
 
         def out(line: str) -> None:
             logs.append(line)
-            if line == "completed mode=backlog vod=newest url=https://www.twitch.tv/videos/newest":
+            if line == "completed mode=backlog vod=older url=https://www.twitch.tv/videos/older":
                 stop_flag["done"] = True
 
         result = run_hybrid_ingest(
@@ -278,10 +294,10 @@ class TestRunHybridIngest:
         )
 
         assert result.backlog_ingested == 1
-        assert FakeBacklogSession.runs == ["newest"]
-        assert any(line == "processing vod=newest chunk=0-30 progress=25.0% backlog=2" for line in logs)
-        assert any(line == "completed vod=newest progress=100.0% backlog=2" for line in logs)
-        assert any(line == "completed mode=backlog vod=newest url=https://www.twitch.tv/videos/newest" for line in logs)
+        assert FakeBacklogSession.runs == ["older"]
+        assert any(line == "processing vod=older chunk=0-30 progress=25.0% backlog=2" for line in logs)
+        assert any(line == "completed vod=older progress=100.0% backlog=2" for line in logs)
+        assert any(line == "completed mode=backlog vod=older url=https://www.twitch.tv/videos/older" for line in logs)
 
     def test_skips_processed_vod_and_resumes_partial(self) -> None:
         monitor = FakeMonitor(
@@ -815,6 +831,63 @@ class TestRunHybridIngest:
         assert result.failed == 1
         assert any(line == "failed mode=live streamer=alice error=live-boom" for line in logs)
 
+    def test_multi_streamer_worker_loads_one_model_and_uses_priority_clients(self) -> None:
+        class FakeEmbedder:
+            model_version = "model"
+            preprocessing_version = "preprocess"
+            embedding_dim = 128
+            is_loaded = False
+
+            def __init__(self) -> None:
+                self.load_calls = 0
+
+            def load(self) -> int:
+                self.load_calls += 1
+                self.is_loaded = True
+                return 123
+
+            def extract(self, audio_path: str, *, offset_seconds: float = 0.0):
+                raise AssertionError("controllers should not run inference in this test")
+
+        embedder = FakeEmbedder()
+        repositories = FakeRepositories(FakeStore())
+        monitor = FakeMonitor()
+        seen: dict[str, dict[str, object]] = {}
+
+        def controller(streamer: str, days: int, **kwargs) -> HybridIngestResult:
+            state = kwargs["build_ingest"]()
+            assert kwargs["build_storage"]() is repositories
+            assert kwargs["provision_streamer"] is False
+            seen[streamer] = state
+            return HybridIngestResult(watch_cycles=1)
+
+        result = run_multi_streamer_ingest(
+            ["JasonTheWeen", "stableronaldo"],
+            monitor=monitor,  # type: ignore[arg-type]
+            build_storage=lambda: repositories,  # type: ignore[arg-type]
+            build_ingest=lambda: {"embedder": embedder},
+            controller=controller,
+            out=lambda _: None,
+        )
+
+        assert result.streamers == ("jasontheween", "stableronaldo")
+        assert set(result.results) == {"jasontheween", "stableronaldo"}
+        assert embedder.load_calls == 1
+        schedulers = {
+            state["live_embedder"].scheduler  # type: ignore[union-attr]
+            for state in seen.values()
+        }
+        assert len(schedulers) == 1
+        for state in seen.values():
+            assert state["embedder"] is embedder
+            assert state["live_embedder"].priority == LIVE_PRIORITY  # type: ignore[union-attr]
+            assert state["backlog_embedder"].priority == BACKLOG_PRIORITY  # type: ignore[union-attr]
+
+    def test_normalize_streamers_accepts_repeated_and_csv_values(self) -> None:
+        assert _normalize_streamers(
+            ["JasonTheWeen", "stableronaldo, jasontheween"]
+        ) == ["jasontheween", "stableronaldo"]
+
     def test_main_returns_zero(self) -> None:
         import runners.run_hybrid_ingest as module
 
@@ -824,3 +897,18 @@ class TestRunHybridIngest:
             assert main(["--streamer", "alice", "--days", "30"]) == 0
         finally:
             module.run_hybrid_ingest = original
+
+    def test_main_uses_code_owned_default_streamer_roster(self) -> None:
+        import runners.run_hybrid_ingest as module
+
+        calls: list[tuple[list[str], int]] = []
+        original = module.run_multi_streamer_ingest
+        try:
+            module.run_multi_streamer_ingest = lambda streamers, days: calls.append(
+                (streamers, days)
+            )
+            assert main(["--days", "30"]) == 0
+        finally:
+            module.run_multi_streamer_ingest = original
+
+        assert calls == [(["jasontheween", "stableronaldo"], 30)]

@@ -1,6 +1,6 @@
 from unittest.mock import patch
 from datetime import datetime, timezone
-from services.twitch_monitor import TwitchMonitor
+from services.twitch_monitor import CachedMultiStreamerTwitchMonitor, TwitchMonitor
 
 class TestTwitchMonitor:
 
@@ -43,3 +43,36 @@ class TestTwitchMonitor:
         assert [vod['id'] for vod in vods] == ['300', '200']
         assert helix_get.call_args_list[0].args[1]['first'] == '100'
         assert helix_get.call_args_list[1].args[1]['after'] == 'next-page'
+
+    def test_get_live_streamers_batches_and_normalizes_up_to_one_hundred_logins(self) -> None:
+        monitor = TwitchMonitor(client_id='x', client_secret='y')
+        payload = {'data': [{'user_login': 'StableRonaldo'}]}
+
+        with patch.object(monitor, '_helix_get', return_value=payload) as helix_get:
+            live = monitor.get_live_streamers(['Jasontheween', 'stableronaldo', 'jasontheween'])
+
+        assert live == {'stableronaldo'}
+        assert helix_get.call_args.args == (
+            'streams',
+            {'user_login': ['jasontheween', 'stableronaldo'], 'first': '100'},
+        )
+
+    def test_cached_multi_streamer_monitor_shares_one_live_lookup(self) -> None:
+        class BatchMonitor:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, ...]] = []
+
+            def get_live_streamers(self, streamers: list[str]) -> set[str]:
+                self.calls.append(tuple(streamers))
+                return {'stableronaldo'}
+
+        base = BatchMonitor()
+        monitor = CachedMultiStreamerTwitchMonitor(  # type: ignore[arg-type]
+            base,
+            ['jasontheween', 'stableronaldo'],
+            cache_seconds=60,
+        )
+
+        assert monitor.is_live('jasontheween') is False
+        assert monitor.is_live('stableronaldo') is True
+        assert base.calls == [('jasontheween', 'stableronaldo')]
