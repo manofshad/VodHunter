@@ -113,6 +113,127 @@ loki.process "vodhunter_api" {
   forward_to = [loki.write.grafana_cloud.receiver]
 }
 
+discovery.relabel "vodhunter_worker" {
+  targets = discovery.docker.vodhunter.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    regex         = "worker"
+    action        = "keep"
+  }
+}
+
+loki.source.docker "vodhunter_worker" {
+  host    = "unix:///var/run/docker.sock"
+  targets = discovery.relabel.vodhunter_worker.output
+  labels = {
+    service_name = "vodhunter-worker",
+    environment  = sys.env("VODHUNTER_ENVIRONMENT"),
+  }
+  forward_to = [loki.process.vodhunter_worker.receiver]
+}
+
+loki.process "vodhunter_worker" {
+  // Worker output is intentionally low-cardinality key/value text. Promote
+  // only the bounded action and mode values; streamer/VOD identity remains
+  // structured metadata and can be parsed for drill-down queries.
+  stage.regex {
+    expression = "^(?P<action>[a-z_]+)"
+  }
+
+  stage.regex {
+    expression = "(?:^| )mode=(?P<mode>[^ ]+)"
+  }
+
+  stage.regex {
+    expression = "(?:^| )event=(?P<worker_event>[^ ]+)"
+  }
+
+  stage.regex {
+    expression = "(?:^| )streamer=(?P<streamer>[^ ]+)"
+  }
+
+  stage.regex {
+    expression = "(?:^| )vod=(?P<vod_id>[^ ]+)"
+  }
+
+  stage.regex {
+    expression = "(?:^| )progress=(?P<progress_percent>[0-9.]+)%"
+  }
+
+  stage.regex {
+    expression = "(?:^| )backlog=(?P<backlog_size>[0-9]+)"
+  }
+
+  stage.labels {
+    values = {
+      action = "",
+      mode   = "",
+      event  = "worker_event",
+    }
+  }
+
+  stage.structured_metadata {
+    values = {
+      streamer        = "",
+      vod_id          = "",
+      progress_percent = "",
+      backlog_size    = "",
+    }
+  }
+
+  forward_to = [loki.write.grafana_cloud.receiver]
+}
+
+discovery.relabel "vodhunter_retention" {
+  targets = discovery.docker.vodhunter.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    regex         = "vod-retention"
+    action        = "keep"
+  }
+}
+
+loki.source.docker "vodhunter_retention" {
+  host    = "unix:///var/run/docker.sock"
+  targets = discovery.relabel.vodhunter_retention.output
+  labels = {
+    service_name = "vodhunter-retention",
+    environment  = sys.env("VODHUNTER_ENVIRONMENT"),
+  }
+  forward_to = [loki.process.vodhunter_retention.receiver]
+}
+
+loki.process "vodhunter_retention" {
+  stage.regex {
+    expression = "(?:^| )event=(?P<retention_event>[^ ]+)"
+  }
+
+  stage.regex {
+    expression = "(?:^| )retention_days=(?P<retention_days>[0-9]+)"
+  }
+
+  stage.regex {
+    expression = "(?:^| )deleted_count=(?P<deleted_count>[0-9]+)"
+  }
+
+  stage.labels {
+    values = {
+      event = "retention_event",
+    }
+  }
+
+  stage.structured_metadata {
+    values = {
+      retention_days = "",
+      deleted_count  = "",
+    }
+  }
+
+  forward_to = [loki.write.grafana_cloud.receiver]
+}
+
 loki.write "grafana_cloud" {
   endpoint {
     url = sys.env("GRAFANA_CLOUD_LOKI_URL")

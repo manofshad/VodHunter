@@ -211,6 +211,42 @@ class TestAlembicMigrations:
         assert 'DROP TABLE fingerprint_embeddings CASCADE' in combined_sql
         assert 'RENAME TO fingerprint_embeddings' in combined_sql
 
+    def test_grafana_reporting_revision_creates_stable_read_only_views(self) -> None:
+        revision = self._load_module(
+            'alembic/versions/20260913_0014_add_grafana_reporting_views.py',
+            'vodhunter_alembic_revision_grafana_reporting',
+        )
+        fake_op = FakeOp()
+        with patch.object(revision, 'op', fake_op):
+            revision.upgrade()
+
+        combined_sql = '\n'.join(fake_op.executed)
+        assert revision.down_revision == '20260913_0013'
+        assert 'CREATE OR REPLACE VIEW grafana_vod_inventory' in combined_sql
+        assert 'CREATE OR REPLACE VIEW grafana_streamer_summary' in combined_sql
+        assert 'CREATE OR REPLACE VIEW grafana_search_quality' in combined_sql
+        assert 'CREATE OR REPLACE VIEW grafana_index_partitions' in combined_sql
+        assert 'CREATE OR REPLACE VIEW grafana_retention_inventory' in combined_sql
+        assert "NOW() - INTERVAL '10 minutes'" in combined_sql
+        assert 'source_app = \'public\'' in combined_sql
+
+    def test_grafana_reporting_revision_downgrade_drops_views_in_dependency_order(self) -> None:
+        revision = self._load_module(
+            'alembic/versions/20260913_0014_add_grafana_reporting_views.py',
+            'vodhunter_alembic_revision_grafana_reporting_downgrade',
+        )
+        fake_op = FakeOp()
+        with patch.object(revision, 'op', fake_op):
+            revision.downgrade()
+
+        assert fake_op.executed == [
+            'DROP VIEW IF EXISTS grafana_retention_inventory',
+            'DROP VIEW IF EXISTS grafana_index_partitions',
+            'DROP VIEW IF EXISTS grafana_search_quality',
+            'DROP VIEW IF EXISTS grafana_streamer_summary',
+            'DROP VIEW IF EXISTS grafana_vod_inventory',
+        ]
+
     def test_nmfp_revision_rebuilds_vectors_and_adds_durable_results(self) -> None:
         revision = self._load_module(
             'alembic/versions/20260824_0010_nmfp_production_schema.py',

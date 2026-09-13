@@ -65,8 +65,8 @@ database storage belongs to the standalone Coolify resource.
 The Alloy sidecar additionally requires the five `GRAFANA_CLOUD_*` variables
 and `VODHUNTER_ENVIRONMENT` shown in `deploy/.env.example`. Keep the access
 token in Coolify's secret store. Alloy has no public route; it scrapes the API
-over the private Compose network and tails only the API container's Docker
-logs.
+over the private Compose network and tails the API, ingestion-worker, and
+retention containers' Docker logs.
 
 The `migrate` service runs `alembic upgrade head` against the standalone
 database. The API, worker, and retention service do not start unless that
