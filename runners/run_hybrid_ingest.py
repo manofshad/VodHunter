@@ -381,7 +381,8 @@ def _build_backlog(
     backlog.sort(
         key=lambda candidate: TwitchMonitor.parse_twitch_datetime(
             str(candidate.vod.get("created_at") or "")
-        )
+        ),
+        reverse=True,
     )
     return backlog
 

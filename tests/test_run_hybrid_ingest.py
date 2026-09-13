@@ -249,7 +249,7 @@ class TestRunHybridIngest:
         assert FakeLiveSession.runs == 0
         assert any(line == "mode=watch streamer=alice backlog=0 is_live=false" for line in logs)
 
-    def test_processes_oldest_missing_backlog_first(self) -> None:
+    def test_processes_newest_missing_backlog_first(self) -> None:
         monitor = FakeMonitor(
             live_sequence=[False, False],
             vods=[
@@ -274,7 +274,7 @@ class TestRunHybridIngest:
 
         def out(line: str) -> None:
             logs.append(line)
-            if line == "completed mode=backlog vod=older url=https://www.twitch.tv/videos/older":
+            if line == "completed mode=backlog vod=newest url=https://www.twitch.tv/videos/newest":
                 stop_flag["done"] = True
 
         result = run_hybrid_ingest(
@@ -294,10 +294,10 @@ class TestRunHybridIngest:
         )
 
         assert result.backlog_ingested == 1
-        assert FakeBacklogSession.runs == ["older"]
-        assert any(line == "processing vod=older chunk=0-30 progress=25.0% backlog=2" for line in logs)
-        assert any(line == "completed vod=older progress=100.0% backlog=2" for line in logs)
-        assert any(line == "completed mode=backlog vod=older url=https://www.twitch.tv/videos/older" for line in logs)
+        assert FakeBacklogSession.runs == ["newest"]
+        assert any(line == "processing vod=newest chunk=0-30 progress=25.0% backlog=2" for line in logs)
+        assert any(line == "completed vod=newest progress=100.0% backlog=2" for line in logs)
+        assert any(line == "completed mode=backlog vod=newest url=https://www.twitch.tv/videos/newest" for line in logs)
 
     def test_skips_processed_vod_and_resumes_partial(self) -> None:
         monitor = FakeMonitor(
@@ -445,6 +445,57 @@ class TestRunHybridIngest:
             line == "skip processed vod=legacy-processed url=https://www.twitch.tv/videos/legacy-processed"
             for line in logs
         )
+
+    def test_backlog_orders_eligible_vods_newest_first(self) -> None:
+        monitor = FakeMonitor(
+            vods=[
+                {
+                    "id": "older",
+                    "url": "https://www.twitch.tv/videos/older",
+                    "created_at": "2026-09-01T12:00:00Z",
+                },
+                {
+                    "id": "newest",
+                    "url": "https://www.twitch.tv/videos/newest",
+                    "created_at": "2026-09-03T12:00:00Z",
+                },
+                {
+                    "id": "already-searchable",
+                    "url": "https://www.twitch.tv/videos/already-searchable",
+                    "created_at": "2026-09-04T12:00:00Z",
+                },
+                {
+                    "id": "middle",
+                    "url": "https://www.twitch.tv/videos/middle",
+                    "created_at": "2026-09-02T12:00:00Z",
+                },
+            ]
+        )
+        store = FakeStore()
+        store.set_video(
+            video_id=10,
+            creator_id=1,
+            url="https://www.twitch.tv/videos/already-searchable",
+            title="Already searchable",
+            processed=True,
+            status="searchable",
+        )
+
+        backlog = _build_backlog(
+            twitch_monitor=monitor,
+            videos=store,
+            ingest_states=store,
+            user_id="user-1",
+            days=30,
+            skipped_vods_logged=set(),
+            out=lambda _: None,
+        )
+
+        assert [candidate.vod["id"] for candidate in backlog] == [
+            "newest",
+            "middle",
+            "older",
+        ]
 
     def test_reindex_requested_vod_does_not_resume_stale_state(self) -> None:
         monitor = FakeMonitor(
