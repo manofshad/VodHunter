@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from storage.database import PostgresDatabase
+from storage.embedding_partition_repository import EmbeddingPartitionRepository
 from storage.fingerprint_repository import FingerprintRepository
 from storage.ingest_state_repository import IngestStateRepository
 from storage.search_job_repository import SearchJobRepository
@@ -18,6 +19,7 @@ class Repositories:
     fingerprints: FingerprintRepository
     ingest_states: IngestStateRepository
     search_jobs: SearchJobRepository
+    embedding_partitions: EmbeddingPartitionRepository
 
 
 def build_repositories(database_url: str) -> Repositories:
@@ -27,10 +29,12 @@ def build_repositories(database_url: str) -> Repositories:
     fingerprints = FingerprintRepository(database)
     ingest_states = IngestStateRepository(database)
     search_jobs = SearchJobRepository(database, videos)
+    embedding_partitions = EmbeddingPartitionRepository(database)
     return Repositories(
         database=database,
         videos=videos,
         fingerprints=fingerprints,
         ingest_states=ingest_states,
         search_jobs=search_jobs,
+        embedding_partitions=embedding_partitions,
     )

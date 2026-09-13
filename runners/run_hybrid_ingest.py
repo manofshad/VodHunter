@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sys
-from threading import Thread
+from threading import Event, Thread
 import time
 from typing import Callable
 
@@ -20,7 +20,12 @@ load_dotenv(ROOT_DIR / ".env")
 from backend.bootstrap_ingest import build_ingest_state
 from backend.bootstrap_shared import build_repositories
 from pipeline.ingest_session import IngestSession
-from services.twitch_monitor import TwitchMonitor
+from pipeline.scheduled_embedder import (
+    BACKLOG_PRIORITY,
+    LIVE_PRIORITY,
+    ScheduledEmbedder,
+)
+from services.twitch_monitor import CachedMultiStreamerTwitchMonitor, TwitchMonitor
 from sources.historical_archive_vod_source import HistoricalArchiveVODSource
 from sources.live_archive_vod_source import LiveArchiveVODSource
 from storage.records import VodIngestStateRecord, VideoRecord, VideoStatus
@@ -36,6 +41,7 @@ LIVE_ARCHIVE_POLL_SECONDS = 15.0
 LIVE_ARCHIVE_FINALIZE_CHECKS = 3
 LIVE_TEMP_DIR = str(ROOT_DIR / "data" / "temp_live_chunks")
 BACKFILL_TEMP_DIR = str(ROOT_DIR / "data" / "temp_backfill_chunks")
+DEFAULT_STREAMERS = ("jasontheween", "stableronaldo")
 
 
 @dataclass
@@ -48,6 +54,12 @@ class HybridIngestResult:
     handoffs_to_live: int = 0
     handoffs_to_backlog: int = 0
     watch_cycles: int = 0
+
+
+@dataclass
+class MultiStreamerIngestResult:
+    streamers: tuple[str, ...]
+    results: dict[str, HybridIngestResult]
 
 
 @dataclass
@@ -82,9 +94,55 @@ def _get_existing_video_status(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Hybrid Twitch ingest with backlog catch-up and live priority.")
-    parser.add_argument("--streamer", required=True, help="Twitch login name")
+    parser.add_argument(
+        "--streamer",
+        action="append",
+        default=[],
+        help="Twitch login name; repeat for multiple streamers",
+    )
+    parser.add_argument(
+        "--streamers",
+        default="",
+        help="Comma-separated Twitch login names",
+    )
     parser.add_argument("--days", type=int, default=30, help="Number of past days to scan for backlog VODs")
     return parser
+
+
+def _normalize_streamers(streamers: list[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_value in streamers:
+        for candidate in str(raw_value).split(","):
+            streamer = candidate.strip().lower()
+            if streamer and streamer not in seen:
+                seen.add(streamer)
+                normalized.append(streamer)
+    if not normalized:
+        raise ValueError("at least one streamer is required")
+    if len(normalized) > 100:
+        raise ValueError("one worker supports at most 100 configured streamers")
+    return normalized
+
+
+def _provision_streamer(
+    *,
+    streamer: str,
+    repositories: object,
+    twitch_monitor: object,
+) -> dict[str, object]:
+    creator_metadata = twitch_monitor.get_user_profile(streamer)
+    partition_repository = getattr(repositories, "embedding_partitions", None)
+    if partition_repository is None:
+        return creator_metadata
+
+    creator_id = repositories.videos.create_or_get_creator(
+        streamer,
+        f"https://twitch.tv/{streamer}",
+        profile_image_url=creator_metadata.get("profile_image_url"),
+    )
+    partition_name = partition_repository.ensure_creator_partition(creator_id)
+    return {**creator_metadata, "creator_id": creator_id, "partition_name": partition_name}
 
 
 def run_hybrid_ingest(
@@ -103,6 +161,7 @@ def run_hybrid_ingest(
     backlog_live_poll_seconds: float = LIVE_ARCHIVE_POLL_SECONDS,
     session_wait_seconds: float = SESSION_POLL_INTERVAL,
     retry_seconds: float = MONITOR_RETRY_SECONDS,
+    provision_streamer: bool = True,
 ) -> HybridIngestResult:
     normalized_streamer = streamer.strip().lower()
     if not normalized_streamer:
@@ -118,9 +177,18 @@ def run_hybrid_ingest(
     ingest_states = repositories.ingest_states
     fingerprints = repositories.fingerprints
     embedder = ingest_state["embedder"]
+    live_embedder = ingest_state.get("live_embedder", embedder)
+    backlog_embedder = ingest_state.get("backlog_embedder", embedder)
     twitch_monitor = monitor or TwitchMonitor.from_env()
 
-    creator_metadata = twitch_monitor.get_user_profile(normalized_streamer)
+    if provision_streamer:
+        creator_metadata = _provision_streamer(
+            streamer=normalized_streamer,
+            repositories=repositories,
+            twitch_monitor=twitch_monitor,
+        )
+    else:
+        creator_metadata = twitch_monitor.get_user_profile(normalized_streamer)
     user_id = str(creator_metadata["id"])
 
     result = HybridIngestResult()
@@ -149,7 +217,7 @@ def run_hybrid_ingest(
                 videos=videos,
                 ingest_states=ingest_states,
                 fingerprints=fingerprints,
-                embedder=embedder,
+                embedder=live_embedder,
                 twitch_monitor=twitch_monitor,
                 session_factory=session_factory,
                 live_source_factory=live_source_factory,
@@ -215,7 +283,7 @@ def run_hybrid_ingest(
                 videos=videos,
                 ingest_states=ingest_states,
                 fingerprints=fingerprints,
-                embedder=embedder,
+                embedder=backlog_embedder,
                 twitch_monitor=twitch_monitor,
                 session_factory=session_factory,
                 historical_source_factory=historical_source_factory,
@@ -310,6 +378,11 @@ def _build_backlog(
             backlog.append(BacklogCandidate(vod=vod, existing_state=None))
             continue
 
+    backlog.sort(
+        key=lambda candidate: TwitchMonitor.parse_twitch_datetime(
+            str(candidate.vod.get("created_at") or "")
+        )
+    )
     return backlog
 
 
@@ -333,7 +406,7 @@ def _start_live_session(
         lag_seconds=LIVE_ARCHIVE_LAG_SECONDS,
         poll_seconds=LIVE_ARCHIVE_POLL_SECONDS,
         finalize_checks=LIVE_ARCHIVE_FINALIZE_CHECKS,
-        temp_dir=LIVE_TEMP_DIR,
+        temp_dir=str(Path(LIVE_TEMP_DIR) / streamer),
     )
     session = session_factory(
         source=source,
@@ -386,7 +459,7 @@ def _run_backlog_session(
         videos=videos,
         ingest_states=ingest_states,
         chunk_seconds=INGEST_CHUNK_SECONDS,
-        temp_dir=BACKFILL_TEMP_DIR,
+        temp_dir=str(Path(BACKFILL_TEMP_DIR) / streamer / vod_id),
         progress_callback=emit_progress,
     )
     session = session_factory(
@@ -465,10 +538,127 @@ def _sleep_interruptibly(duration: float, should_stop: Callable[[], bool]) -> No
         remaining -= step
 
 
+def run_multi_streamer_ingest(
+    streamers: list[str],
+    days: int = 30,
+    *,
+    monitor: TwitchMonitor | None = None,
+    build_storage: Callable[[], Repositories] = build_repositories,
+    build_ingest: Callable[[], dict[str, object]] = build_ingest_state,
+    out: Callable[[str], None] = print,
+    should_stop: Callable[[], bool] | None = None,
+    controller: Callable[..., HybridIngestResult] = run_hybrid_ingest,
+) -> MultiStreamerIngestResult:
+    normalized_streamers = _normalize_streamers(streamers)
+    if int(days) < 1:
+        raise ValueError("days must be >= 1")
+
+    repositories = build_storage()
+    ingest_state = build_ingest()
+    base_embedder = ingest_state["embedder"]
+    raw_monitor = monitor or TwitchMonitor.from_env()
+
+    for streamer in normalized_streamers:
+        provisioned = _provision_streamer(
+            streamer=streamer,
+            repositories=repositories,
+            twitch_monitor=raw_monitor,
+        )
+        out(
+            f"provisioned streamer={streamer} user_id={provisioned['id']} "
+            f"partition={provisioned.get('partition_name', 'unmanaged')}"
+        )
+
+    model_load_ms = base_embedder.load()
+    scheduler = ScheduledEmbedder(base_embedder)
+    shared_monitor = CachedMultiStreamerTwitchMonitor(
+        raw_monitor,
+        normalized_streamers,
+        cache_seconds=LIVE_ARCHIVE_POLL_SECONDS,
+    )
+    stop_event = Event()
+    external_should_stop = should_stop or (lambda: False)
+    results: dict[str, HybridIngestResult] = {}
+    errors: dict[str, Exception] = {}
+    threads: list[Thread] = []
+
+    def stopping() -> bool:
+        return stop_event.is_set() or external_should_stop()
+
+    def run_controller(streamer: str) -> None:
+        try:
+            live_client = scheduler.client(
+                priority=LIVE_PRIORITY,
+                source_name=f"{streamer}:live",
+            )
+            backlog_client = scheduler.client(
+                priority=BACKLOG_PRIORITY,
+                source_name=f"{streamer}:backlog",
+            )
+            results[streamer] = controller(
+                streamer,
+                days,
+                monitor=shared_monitor,
+                build_storage=lambda: repositories,
+                build_ingest=lambda: {
+                    "embedder": base_embedder,
+                    "live_embedder": live_client,
+                    "backlog_embedder": backlog_client,
+                },
+                out=out,
+                should_stop=stopping,
+                provision_streamer=False,
+            )
+        except Exception as exc:
+            errors[streamer] = exc
+            out(f"failed mode=controller streamer={streamer} error={exc}")
+
+    out(
+        f"worker mode=multi_streamer streamers={','.join(normalized_streamers)} "
+        f"model_load_ms={model_load_ms} inference_consumers=1"
+    )
+    try:
+        for streamer in normalized_streamers:
+            thread = Thread(
+                target=run_controller,
+                args=(streamer,),
+                name=f"twitch-{streamer}",
+                daemon=True,
+            )
+            threads.append(thread)
+            thread.start()
+
+        while any(thread.is_alive() for thread in threads) and not stopping():
+            time.sleep(0.25)
+    finally:
+        stop_event.set()
+        for thread in threads:
+            thread.join()
+        scheduler.close()
+
+    if errors and not external_should_stop():
+        details = "; ".join(f"{streamer}: {error}" for streamer, error in errors.items())
+        raise RuntimeError(f"streamer controllers failed: {details}")
+
+    return MultiStreamerIngestResult(
+        streamers=tuple(normalized_streamers),
+        results=results,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    configured_streamers = [*args.streamer, args.streamers]
+    streamers = _normalize_streamers(
+        configured_streamers
+        if any(str(value).strip() for value in configured_streamers)
+        else list(DEFAULT_STREAMERS)
+    )
     try:
-        run_hybrid_ingest(args.streamer, args.days)
+        if len(streamers) == 1:
+            run_hybrid_ingest(streamers[0], args.days)
+        else:
+            run_multi_streamer_ingest(streamers, args.days)
     except KeyboardInterrupt:
         return 0
     return 0

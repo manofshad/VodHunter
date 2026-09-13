@@ -72,8 +72,6 @@ services:
         "python",
         "-m",
         "runners.run_hybrid_ingest",
-        "--streamer",
-        "${TWITCH_STREAMER:-jasontheween}",
         "--days",
         "${HYBRID_INGEST_DAYS:-30}"
       ]

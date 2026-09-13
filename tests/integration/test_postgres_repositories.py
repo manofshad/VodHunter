@@ -26,6 +26,7 @@ def _create_creator(store, scope, *, suffix: str = "") -> int:
         url=f"https://www.twitch.tv/{name}",
         profile_image_url=f"https://cdn.example/{name}.png",
     )
+    store.embedding_partitions.ensure_creator_partition(creator_id)
     return scope.remember_creator(creator_id)
 
 

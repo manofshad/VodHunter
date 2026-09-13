@@ -39,6 +39,18 @@ class FingerprintRepository:
         return self.database.hnsw_ef_search
 
     @property
+    def hnsw_iterative_scan(self) -> str:
+        return self.database.hnsw_iterative_scan
+
+    @property
+    def hnsw_max_scan_tuples(self) -> int:
+        return self.database.hnsw_max_scan_tuples
+
+    @property
+    def hnsw_scan_mem_multiplier(self) -> float:
+        return self.database.hnsw_scan_mem_multiplier
+
+    @property
     def model_version(self) -> str:
         return self.database.model_version
 
@@ -91,7 +103,7 @@ class FingerprintRepository:
                         preprocessing_version
                     )
                     VALUES {placeholders}
-                    ON CONFLICT (fingerprint_id) DO UPDATE
+                    ON CONFLICT (creator_id, fingerprint_id) DO UPDATE
                     SET embedding = excluded.embedding,
                         creator_id = excluded.creator_id,
                         model_version = excluded.model_version,
@@ -221,6 +233,16 @@ class FingerprintRepository:
             with conn.cursor() as cur:
                 cur.execute(f"SET LOCAL hnsw.ef_search = {self.hnsw_ef_search}")
                 cur.execute(
+                    f"SET LOCAL hnsw.iterative_scan = '{self.hnsw_iterative_scan}'"
+                )
+                cur.execute(
+                    f"SET LOCAL hnsw.max_scan_tuples = {self.hnsw_max_scan_tuples}"
+                )
+                cur.execute(
+                    "SET LOCAL hnsw.scan_mem_multiplier = "
+                    f"{self.hnsw_scan_mem_multiplier:g}"
+                )
+                cur.execute(
                     f"""
                     WITH query_fingerprints(query_index, query_time, embedding) AS (
                         VALUES {', '.join(values_sql)}
@@ -264,6 +286,7 @@ class FingerprintRepository:
         logger.info(
             "timing event=fingerprint_repository_nmfp_candidates query_count=%d "
             "candidate_count=%d creator_id=%d top_k=%d ef_search=%d date_filtered=%s "
+            "iterative_scan=%s max_scan_tuples=%d scan_mem_multiplier=%g "
             "seconds=%.3f model_version=%s preprocessing_version=%s",
             len(query_embeddings),
             len(rows),
@@ -271,6 +294,9 @@ class FingerprintRepository:
             int(top_k),
             self.hnsw_ef_search,
             has_date_bounds,
+            self.hnsw_iterative_scan,
+            self.hnsw_max_scan_tuples,
+            self.hnsw_scan_mem_multiplier,
             retrieval_seconds,
             resolved_model_version,
             resolved_preprocessing_version,

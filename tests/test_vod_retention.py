@@ -88,7 +88,7 @@ class FakeCursor:
     def __init__(self, database: FakeDatabase):
         self.database = database
         self.executed: list[tuple[str, tuple | None]] = []
-        self.rows: list[tuple[int]] = []
+        self.rows: list[tuple[int, ...]] = []
         self.rowcount = -1
 
     def __enter__(self) -> "FakeCursor":
@@ -122,7 +122,10 @@ class FakeCursor:
                     video_id,
                 )
             )
-            self.rows = [(video_id,) for video_id in candidate_ids]
+            self.rows = [
+                (video_id, int(self.database.videos[video_id]["creator_id"]))
+                for video_id in candidate_ids
+            ]
             return
 
         if normalized_query.startswith("UPDATE search_requests"):
@@ -138,7 +141,9 @@ class FakeCursor:
 
         if normalized_query.startswith("DELETE FROM fingerprint_embeddings"):
             self._fail_if_requested("fingerprint_embeddings")
-            video_id = int(params[0])
+            creator_id = int(params[0])
+            video_id = int(params[1])
+            assert creator_id == int(self.database.videos[video_id]["creator_id"])
             fingerprint_ids = {
                 fingerprint_id
                 for fingerprint_id, fingerprint in self.database.fingerprints.items()
@@ -188,19 +193,19 @@ class FakeCursor:
         if self.database.fail_on == operation:
             raise RuntimeError(f"injected {operation} failure")
 
-    def fetchall(self) -> list[tuple[int]]:
+    def fetchall(self) -> list[tuple[int, ...]]:
         return list(self.rows)
 
 
 def _build_database(now: datetime) -> FakeDatabase:
     database = FakeDatabase(now=now)
     database.videos = {
-        1: {"streamed_at": now - timedelta(days=31), "status": "searchable"},
-        2: {"streamed_at": now - timedelta(days=29), "status": "searchable"},
-        3: {"streamed_at": now - timedelta(days=30), "status": "searchable"},
-        4: {"streamed_at": None, "status": "searchable"},
-        5: {"streamed_at": now - timedelta(days=31), "status": "indexing"},
-        6: {"streamed_at": now - timedelta(days=31), "status": "searchable"},
+        1: {"creator_id": 7, "streamed_at": now - timedelta(days=31), "status": "searchable"},
+        2: {"creator_id": 7, "streamed_at": now - timedelta(days=29), "status": "searchable"},
+        3: {"creator_id": 7, "streamed_at": now - timedelta(days=30), "status": "searchable"},
+        4: {"creator_id": 7, "streamed_at": None, "status": "searchable"},
+        5: {"creator_id": 7, "streamed_at": now - timedelta(days=31), "status": "indexing"},
+        6: {"creator_id": 7, "streamed_at": now - timedelta(days=31), "status": "searchable"},
     }
     database.fingerprints = {
         101: {"video_id": 1},
@@ -264,6 +269,7 @@ def test_purges_only_strictly_older_non_active_vods_and_preserves_unrelated_rows
     assert "v.streamed_at IS NOT NULL" in candidate_query
     assert "v.streamed_at < NOW()" in candidate_query
     assert "FOR UPDATE OF v SKIP LOCKED" in candidate_query
+    assert "v.creator_id" in candidate_query
     assert candidate_params == (30,)
 
 
