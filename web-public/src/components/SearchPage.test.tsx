@@ -349,12 +349,34 @@ describe("StreamerPicker", () => {
       />,
     );
 
-    const trigger = screen.getByRole("button", { name: "Streamer" });
+    const trigger = screen.getByRole("combobox", { name: "Streamer" });
     fireEvent.click(trigger);
 
     expect(trigger.classList.contains("border-0")).toBe(true);
-    expect(screen.getByRole("listbox").classList.contains("top-full")).toBe(true);
-    expect(screen.getByRole("listbox").classList.contains("border-gray-700")).toBe(true);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByRole("listbox")).toBeTruthy();
+  });
+
+  it("opens from the keyboard with ArrowDown", () => {
+    const triggerRef = createRef<HTMLButtonElement>();
+    render(
+      <StreamerPicker
+        streamer=""
+        streamers={[{ name: "alice", profile_image_url: null }]}
+        loading={false}
+        disabled={false}
+        error={null}
+        triggerRef={triggerRef}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    const trigger = screen.getByRole("combobox", { name: "Streamer" });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByRole("listbox")).toBeTruthy();
   });
 
   it("closes after a selection and returns focus to its trigger", () => {
@@ -375,7 +397,7 @@ describe("StreamerPicker", () => {
       />,
     );
 
-    const trigger = screen.getByRole("button", { name: "Streamer" });
+    const trigger = screen.getByRole("combobox", { name: "Streamer" });
     fireEvent.click(trigger);
     expect(screen.getByRole("listbox")).toBeTruthy();
 
@@ -400,9 +422,9 @@ describe("StreamerPicker", () => {
       />,
     );
 
-    const trigger = screen.getByRole("button", { name: "Streamer" });
+    const trigger = screen.getByRole("combobox", { name: "Streamer" });
     fireEvent.click(trigger);
-    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.keyDown(document.activeElement ?? window, { key: "Escape" });
 
     expect(screen.queryByRole("listbox")).toBeNull();
     expect(document.activeElement).toBe(trigger);
