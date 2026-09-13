@@ -355,6 +355,10 @@ describe("StreamerPicker", () => {
     expect(trigger.classList.contains("border-0")).toBe(true);
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByRole("listbox")).toBeTruthy();
+    expect(screen.getByRole("option", { name: "alice" }).classList.contains("hover:bg-gray-700")).toBe(true);
+    expect(screen.getByRole("option", { name: "alice" }).classList.contains("data-[highlighted]:bg-gray-700")).toBe(
+      false,
+    );
   });
 
   it("opens from the keyboard with ArrowDown", () => {
@@ -377,6 +381,9 @@ describe("StreamerPicker", () => {
 
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByRole("listbox")).toBeTruthy();
+    expect(screen.getByRole("option", { name: "alice" }).classList.contains("data-[highlighted]:bg-gray-700")).toBe(
+      true,
+    );
   });
 
   it("closes after a selection and returns focus to its trigger", () => {

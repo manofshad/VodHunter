@@ -1,4 +1,4 @@
-import { RefObject } from "react";
+import { KeyboardEvent, RefObject, useState } from "react";
 import * as Select from "@radix-ui/react-select";
 import { Check, ChevronDown } from "lucide-react";
 
@@ -24,6 +24,7 @@ export function StreamerPicker({
   triggerRef,
   onSelect,
 }: StreamerPickerProps) {
+  const [keyboardNavigation, setKeyboardNavigation] = useState(false);
   const placeholder = loading
     ? "Loading streamers..."
     : streamers.length === 0
@@ -36,12 +37,23 @@ export function StreamerPicker({
         value={streamer}
         disabled={disabled || loading || streamers.length === 0}
         onValueChange={onSelect}
+        onOpenChange={(open) => {
+          if (!open) {
+            setKeyboardNavigation(false);
+          }
+        }}
       >
         <Select.Trigger
           ref={triggerRef}
           aria-label="Streamer"
           aria-invalid={error ? "true" : "false"}
           aria-describedby={error ? "streamer-error" : undefined}
+          onPointerDown={() => setKeyboardNavigation(false)}
+          onKeyDown={(event) => {
+            if (["ArrowDown", "ArrowUp", "Enter", " "].includes(event.key)) {
+              setKeyboardNavigation(true);
+            }
+          }}
           className="group flex h-10 w-full items-center gap-2 border-0 bg-transparent px-4 text-sm font-medium text-gray-100 outline-none disabled:cursor-not-allowed disabled:text-gray-500 md:h-12"
         >
           <Select.Value placeholder={placeholder} />
@@ -57,6 +69,11 @@ export function StreamerPicker({
             sideOffset={0}
             align="start"
             collisionPadding={8}
+            onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
+              if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+                setKeyboardNavigation(true);
+              }
+            }}
             className="z-20 max-h-60 w-[var(--radix-select-trigger-width)] overflow-hidden rounded-b-xl border border-gray-700 bg-gray-800"
           >
             <Select.Viewport className="max-h-60 overflow-y-auto">
@@ -64,7 +81,10 @@ export function StreamerPicker({
                 <Select.Item
                   key={item.name}
                   value={item.name}
-                  className="relative flex min-h-10 w-full cursor-default select-none items-center gap-2 px-4 py-2 text-left text-sm text-gray-100 outline-none data-[highlighted]:bg-gray-700"
+                  onPointerMove={() => setKeyboardNavigation(false)}
+                  className={`relative flex min-h-10 w-full cursor-default select-none items-center gap-2 px-4 py-2 text-left text-sm text-gray-100 outline-none hover:bg-gray-700 ${
+                    keyboardNavigation ? "data-[highlighted]:bg-gray-700" : ""
+                  }`}
                 >
                   <Select.ItemText>
                     <span className="flex min-w-0 items-center gap-2">
