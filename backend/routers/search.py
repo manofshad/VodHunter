@@ -113,6 +113,8 @@ def get_search_clip_job(request: Request, search_id: int) -> SearchJobResponse:
         search_id=job.id,
         status=job.status,
         stage=job.stage,
+        tiktok_url=job.tiktok_url,
+        streamer=job.streamer,
         created_at=job.created_at,
         started_at=job.started_at,
         finished_at=job.finished_at,

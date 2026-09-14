@@ -4,6 +4,7 @@ import { createSearchJob, getSearchJob, listSearchableStreamers } from "../../ap
 import { SearchJobResponse, SearchResponse, StreamerListItem } from "../../api/types";
 import { createSearchHistoryEntry, SearchHistoryEntry } from "./searchHistory";
 import { isSupportedTikTokUrl } from "./searchUtils";
+import { parseSharedSearchLocation, sharedSearchPath } from "./sharedSearch";
 import { useSearchHistory } from "./useSearchHistory";
 
 const ACTIVE_SEARCH_STORAGE_KEY = "vodhunter-public-active-search";
@@ -133,6 +134,22 @@ export function useSearchPage(): SearchPageState {
   }, []);
 
   useEffect(() => {
+    const sharedSearch = parseSharedSearchLocation(window.location);
+    if (sharedSearch.kind !== "none") {
+      // A share link is explicit navigation and must never resume a different,
+      // older search saved by this browser.
+      clearActiveSearch();
+      if (sharedSearch.kind === "invalid") {
+        setRequestError("This VodHunter search link is invalid.");
+        return;
+      }
+
+      setActiveSearchId(sharedSearch.searchId);
+      setActiveSearchStage("validating");
+      setSubmitting(true);
+      return;
+    }
+
     const activeSearch = readActiveSearch();
     if (activeSearch === null) {
       return;
@@ -186,6 +203,13 @@ export function useSearchPage(): SearchPageState {
 
   const handlePolledJob = (job: SearchJobResponse) => {
     setActiveSearchStage(job.stage);
+    if (job.tiktok_url) {
+      setTiktokUrl(job.tiktok_url);
+      setLastSubmittedUrl(job.tiktok_url);
+    }
+    if (job.streamer) {
+      setStreamer(job.streamer);
+    }
 
     if (job.status === "queued" || job.status === "running") {
       setSubmitting(true);
@@ -201,7 +225,11 @@ export function useSearchPage(): SearchPageState {
       setResult(job.result);
       setRequestError(null);
       if (job.result) {
-        const historyEntry = createSearchHistoryEntry(job.result, lastSubmittedUrl, job.created_at);
+        const historyEntry = createSearchHistoryEntry(
+          job.result,
+          job.tiktok_url ?? lastSubmittedUrl,
+          job.created_at,
+        );
         if (historyEntry) {
           addEntry(historyEntry);
         }
@@ -249,6 +277,7 @@ export function useSearchPage(): SearchPageState {
         streamedTo: submittedStreamedTo || undefined,
       });
       persistActiveSearch(created.search_id, submittedUrl, submittedStreamedFrom, submittedStreamedTo);
+      window.history.replaceState(null, "", sharedSearchPath(created.search_id));
       setActiveSearchId(created.search_id);
       setActiveSearchStage(created.stage);
     } catch (err) {

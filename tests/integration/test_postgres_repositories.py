@@ -92,6 +92,8 @@ def test_search_job_payload_survives_real_database_round_trip(store, database_sc
     assert queued is not None
     assert queued.status == "queued"
     assert queued.result is None
+    assert queued.tiktok_url == "https://www.tiktok.com/@integration/video/123456789"
+    assert queued.streamer == database_scope.streamer
 
     store.search_jobs.update_search_job_status(
         search_id,

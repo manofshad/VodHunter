@@ -57,6 +57,8 @@ export interface SearchJobResponse {
   search_id: number;
   status: "queued" | "running" | "completed" | "failed";
   stage: string | null;
+  tiktok_url: string | null;
+  streamer: string | null;
   created_at: string;
   started_at: string | null;
   finished_at: string | null;

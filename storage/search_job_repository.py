@@ -246,7 +246,8 @@ class SearchJobRepository:
                         result_reason,
                         error_code,
                         error_message,
-                        result_payload
+                        result_payload,
+                        tiktok_url
                     FROM search_requests
                     WHERE id = %s
                       AND source_app = 'public'
@@ -274,6 +275,7 @@ class SearchJobRepository:
             error_code,
             error_message,
             result_payload,
+            tiktok_url,
         ) = row
 
         result: SearchResult | None = None
@@ -325,6 +327,8 @@ class SearchJobRepository:
             result=result,
             error_code=str(error_code) if error_code else None,
             error_message=str(error_message) if error_message else None,
+            tiktok_url=str(tiktok_url) if tiktok_url else None,
+            streamer=str(streamer) if streamer else None,
         )
 
     def fail_incomplete_public_search_jobs(
