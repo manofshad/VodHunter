@@ -212,3 +212,5 @@ class SearchJobRecord:
     result: SearchResult | None
     error_code: str | None
     error_message: str | None
+    tiktok_url: str | None = None
+    streamer: str | None = None

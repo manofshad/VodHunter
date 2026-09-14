@@ -254,6 +254,8 @@ def test_public_search_job_endpoint_returns_job_status() -> None:
         result=SearchResult(found=False, streamer="jason", reason="url test"),
         error_code=None,
         error_message=None,
+        tiktok_url="https://www.tiktok.com/@u/video/1",
+        streamer="jason",
     )
 
     with client:
@@ -262,7 +264,71 @@ def test_public_search_job_endpoint_returns_job_status() -> None:
     assert response.status_code == 200
     assert response.json()["search_id"] == 101
     assert response.json()["status"] == "completed"
+    assert response.json()["tiktok_url"] == "https://www.tiktok.com/@u/video/1"
+    assert response.json()["streamer"] == "jason"
     assert response.json()["result"]["reason"] == "url test"
+
+
+def test_public_search_job_endpoint_returns_queued_job_context() -> None:
+    app, client = build_client(create_public_app)
+    app.state.search_job_service.jobs[101] = SearchJobRecord(
+        id=101,
+        status="queued",
+        stage="validating",
+        created_at="2026-04-15T00:00:00Z",
+        started_at=None,
+        finished_at=None,
+        result=None,
+        error_code=None,
+        error_message=None,
+        tiktok_url="https://www.tiktok.com/t/ZP8ctwC2V/",
+        streamer="xqc",
+    )
+
+    with client:
+        response = client.get("/api/search/clip/101")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "search_id": 101,
+        "status": "queued",
+        "stage": "validating",
+        "tiktok_url": "https://www.tiktok.com/t/ZP8ctwC2V/",
+        "streamer": "xqc",
+        "created_at": "2026-04-15T00:00:00Z",
+        "started_at": None,
+        "finished_at": None,
+        "result": None,
+        "error": None,
+    }
+
+
+def test_public_search_job_endpoint_returns_failed_job() -> None:
+    app, client = build_client(create_public_app)
+    app.state.search_job_service.jobs[101] = SearchJobRecord(
+        id=101,
+        status="failed",
+        stage=None,
+        created_at="2026-04-15T00:00:00Z",
+        started_at="2026-04-15T00:00:01Z",
+        finished_at="2026-04-15T00:00:02Z",
+        result=None,
+        error_code="DOWNLOAD_ERROR",
+        error_message="TikTok could not be downloaded",
+        tiktok_url="https://www.tiktok.com/@u/video/1",
+        streamer="jason",
+    )
+
+    with client:
+        response = client.get("/api/search/clip/101")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "failed"
+    assert response.json()["result"] is None
+    assert response.json()["error"] == {
+        "code": "DOWNLOAD_ERROR",
+        "message": "TikTok could not be downloaded",
+    }
 
 
 def test_public_search_job_endpoint_returns_restored_multi_segment_payload() -> None:

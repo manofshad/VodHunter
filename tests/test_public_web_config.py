@@ -22,6 +22,7 @@ def test_nginx_public_template_proxies_api_and_rate_limits_search() -> None:
     assert "location ^~ /internal/ {" in nginx_template
     assert "return 404;" in nginx_template
     assert "proxy_pass ${PUBLIC_API_UPSTREAM};" in nginx_template
+    assert "try_files $uri $uri/ /index.html;" in nginx_template
     assert 'return 429 \'{"detail":{"code":"RATE_LIMITED","message":"Too many search requests. Please wait a moment and try again."}}\';' in nginx_template
 
 
