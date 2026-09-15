@@ -75,6 +75,7 @@ class StubSearchJobService:
         streamer: str,
         creator_id: int | None,
         date_range: SearchDateRange | None = None,
+        notification_installation_id: int | None = None,
     ) -> int:
         self.created_jobs.append(
             {
@@ -82,6 +83,7 @@ class StubSearchJobService:
                 "streamer": streamer,
                 "creator_id": creator_id,
                 "date_range": date_range,
+                "notification_installation_id": notification_installation_id,
             }
         )
         return 101
@@ -95,6 +97,11 @@ def build_client(app_factory):
     app.state.videos = StubStore()
     app.state.search_manager = StubSearchManager()
     app.state.search_job_service = StubSearchJobService()
+    app.state.notifications = type(
+        "StubNotifications",
+        (),
+        {"resolve_shortcut_token": lambda self, token: 55 if token == "paired-token" else None},
+    )()
     return app, TestClient(app)
 
 
@@ -124,7 +131,12 @@ def test_public_search_endpoint_accepts_tiktok_url_only() -> None:
         )
 
     assert response.status_code == 202
-    assert response.json() == {"search_id": 101, "status": "queued", "stage": "validating"}
+    assert response.json() == {
+        "search_id": 101,
+        "status": "queued",
+        "stage": "validating",
+        "notifications_enabled": False,
+    }
     assert app.state.search_manager.url_calls == 0
     assert app.state.search_job_service.created_jobs == [
         {
@@ -132,8 +144,44 @@ def test_public_search_endpoint_accepts_tiktok_url_only() -> None:
             "streamer": "jason",
             "creator_id": 2,
             "date_range": None,
+            "notification_installation_id": None,
         }
     ]
+
+
+def test_public_search_links_a_valid_shortcut_notification_token() -> None:
+    app, client = build_client(create_public_app)
+
+    with client:
+        response = client.post(
+            "/api/search/clip",
+            data={
+                "tiktok_url": "https://www.tiktok.com/@u/video/1",
+                "streamer": "jason",
+                "notification_token": "paired-token",
+            },
+        )
+
+    assert response.status_code == 202
+    assert response.json()["notifications_enabled"] is True
+    assert app.state.search_job_service.created_jobs[0]["notification_installation_id"] == 55
+
+
+def test_public_search_ignores_an_invalid_shortcut_notification_token() -> None:
+    app, client = build_client(create_public_app)
+
+    with client:
+        response = client.post(
+            "/api/search/clip",
+            data={
+                "tiktok_url": "https://www.tiktok.com/@u/video/1",
+                "streamer": "jason",
+                "notification_token": "expired-token",
+            },
+        )
+
+    assert response.status_code == 202
+    assert response.json()["notifications_enabled"] is False
 
 
 def test_internal_metrics_endpoint_is_available_to_private_api_clients() -> None:

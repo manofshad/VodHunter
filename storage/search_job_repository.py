@@ -32,6 +32,7 @@ class SearchJobRepository:
         streamer: str,
         creator_id: int | None,
         date_range: SearchDateRange | None = None,
+        notification_installation_id: int | None = None,
     ) -> int:
         with self.database.connect() as conn:
             with conn.cursor() as cur:
@@ -50,9 +51,10 @@ class SearchJobRepository:
                         streamed_from,
                         streamed_to,
                         model_version,
-                        preprocessing_version
+                        preprocessing_version,
+                        notification_installation_id
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
                     """,
                     (
@@ -69,6 +71,7 @@ class SearchJobRepository:
                         date_range.streamed_to if date_range is not None else None,
                         self.database.model_version,
                         self.database.preprocessing_version,
+                        notification_installation_id,
                     ),
                 )
                 row = cur.fetchone()

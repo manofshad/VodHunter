@@ -1,6 +1,7 @@
 import { RefObject, useRef, useState } from "react";
-import { History as HistoryIcon } from "lucide-react";
+import { Bell, History as HistoryIcon } from "lucide-react";
 
+import { NotificationSetup } from "./notifications/NotificationSetup";
 import { HistoryDrawer } from "./search/HistoryDrawer";
 import { SearchFeedback } from "./search/SearchFeedback";
 import { SearchForm } from "./search/SearchForm";
@@ -14,9 +15,10 @@ interface HeaderProps {
   historyOpen: boolean;
   historyButtonRef: RefObject<HTMLButtonElement>;
   onOpenHistory: () => void;
+  onOpenNotifications: () => void;
 }
 
-function Header({ historyOpen, historyButtonRef, onOpenHistory }: HeaderProps) {
+function Header({ historyOpen, historyButtonRef, onOpenHistory, onOpenNotifications }: HeaderProps) {
   return (
     <header className="border-b border-gray-700 bg-gray-900 px-6 py-4">
       <div className="mx-auto flex max-w-7xl items-center justify-between">
@@ -26,7 +28,16 @@ function Header({ historyOpen, historyButtonRef, onOpenHistory }: HeaderProps) {
             <span className="font-bold text-[#fb2844]">Hunter</span>
           </span>
         </div>
-        <nav>
+        <nav className="flex items-center gap-1">
+          <button
+            type="button"
+            aria-label="Notifications"
+            onClick={onOpenNotifications}
+            className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-gray-300 transition hover:bg-gray-800 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#fb2844]"
+          >
+            <Bell aria-hidden="true" className="size-5" />
+            <span className="hidden sm:inline">Notifications</span>
+          </button>
           <button
             ref={historyButtonRef}
             type="button"
@@ -81,7 +92,16 @@ function FeatureGrid() {
 export default function SearchPage() {
   const page = useSearchPage();
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(() =>
+    window.location.pathname.startsWith("/notifications/"),
+  );
   const historyButtonRef = useRef<HTMLButtonElement>(null);
+  const closeNotifications = () => {
+    setNotificationsOpen(false);
+    if (window.location.pathname.startsWith("/notifications/")) {
+      window.history.replaceState(null, "", "/");
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-900">
@@ -89,7 +109,10 @@ export default function SearchPage() {
         historyOpen={historyOpen}
         historyButtonRef={historyButtonRef}
         onOpenHistory={() => setHistoryOpen(true)}
+        onOpenNotifications={() => setNotificationsOpen(true)}
       />
+
+      <NotificationSetup open={notificationsOpen} onClose={closeNotifications} />
 
       <HistoryDrawer
         open={historyOpen}

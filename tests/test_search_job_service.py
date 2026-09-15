@@ -36,8 +36,11 @@ class StubStore:
         streamer: str,
         creator_id: int | None,
         date_range: SearchDateRange | None = None,
+        notification_installation_id: int | None = None,
     ) -> int:
-        self.created_jobs.append((tiktok_url, streamer, creator_id, date_range))
+        self.created_jobs.append(
+            (tiktok_url, streamer, creator_id, date_range, notification_installation_id)
+        )
         return 7
 
     def update_search_job_status(self, search_id: int, *, status=None, stage=None, started=False) -> None:
@@ -98,6 +101,17 @@ class StubSearchManager:
         )
 
 
+class StubNotifier:
+    def __init__(self, error: Exception | None = None) -> None:
+        self.calls = []
+        self.error = error
+
+    def notify_search_finished(self, **kwargs) -> None:
+        self.calls.append(kwargs)
+        if self.error is not None:
+            raise self.error
+
+
 def test_search_job_service_completes_job() -> None:
     store = StubStore()
     service = SearchJobService(jobs=store, search_manager=StubSearchManager(), executor=InlineExecutor())
@@ -109,11 +123,53 @@ def test_search_job_service_completes_job() -> None:
     )
 
     assert search_id == 7
-    assert store.created_jobs == [("https://www.tiktok.com/@u/video/1", "jason", 2, None)]
+    assert store.created_jobs == [("https://www.tiktok.com/@u/video/1", "jason", 2, None, None)]
     assert store.status_updates[0] == (7, "running", "validating", True)
     assert (7, None, "downloading", False) in store.status_updates
     assert (7, None, "embedding", False) in store.status_updates
     assert (7, None, "finalizing", False) in store.status_updates
+    assert store.completed[0][0] == 7
+    assert store.failed == []
+
+
+def test_search_job_service_notifies_after_a_completed_job() -> None:
+    store = StubStore()
+    notifier = StubNotifier()
+    service = SearchJobService(
+        jobs=store,
+        search_manager=StubSearchManager(),
+        executor=InlineExecutor(),
+        notifier=notifier,
+    )
+
+    service.create_public_search_job(
+        tiktok_url="https://www.tiktok.com/@u/video/1",
+        streamer="jason",
+        creator_id=2,
+        notification_installation_id=44,
+    )
+
+    assert store.created_jobs[0][-1] == 44
+    assert notifier.calls == [
+        {"search_id": 7, "status": "completed", "streamer": "jason", "found": False}
+    ]
+
+
+def test_notification_failure_does_not_change_a_completed_search() -> None:
+    store = StubStore()
+    service = SearchJobService(
+        jobs=store,
+        search_manager=StubSearchManager(),
+        executor=InlineExecutor(),
+        notifier=StubNotifier(RuntimeError("push unavailable")),
+    )
+
+    service.create_public_search_job(
+        tiktok_url="https://www.tiktok.com/@u/video/1",
+        streamer="jason",
+        creator_id=2,
+    )
+
     assert store.completed[0][0] == 7
     assert store.failed == []
 
@@ -160,7 +216,7 @@ def test_search_job_service_forwards_date_range() -> None:
         date_range=date_range,
     )
 
-    assert store.created_jobs == [("https://www.tiktok.com/@u/video/1", "jason", 2, date_range)]
+    assert store.created_jobs == [("https://www.tiktok.com/@u/video/1", "jason", 2, date_range, None)]
     assert manager.date_ranges == [date_range]
 
 

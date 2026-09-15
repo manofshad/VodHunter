@@ -10,3 +10,4 @@ python-dotenv==1.0.1
 prometheus-client==0.21.1
 alembic==1.13.1
 sqlalchemy==2.0.15
+pywebpush==2.5.0

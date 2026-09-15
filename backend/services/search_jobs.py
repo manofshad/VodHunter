@@ -19,10 +19,11 @@ def _duration_ms(seconds: float) -> int:
 
 
 class SearchJobService:
-    def __init__(self, jobs: SearchJobRepository, search_manager, executor: Executor):
+    def __init__(self, jobs: SearchJobRepository, search_manager, executor: Executor, notifier=None):
         self.jobs = jobs
         self.search_manager = search_manager
         self.executor = executor
+        self.notifier = notifier
 
     def create_public_search_job(
         self,
@@ -31,15 +32,19 @@ class SearchJobService:
         streamer: str,
         creator_id: int | None,
         date_range: SearchDateRange | None = None,
+        notification_installation_id: int | None = None,
     ) -> int:
         accepted_started_at = time.perf_counter()
         normalized_tiktok_url = validate_tiktok_url(tiktok_url)
-        search_id = self.jobs.create_public_search_job(
+        create_kwargs = dict(
             tiktok_url=normalized_tiktok_url,
             streamer=streamer,
             creator_id=creator_id,
             date_range=date_range,
         )
+        if notification_installation_id is not None:
+            create_kwargs["notification_installation_id"] = notification_installation_id
+        search_id = self.jobs.create_public_search_job(**create_kwargs)
         self.executor.submit(
             self._run_public_search_job,
             search_id,
@@ -68,6 +73,12 @@ class SearchJobService:
                 total_duration_ms=None,
                 error_code="WORKER_RESTARTED",
                 http_status=500,
+            )
+            self._notify_terminal(
+                search_id=int(search_id),
+                status="failed",
+                streamer=streamer,
+                error_message="The server restarted before this search completed.",
             )
 
     def _run_public_search_job(
@@ -115,6 +126,12 @@ class SearchJobService:
                 stage_durations_ms=stage_durations_ms,
                 result=outcome.result,
                 diagnostics=self._diagnostics(outcome),
+            )
+            self._notify_terminal(
+                search_id=search_id,
+                status="completed",
+                streamer=streamer,
+                found=outcome.result.found,
             )
         except InputDurationExceededError as exc:
             self._fail_and_observe(
@@ -216,6 +233,23 @@ class SearchJobService:
                 "input_duration_seconds": input_duration_seconds,
             },
         )
+        self._notify_terminal(
+            search_id=search_id,
+            status="failed",
+            streamer=streamer,
+            error_message=error_message,
+        )
+
+    def _notify_terminal(self, **kwargs) -> None:
+        if self.notifier is None:
+            return
+        try:
+            self.notifier.notify_search_finished(**kwargs)
+        except Exception:
+            logger.exception(
+                "Unable to send terminal search notification search_id=%s",
+                kwargs.get("search_id"),
+            )
 
     @staticmethod
     def _diagnostics(outcome) -> dict[str, object | None]:

@@ -1,59 +1,98 @@
-# Search with VodHunter iOS Shortcut
+# VodHunter Search iOS Shortcut
 
-This Shortcut starts a VodHunter search directly from TikTok's Share Sheet. The user chooses a streamer, confirms with **Search**, and is sent to the VodHunter frontend while the server-side job is running.
+The `VodHunter Search` Shortcut starts a search from TikTok's Share Sheet. Once notifications are paired, it finishes without opening a browser so the user can keep scrolling. VodHunter sends a Web Push notification when the job reaches a terminal state; tapping it opens `/share?search_id=...` with the stored result.
 
-## Shortcut settings
+If the Shortcut is not paired, its token has expired, or server-side notifications are disabled, the existing behavior remains intact: it opens the VodHunter result page immediately and the page polls the job.
 
-- Name: `Search with VodHunter`
-- Enable **Show in Share Sheet**.
-- Receive **URLs** and **Text** from the Share Sheet.
-- When there is no input, choose **Stop and Respond** and use: `Share a TikTok video with this shortcut.`
+## Requirements
+
+- iOS or iPadOS 16.4 or later for Home Screen Web Push
+- VodHunter added to the Home Screen from Safari
+- The web app opened from its Home Screen icon
+- Notifications allowed after tapping **Enable Notifications**
+- Shortcut name exactly `VodHunter Search` (the pairing URL launches it by name)
+- **Show in Share Sheet** enabled, receiving **URLs** and **Text**
 
 Apple references:
 
-- [Launch a shortcut from another app](https://support.apple.com/guide/shortcuts/launch-a-shortcut-from-another-app-apd163eb9f95/ios)
-- [Limit the input for a shortcut](https://support.apple.com/guide/shortcuts/limit-the-input-for-a-shortcut-apd8195f96d6/ios)
+- [Web Push for Home Screen web apps](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/)
+- [Launch a shortcut from a URL](https://support.apple.com/guide/shortcuts/apd624386f42/ios)
+- [Use x-callback-url with Shortcuts](https://support.apple.com/guide/shortcuts/apdcd7f20a6f/ios)
 - [Make API requests from Shortcuts](https://support.apple.com/guide/shortcuts/apd58d46713f/ios)
 
-## Actions
+## Shortcut v2 action sequence
 
-1. Add **Get URLs from Shortcut Input**.
-2. Add **Get Item from List**, configured to get the **First Item**. Rename its output variable to `TikTok URL`.
-3. Add **If** `TikTok URL` does not have a value. Inside it, add **Show Alert** with `No TikTok URL was found`, followed by **Stop This Shortcut**.
-4. Add **URL** with `https://vodhunter.com/api/search/streamers`.
-5. Add **Get Contents of URL** using `GET`.
-6. Add **Repeat with Each** over the returned list.
-   - Inside the repeat, add **Get Dictionary Value** for the `name` key from the Repeat Item.
-   - Add **Add to Variable** and name the variable `Streamers`.
-7. Add **Choose from List** using `Streamers`, with multiple selection disabled. Rename its output variable to `Streamer`.
-8. Add **Choose from Menu** with the prompt `Search this TikTok clip with Streamer?` Insert the `Streamer` magic variable in place of the final word.
-   - Menu item **Search** continues with the API actions below.
-   - Menu item **Cancel** contains **Stop This Shortcut**.
-9. Under **Search**, add **URL** with `https://vodhunter.com/api/search/clip`.
-10. Add **Get Contents of URL** and configure:
-   - Method: `POST`
-   - Request Body: `Form`
-   - `tiktok_url`: the `TikTok URL` magic variable
-   - `streamer`: the `Streamer` magic variable
-11. Add **Get Dictionary Value** for `search_id` from the POST response. Rename the output to `Search ID`.
-12. Add **Text** containing `https://vodhunter.com/share?search_id=` followed by the `Search ID` magic variable.
-13. Add **Open URLs** using that Text result.
+The entire existing TikTok flow moves into the **Otherwise** branch described below.
 
-The Shortcut must not poll the job. Opening the frontend immediately lets the normal VodHunter polling UI take over and avoids depending on a long-running Shortcut process.
+1. Configure the Shortcut to receive **URLs** and **Text** from the Share Sheet. For no input, use **Stop and Respond** with `Share a TikTok video with this shortcut.`
+2. Add **Get Text from Shortcut Input**. Rename its output `Input Text`.
+3. Add **If** `Input Text` begins with `vodhunter-setup:`.
+4. In the pairing branch:
+   1. Add **Replace Text**. Replace `vodhunter-setup:` with nothing in `Input Text`. Rename the result `Pairing Code`.
+   2. Add **URL**: `https://vodhunter.com/api/notifications/pairings/claim`.
+   3. Add **Get Contents of URL** with method `POST`, request body `Form`, and field `pairing_code` set to `Pairing Code`.
+   4. Add **Get Dictionary Value** for `shortcut_token` from the response. Rename it `Notification Token`.
+   5. Add **Text** containing the `Notification Token` magic variable.
+   6. Add **Save File** to `iCloud Drive/Shortcuts/VodHunter/notification-token.txt`. Turn off **Ask Where to Save** and turn on **Overwrite If File Exists**.
+   7. Add **Show Alert**: `VodHunter Shortcut connected`.
+5. Add **Otherwise**. Put every normal TikTok-search action below inside this branch.
+6. Add **Get URLs from Shortcut Input**.
+7. Add **Get Item from List**, configured for **First Item**. Rename it `TikTok URL`.
+8. Add **If** `TikTok URL` does not have a value. Inside it, show `No TikTok URL was found. Share a TikTok video and try again.`, then **Stop This Shortcut**.
+9. Add **Get File from Folder** for `Shortcuts/VodHunter/notification-token.txt`. Turn off **Error If Not Found**. Rename the result `Notification Token File`.
+10. Add **If** `Notification Token File` has a value. Inside it, add **Get Text from Input** using that file and rename the result `Notification Token`. In **Otherwise**, add an empty **Text** action and also rename its result `Notification Token`.
+11. Add **URL**: `https://vodhunter.com/api/search/streamers`.
+12. Add **Get Contents of URL** using `GET`.
+13. Add **Repeat with Each** over the response. Inside it, get dictionary value `name` from `Repeat Item`, then **Add to Variable** named `Streamers`.
+14. Add **Choose from List** using `Streamers`, with multiple selection disabled. Rename the result `Streamer`.
+15. Add **Choose from Menu** with prompt `Search this TikTok clip with [Streamer]?`.
+    - **Cancel** contains **Stop This Shortcut**.
+    - **Search** contains the remaining API actions.
+16. Under **Search**, add **URL**: `https://vodhunter.com/api/search/clip`.
+17. Add **Get Contents of URL** with method `POST`, request body `Form`, and fields:
+    - `tiktok_url`: `TikTok URL`
+    - `streamer`: `Streamer`
+    - `notification_token`: `Notification Token`
+18. Add **Get Dictionary Value** for `notifications_enabled` from the response.
+19. Add **If** `notifications_enabled` is true:
+    - Add **Show Notification**: `VodHunter is searching. You can keep scrolling.`
+    - Add **Stop This Shortcut**. Because no browser is opened, iOS returns to TikTok.
+20. In **Otherwise** (notifications unavailable):
+    1. Get dictionary value `search_id` from the same POST response. Rename it `Search ID`.
+    2. Add **Text**: `https://vodhunter.com/share?search_id=` followed by `Search ID`.
+    3. Add **Open URLs** using that Text result.
+21. Close the notification fallback **If**, the **Search** menu item, the menu, and the top-level pairing **If**.
+
+The pairing branch must complete normally rather than using **Stop This Shortcut**. This allows the `x-success` callback to return to VodHunter, where the web app confirms that the one-time code was claimed.
+
+## One-tap onboarding
+
+1. Install or update the `VodHunter Search` Shortcut.
+2. In Safari, open VodHunter, tap **Share**, then **Add to Home Screen**.
+3. Open VodHunter from its Home Screen icon.
+4. Tap **Notifications** in the header, then **Enable** and approve the iOS prompt.
+5. Tap **Connect**. VodHunter creates a five-minute, single-use pairing code and opens the installed Shortcut automatically.
+6. Approve any first-time Shortcuts file/network prompts. The Shortcut saves its scoped token in iCloud Drive and returns to VodHunter.
+
+Depending on the iOS version, the callback may open VodHunter in Safari instead of the standalone Home Screen window. The pairing is still complete; close Safari and keep using VodHunter from its Home Screen icon.
+
+The long-lived Shortcut token is never placed in the custom-scheme URL. The server stores only SHA-256 token hashes. Creating a new pairing rotates the Shortcut token for that installation.
 
 ## Distribution
 
-Create and test the Shortcut on a physical iPhone, then use **Copy iCloud Link** from the Shortcut's sharing menu. Publish that link as the install action on VodHunter. Apple documents [sharing a Shortcut through iCloud](https://support.apple.com/guide/shortcuts/apdf01f8c054/ios).
+Build and test the Shortcut on a physical iPhone, then publish an updated **Copy iCloud Link** from the Shortcut sharing menu. Apple documents [sharing a Shortcut through iCloud](https://support.apple.com/guide/shortcuts/apdf01f8c054/ios).
 
-The iCloud Shortcut itself is maintained in Apple's Shortcuts app. Update this document whenever its action sequence or API contract changes.
+The Shortcut is maintained in Apple's Shortcuts app, not generated by this repository. Update this document and the public iCloud link whenever its action sequence or API contract changes.
 
 ## Device acceptance checks
 
-- TikTok full video URL and TikTok short share URL
-- Shortcut visible under TikTok **Share → More**
-- No-input error
-- Streamer list loads and only one streamer can be selected
-- Cancel does not create a search
-- Search creates exactly one job and opens `/share?search_id=...`
-- Queued/running progress, completed match, no match, failed job, and unknown job
-- Refresh during processing and opening a completed URL on another device
+- Add to Home Screen uses the VodHunter icon and opens in standalone mode
+- Notification permission is requested only after tapping **Enable**
+- **Connect** opens `VodHunter Search`, saves the token file, and returns with a connected confirmation
+- A pairing code cannot be claimed twice and expires after five minutes
+- TikTok full and short share URLs still work
+- A paired search returns to TikTok without opening Safari/Chrome
+- Match, no-match, and failed searches each deliver one visible notification
+- Tapping a notification opens the correct `/share?search_id=...` result
+- Missing, invalid, or revoked Shortcut tokens use the immediate browser fallback
+- Reconnecting rotates the Shortcut token and future searches still notify

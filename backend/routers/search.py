@@ -59,6 +59,7 @@ def create_search_clip_job(
     streamer: str | None = Form(default=None),
     streamed_from: str | None = Form(default=None),
     streamed_to: str | None = Form(default=None),
+    notification_token: str | None = Form(default=None, max_length=256),
 ) -> SearchJobCreatedResponse:
     has_url = bool((tiktok_url or "").strip())
     if not has_url:
@@ -84,13 +85,27 @@ def create_search_clip_job(
     normalized_streamer = _normalize_and_validate_streamer(request, streamer)
     creator_id = _resolve_creator_id(request, normalized_streamer)
     date_range = parse_search_date_range(streamed_from, streamed_to)
-    search_id = request.app.state.search_job_service.create_public_search_job(
+    notification_repository = getattr(request.app.state, "notifications", None)
+    notification_installation_id = (
+        notification_repository.resolve_shortcut_token((notification_token or "").strip() or None)
+        if notification_repository is not None
+        else None
+    )
+    create_kwargs = dict(
         tiktok_url=normalized_tiktok_url,
         streamer=normalized_streamer,
         creator_id=creator_id,
         date_range=date_range,
     )
-    return SearchJobCreatedResponse(search_id=search_id, status="queued", stage="validating")
+    if notification_installation_id is not None:
+        create_kwargs["notification_installation_id"] = notification_installation_id
+    search_id = request.app.state.search_job_service.create_public_search_job(**create_kwargs)
+    return SearchJobCreatedResponse(
+        search_id=search_id,
+        status="queued",
+        stage="validating",
+        notifications_enabled=notification_installation_id is not None,
+    )
 
 
 @router.get(
