@@ -31,6 +31,16 @@ server {
         return 404;
     }
 
+    location = /service-worker.js {
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+        try_files $uri =404;
+    }
+
+    location = /manifest.webmanifest {
+        add_header Cache-Control "public, max-age=300";
+        try_files $uri =404;
+    }
+
     location @search_rate_limited {
         default_type application/json;
         return 429 '{"detail":{"code":"RATE_LIMITED","message":"Too many search requests. Please wait a moment and try again."}}';

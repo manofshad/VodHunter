@@ -130,6 +130,7 @@ class SearchJobCreatedResponse(BaseModel):
     search_id: int
     status: SearchJobStatus
     stage: str | None = None
+    notifications_enabled: bool = False
 
 
 class SearchJobResponse(BaseModel):
@@ -143,6 +144,45 @@ class SearchJobResponse(BaseModel):
     finished_at: str | None = None
     result: SearchResponse | None = None
     error: SearchJobError | None = None
+
+
+class NotificationConfigResponse(BaseModel):
+    enabled: bool
+    vapid_public_key: str | None = None
+
+
+class PushSubscriptionKeys(BaseModel):
+    p256dh: str = Field(min_length=1, max_length=512)
+    auth: str = Field(min_length=1, max_length=512)
+
+
+class PushSubscriptionRequest(BaseModel):
+    endpoint: str = Field(min_length=1, max_length=4096)
+    expirationTime: float | None = None
+    keys: PushSubscriptionKeys
+
+
+class PushSubscriptionResponse(BaseModel):
+    enabled: bool
+    installation_token: str | None = None
+
+
+class NotificationPairingResponse(BaseModel):
+    pairing_id: str
+    expires_at: str
+    shortcut_url: str
+
+
+NotificationPairingStatus = Literal["pending", "connected", "expired"]
+
+
+class NotificationPairingStatusResponse(BaseModel):
+    status: NotificationPairingStatus
+
+
+class NotificationPairingClaimResponse(BaseModel):
+    status: Literal["connected"]
+    shortcut_token: str
 
 
 class InternalVideoMutationRequest(BaseModel):

@@ -18,7 +18,9 @@ from backend import bootstrap_shared
 from backend.routers.health import router as health_router
 from backend.routers.internal_videos import router as internal_videos_router
 from backend.routers.metrics import router as metrics_router
+from backend.routers.notifications import router as notifications_router
 from backend.routers.search import router as search_router
+from backend.services.push_notifications import PushNotificationService, WebPushConfig
 from backend.services.search_jobs import SearchJobService
 
 
@@ -61,10 +63,16 @@ def create_public_app(
                 preprocess_temp_dir=str(data_dir / "temp_search"),
             )
             search_job_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="public-search")
+            notification_repository = getattr(repositories, "notifications", None)
+            push_notification_service = PushNotificationService(
+                notification_repository,
+                WebPushConfig.from_env(),
+            )
             search_job_service = SearchJobService(
                 jobs=repositories.search_jobs,
                 search_manager=search_stack.search_manager,
                 executor=search_job_executor,
+                notifier=push_notification_service,
             )
             search_job_service.fail_incomplete_public_search_jobs()
 
@@ -73,12 +81,14 @@ def create_public_app(
                 "videos": repositories.videos,
                 "fingerprints": repositories.fingerprints,
                 "ingest_states": repositories.ingest_states,
+                "notifications": notification_repository,
                 "search_jobs": repositories.search_jobs,
                 "query_embedder": search_stack.query_embedder,
                 "search_service": search_stack.search_service,
                 "search_manager": search_stack.search_manager,
                 "search_job_executor": search_job_executor,
                 "search_job_service": search_job_service,
+                "push_notification_service": push_notification_service,
             }.items():
                 setattr(app.state, key, value)
 
@@ -96,6 +106,7 @@ def create_public_app(
     _configure_cors(app)
     app.include_router(health_router)
     app.include_router(metrics_router)
+    app.include_router(notifications_router)
     app.include_router(search_router)
     app.include_router(internal_videos_router)
     return app

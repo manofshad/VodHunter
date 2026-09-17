@@ -69,6 +69,9 @@ import backend.bootstrap_shared
         public_paths = _route_paths(public_app.routes)
         assert '/api/health' in public_paths
         assert '/api/search/clip' in public_paths
+        assert '/api/notifications/config' in public_paths
+        assert '/api/notifications/subscriptions' in public_paths
+        assert '/api/notifications/pairings/claim' in public_paths
         assert '/internal/videos/{video_id}/delete-index' in public_paths
         assert '/internal/videos/{video_id}/request-reindex' in public_paths
         assert '/api/live/status' not in public_paths
@@ -112,6 +115,7 @@ import backend.bootstrap_shared
             videos=object(),
             fingerprints=object(),
             ingest_states=object(),
+            notifications=object(),
             search_jobs=jobs,
         )
         search_stack = SearchStack(
@@ -126,6 +130,7 @@ import backend.bootstrap_shared
                     assert hasattr(app.state, 'repositories')
                     assert hasattr(app.state, 'videos')
                     assert hasattr(app.state, 'search_manager')
+                    assert hasattr(app.state, 'push_notification_service')
                     assert not hasattr(app.state, 'embedder')
             asyncio.run(run_lifespan())
             assert query_embedder.close_calls == 1

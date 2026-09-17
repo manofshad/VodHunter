@@ -32,6 +32,8 @@ Ingestion resolves VOD media with `yt-dlp`, extracts overlapping audio chunks, f
 
 The public endpoint is asynchronous: `POST /api/search/clip` creates a job and `GET /api/search/clip/{search_id}` returns its state and durable result. A successful result retains the legacy top-level timestamp/URL while adding `segments` and `unmatched_ranges`.
 
+The iOS Share Sheet integration and its optional Home Screen Web Push handoff are documented in [the Shortcut guide](docs/ios-shortcut.md). Production VAPID configuration and notification smoke tests are in [the Web Push deployment guide](docs/web-push-deployment.md).
+
 NMFP only reports ranges with enough consistent evidence. Very short sections, fully overlaid audio, silence, heavy transformation, or isolated nearest neighbors can remain unmatched. An unmatched range is an honest lack of support, not proof that the source audio never occurred in a VOD.
 
 ## Cut-aware alignment defaults

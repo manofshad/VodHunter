@@ -108,6 +108,9 @@ class PostgresDatabase:
                     "fingerprint_index_metadata",
                     "vod_ingest_state",
                     "search_requests",
+                    "notification_installations",
+                    "push_subscriptions",
+                    "notification_pairings",
                 )
                 missing_tables: list[str] = []
                 for table_name in required_tables:
@@ -175,6 +178,8 @@ class PostgresDatabase:
                     ("search_requests", "query_fingerprint_count"),
                     ("search_requests", "candidate_count"),
                     ("search_requests", "segment_count"),
+                    ("search_requests", "notification_installation_id"),
+                    ("search_requests", "notification_sent_at"),
                 )
                 missing_columns: list[str] = []
                 for table_name, column_name in required_columns:

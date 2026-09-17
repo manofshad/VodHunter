@@ -46,6 +46,7 @@ export interface SearchJobCreatedResponse {
   search_id: number;
   status: "queued" | "running" | "completed" | "failed";
   stage: string | null;
+  notifications_enabled?: boolean;
 }
 
 export interface SearchJobError {

@@ -247,6 +247,23 @@ class TestAlembicMigrations:
             'DROP VIEW IF EXISTS grafana_vod_inventory',
         ]
 
+    def test_web_push_revision_adds_pairing_and_search_delivery_schema(self) -> None:
+        revision = self._load_module(
+            'alembic/versions/20260915_0015_add_web_push_notifications.py',
+            'vodhunter_alembic_revision_web_push',
+        )
+        fake_op = FakeOp()
+        with patch.object(revision, 'op', fake_op):
+            revision.upgrade()
+
+        combined_sql = '\n'.join(fake_op.executed)
+        assert revision.down_revision == '20260913_0014'
+        assert 'CREATE TABLE IF NOT EXISTS notification_installations' in combined_sql
+        assert 'CREATE TABLE IF NOT EXISTS push_subscriptions' in combined_sql
+        assert 'CREATE TABLE IF NOT EXISTS notification_pairings' in combined_sql
+        assert 'notification_installation_id BIGINT' in combined_sql
+        assert 'notification_sent_at TIMESTAMPTZ' in combined_sql
+
     def test_nmfp_revision_rebuilds_vectors_and_adds_durable_results(self) -> None:
         revision = self._load_module(
             'alembic/versions/20260824_0010_nmfp_production_schema.py',
