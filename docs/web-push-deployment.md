@@ -14,18 +14,18 @@ With `py-vapid` installed by `pywebpush`:
 mkdir vodhunter-vapid
 cd vodhunter-vapid
 vapid --gen
-vapid --applicationServerKey
 ```
 
-Configure these Coolify secrets for the API service:
+Configure this Coolify secret for the API service:
 
-- `PUBLIC_SITE_URL=https://vodhunter.com`
-- `VODHUNTER_SHORTCUT_NAME=VodHunter Search`
-- `WEB_PUSH_VAPID_PUBLIC_KEY`: output of `vapid --applicationServerKey`
 - `WEB_PUSH_VAPID_PRIVATE_KEY`: the generated `private_key.pem` contents (multiline PEM and escaped-newline PEM are both accepted)
-- `WEB_PUSH_SUBJECT=mailto:<monitored-address>` (or an HTTPS contact URL)
 
-Do not commit the generated private key or any browser/Shortcut token. The checked-in `.env.example` files contain names only.
+The API derives the browser-facing VAPID public key from that private key. The
+VodHunter site URL, Shortcut name, and VAPID contact URI are public product
+constants and are kept in the codebase instead of deployment configuration.
+
+Do not commit the generated private key or any browser/Shortcut token. The
+checked-in `.env.example` files contain the secret's name only.
 
 The deployment migration creates:
 

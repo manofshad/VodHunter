@@ -1,5 +1,9 @@
+import base64
 import json
 
+import pytest
+
+from backend.services import push_notifications
 from backend.services.push_notifications import PushNotificationService, WebPushConfig
 from storage.notification_repository import PushSubscriptionRecord
 
@@ -35,6 +39,53 @@ def config() -> WebPushConfig:
         site_url="https://vodhunter.com",
         shortcut_name="VodHunter Search",
     )
+
+
+def test_runtime_config_derives_public_key_and_keeps_public_values_in_code(monkeypatch) -> None:
+    monkeypatch.setattr(push_notifications, "_public_vapid_key", lambda value: "derived-key")
+    monkeypatch.setenv("WEB_PUSH_VAPID_PRIVATE_KEY", "private-key")
+    monkeypatch.setenv("WEB_PUSH_VAPID_PUBLIC_KEY", "ignored-public-key")
+    monkeypatch.setenv("WEB_PUSH_SUBJECT", "mailto:ignored@example.com")
+    monkeypatch.setenv("PUBLIC_SITE_URL", "https://ignored.example")
+    monkeypatch.setenv("VODHUNTER_SHORTCUT_NAME", "Ignored Shortcut")
+
+    runtime_config = WebPushConfig.from_env()
+
+    assert runtime_config.public_key == "derived-key"
+    assert runtime_config.private_key == "private-key"
+    assert runtime_config.subject == "https://vodhunter.com"
+    assert runtime_config.site_url == "https://vodhunter.com"
+    assert runtime_config.shortcut_name == "VodHunter Search"
+    assert runtime_config.enabled is True
+
+
+def test_public_vapid_key_is_derived_from_private_key() -> None:
+    serialization = pytest.importorskip("cryptography.hazmat.primitives.serialization")
+    ec = pytest.importorskip("cryptography.hazmat.primitives.asymmetric.ec")
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    private_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).decode("ascii")
+    expected_public_key = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.X962,
+        format=serialization.PublicFormat.UncompressedPoint,
+    )
+
+    assert push_notifications._public_vapid_key(private_pem) == base64.urlsafe_b64encode(
+        expected_public_key
+    ).decode("ascii").rstrip("=")
+
+
+def test_runtime_config_is_disabled_without_private_key(monkeypatch) -> None:
+    monkeypatch.delenv("WEB_PUSH_VAPID_PRIVATE_KEY", raising=False)
+
+    runtime_config = WebPushConfig.from_env()
+
+    assert runtime_config.public_key == ""
+    assert runtime_config.private_key == ""
+    assert runtime_config.enabled is False
 
 
 def test_matching_search_sends_a_tappable_result_notification() -> None:

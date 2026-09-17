@@ -14,6 +14,49 @@ from storage.notification_repository import NotificationRepository, PushSubscrip
 
 logger = logging.getLogger("uvicorn.error")
 
+VODHUNTER_SITE_URL = "https://vodhunter.com"
+VODHUNTER_SHORTCUT_NAME = "VodHunter Search"
+VODHUNTER_VAPID_SUBJECT = "https://vodhunter.com"
+
+
+def _load_vapid_private_key(value: str):
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    encoded = value.encode("utf-8")
+    if "-----BEGIN" in value:
+        return serialization.load_pem_private_key(encoded, password=None)
+
+    padding = "=" * (-len(value) % 4)
+    private_bytes = base64.urlsafe_b64decode(value + padding)
+    try:
+        return serialization.load_der_private_key(private_bytes, password=None)
+    except ValueError:
+        if len(private_bytes) != 32:
+            raise
+        return ec.derive_private_key(int.from_bytes(private_bytes, "big"), ec.SECP256R1())
+
+
+def _public_vapid_key(private_key: str) -> str:
+    from cryptography.hazmat.primitives import serialization
+
+    public_bytes = _load_vapid_private_key(private_key).public_key().public_bytes(
+        encoding=serialization.Encoding.X962,
+        format=serialization.PublicFormat.UncompressedPoint,
+    )
+    return base64.urlsafe_b64encode(public_bytes).decode("ascii").rstrip("=")
+
+
+def _private_vapid_key_as_der(private_key: str) -> str:
+    from cryptography.hazmat.primitives import serialization
+
+    private_der = _load_vapid_private_key(private_key).private_bytes(
+        encoding=serialization.Encoding.DER,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    return base64.urlsafe_b64encode(private_der).decode("ascii").rstrip("=")
+
 
 @dataclass(frozen=True)
 class WebPushConfig:
@@ -35,12 +78,13 @@ class WebPushConfig:
 
     @classmethod
     def from_env(cls) -> "WebPushConfig":
+        private_key = os.getenv("WEB_PUSH_VAPID_PRIVATE_KEY", "").strip().replace("\\n", "\n")
         return cls(
-            public_key=os.getenv("WEB_PUSH_VAPID_PUBLIC_KEY", "").strip(),
-            private_key=os.getenv("WEB_PUSH_VAPID_PRIVATE_KEY", "").strip().replace("\\n", "\n"),
-            subject=os.getenv("WEB_PUSH_SUBJECT", "").strip(),
-            site_url=os.getenv("PUBLIC_SITE_URL", "https://vodhunter.com").strip().rstrip("/"),
-            shortcut_name=os.getenv("VODHUNTER_SHORTCUT_NAME", "VodHunter Search").strip(),
+            public_key=_public_vapid_key(private_key) if private_key else "",
+            private_key=private_key,
+            subject=VODHUNTER_VAPID_SUBJECT,
+            site_url=VODHUNTER_SITE_URL,
+            shortcut_name=VODHUNTER_SHORTCUT_NAME,
         )
 
 
@@ -54,25 +98,13 @@ def _send_web_push(
 ) -> None:
     from pywebpush import webpush  # Imported lazily so disabled Push remains optional in local tooling.
 
-    private_key = config.private_key
-    if "-----BEGIN" in private_key:
-        from cryptography.hazmat.primitives import serialization
-
-        loaded_key = serialization.load_pem_private_key(private_key.encode("utf-8"), password=None)
-        private_der = loaded_key.private_bytes(
-            encoding=serialization.Encoding.DER,
-            format=serialization.PrivateFormat.PKCS8,
-            encryption_algorithm=serialization.NoEncryption(),
-        )
-        private_key = base64.urlsafe_b64encode(private_der).decode("ascii").rstrip("=")
-
     webpush(
         subscription_info={
             "endpoint": subscription.endpoint,
             "keys": {"p256dh": subscription.p256dh, "auth": subscription.auth},
         },
         data=payload,
-        vapid_private_key=private_key,
+        vapid_private_key=_private_vapid_key_as_der(config.private_key),
         vapid_claims={"sub": config.subject},
         timeout=10,
         ttl=86_400,
