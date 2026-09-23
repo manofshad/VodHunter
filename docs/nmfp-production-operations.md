@@ -203,6 +203,13 @@ An empty or partial segment list is valid. Never describe unmatched ranges as de
 
 ## Latency and observability
 
+After restoring or rebuilding the vector indexes, run
+`python -m runners.prewarm_vector_indexes` from an application container to
+prewarm the active creator indexes. The one-shot command discovers attached
+partitions from the database catalog and fails if any lacks a valid cosine
+HNSW index. It also warms the fingerprint primary-key index. The obsolete
+unpartitioned rollback table is removed by migration `20260923_0015`.
+
 The benchmark's roughly 231-240 ms median measured cached alignment with query fingerprints already present. It excluded cold TensorFlow startup and query fingerprint extraction. It is not comparable to clip-to-result latency.
 
 Production emits and persists the following independently:

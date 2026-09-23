@@ -219,6 +219,16 @@ def test_schema_readiness_verifies_nmfp_width_and_versions() -> None:
 
     assert any("SELECT format_type" in query for query, _ in cursor.executed)
     assert any("FROM fingerprint_index_metadata" in query for query, _ in cursor.executed)
+    assert any("pg_partition_tree" in query for query, _ in cursor.executed)
+
+
+def test_schema_readiness_rejects_partition_without_hnsw_index() -> None:
+    cursor = SchemaCursor()
+    cursor.rows = [(42, "fingerprint_embeddings_creator_42", None, None, None)]
+    database = build_database(cursor)
+
+    with pytest.raises(RuntimeError, match="fingerprint_embeddings_creator_42"):
+        database.ensure_schema_ready()
 
 
 def test_schema_readiness_requires_partitioned_embedding_parent() -> None:
