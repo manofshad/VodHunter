@@ -38,13 +38,20 @@ stack. Enable the application's **Connect to Predefined Network** setting so
 the application and standalone database can communicate over Coolify's private
 network. Do not expose the database publicly.
 
-The `pg_prewarm` extension is installed by the latest Alembic migration. After
-the first restore, warm the large HNSW index before opening traffic:
+The `pg_prewarm` extension is installed by Alembic. After a database restore,
+partition rebuild, or restart where the automatic cache restoration is
+insufficient, run the one-shot warmup from an application container with its
+normal `DATABASE_URL`:
 
-```sql
-SELECT pg_prewarm('idx_fingerprint_embeddings_hnsw_cos', 'buffer');
-SELECT pg_prewarm('fingerprints_pkey', 'buffer');
+```bash
+docker exec <running-api-container> python -m runners.prewarm_vector_indexes
 ```
+
+The command discovers valid cosine HNSW indexes on the active creator
+partitions from PostgreSQL metadata, then warms those indexes and the
+`fingerprints` primary-key index. It reports each relation and the number of
+blocks loaded. It does not select indexes from the retired backup table.
+Prewarming fills available cache; it does not pin every index in memory.
 
 ## First deployment
 
@@ -89,7 +96,7 @@ fingerprint-index metadata, HNSW index, and representative searches. Measure
 the restore and index-build duration before scheduling the final maintenance
 window. During that window, stop API, worker, and retention writers, take a
 final dump, restore it into the standalone database, run migrations and
-`ANALYZE`, prewarm the HNSW index, update `DATABASE_URL`, and validate health
+`ANALYZE`, prewarm the active creator HNSW indexes, update `DATABASE_URL`, and validate health
 and searches before reopening traffic.
 
 Keep the original database volume untouched until standalone backups and a

@@ -251,3 +251,10 @@ class PostgresDatabase:
                         "Database fingerprint index metadata is incompatible with the configured NMFP runtime; "
                         f"expected={expected_metadata} found={actual_metadata or 'missing'}"
                     )
+
+                from storage.vector_cache_repository import (
+                    list_active_vector_indexes,
+                    require_active_vector_indexes,
+                )
+
+                require_active_vector_indexes(list_active_vector_indexes(cur))

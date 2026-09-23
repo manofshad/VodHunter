@@ -247,6 +247,21 @@ class TestAlembicMigrations:
             'DROP VIEW IF EXISTS grafana_vod_inventory',
         ]
 
+    def test_backup_cleanup_drops_only_obsolete_table_without_cascade(self) -> None:
+        revision = self._load_module(
+            'alembic/versions/20260923_0015_drop_embedding_backup.py',
+            'vodhunter_alembic_revision_drop_embedding_backup',
+        )
+        fake_op = FakeOp()
+        with patch.object(revision, 'op', fake_op):
+            revision.upgrade()
+
+        assert revision.down_revision == '20260913_0014'
+        assert "relkind = 'p'" in fake_op.executed[0]
+        assert fake_op.executed[1] == (
+            'DROP TABLE IF EXISTS fingerprint_embeddings_unpartitioned_backup'
+        )
+
     def test_nmfp_revision_rebuilds_vectors_and_adds_durable_results(self) -> None:
         revision = self._load_module(
             'alembic/versions/20260824_0010_nmfp_production_schema.py',
