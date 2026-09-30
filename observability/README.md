@@ -206,14 +206,20 @@ after unusually large backfills if the estimates need refreshing.
 
 ## Deploy
 
-The normal deployment runs `alembic upgrade head`, which installs the reporting
-views. To update Alloy after deployment:
+Production deploys merged `main` through Coolify, including the web build
+arguments and Alloy configuration. The migration step runs `alembic upgrade
+head` to install the reporting views. Inspect the public endpoint and actual
+running containers before investigating deployment or telemetry failures:
 
 ```sh
-docker compose -f compose.production.yaml config
-docker compose -f compose.production.yaml up -d alloy
-docker compose -f compose.production.yaml ps alloy
+curl -fsS https://vodhunter.com/api/health
+ssh -o BatchMode=yes vodhunter-vps docker ps
 ```
+
+Resolve current Alloy/API/worker names from that output before reading their
+logs. An older `/opt/vodhunter` Compose project can coexist with the live
+Coolify deployment; avoid starting it to update or inspect monitoring. Apply
+application-side monitoring changes through the normal Coolify deployment.
 
 Alloy scrapes `api:8000/internal/metrics` on the private Compose network. It
 tails the `api`, `worker`, and `vod-retention` containers through the Docker
