@@ -91,7 +91,7 @@ blocking and privacy choices; observed sessions are not unique people.
 
 Events include page ready/streamer-list failure, submit attempts, client
 validation blocks, job acceptance, submission/poll failures, stage changes,
-terminal results committed to the UI, resume/shared-link journeys, visibility
+terminal results committed to a foreground view (deferred until return if the tab is hidden), resume/shared-link journeys, visibility
 changes while waiting, result-source/segment clicks, history opens, date-filter
 usage, and clipboard failures. Result clicks indicate engagement, not Twitch
 playback or verified correctness. A hidden view does not establish abandonment.

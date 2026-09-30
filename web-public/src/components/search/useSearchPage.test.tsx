@@ -57,6 +57,7 @@ function job(overrides: Partial<SearchJobResponse> = {}): SearchJobResponse {
 describe("useSearchPage shared jobs", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    Object.defineProperty(document, "hidden", { configurable: true, value: false });
     window.localStorage.clear();
     window.history.replaceState(null, "", "/");
     vi.mocked(listSearchableStreamers).mockResolvedValue([
@@ -79,6 +80,21 @@ describe("useSearchPage shared jobs", () => {
     // Validation leaves the previous result visible; clicks retain its journey.
     act(() => hook.current.onResultClick("segment"));
     expect(trackEvent).toHaveBeenCalledWith("result_vod_clicked", expect.objectContaining({ link_kind: "segment", search_id: 42 }));
+  });
+
+  it("waits for a foreground view before recording a visible result", async () => {
+    Object.defineProperty(document, "hidden", { configurable: true, value: true });
+    window.history.replaceState(null, "", "/share?search_id=42");
+    vi.mocked(getSearchJob).mockResolvedValue(job({ status: "completed", result: result(), stage: null }));
+    const { result: hook } = renderHook(() => useSearchPage());
+    await waitFor(() => expect(hook.current.result?.found).toBe(true));
+    expect(vi.mocked(trackEvent).mock.calls.filter(([name]) => name === "search_result_visible")).toHaveLength(0);
+    act(() => {
+      Object.defineProperty(document, "hidden", { configurable: true, value: false });
+      document.dispatchEvent(new Event("visibilitychange"));
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(vi.mocked(trackEvent).mock.calls.filter(([name]) => name === "search_result_visible")).toHaveLength(1);
   });
 
   it("observes client validation without submitting a backend job", async () => {

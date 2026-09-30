@@ -116,10 +116,16 @@ export function useSearchPage(): SearchPageState {
   }, [activeSearchStage]);
 
   useEffect(() => {
-    if (!submitting && terminalEvent.current && journey.current) {
-      trackEvent("search_result_visible", { ...journeyAttributes(journey.current), ...terminalEvent.current });
-      terminalEvent.current = null;
-    }
+    if (submitting) return;
+    const observeVisibleResult = () => {
+      if (!document.hidden && terminalEvent.current && journey.current) {
+        trackEvent("search_result_visible", { ...journeyAttributes(journey.current), ...terminalEvent.current });
+        terminalEvent.current = null;
+      }
+    };
+    observeVisibleResult();
+    document.addEventListener("visibilitychange", observeVisibleResult);
+    return () => document.removeEventListener("visibilitychange", observeVisibleResult);
   }, [submitting, result, requestError]);
 
   useEffect(() => {
