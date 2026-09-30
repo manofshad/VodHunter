@@ -3,6 +3,8 @@ from concurrent.futures import ThreadPoolExecutor
 import os
 from pathlib import Path
 import sys
+import time
+import logging
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
@@ -20,6 +22,7 @@ from backend.routers.internal_videos import router as internal_videos_router
 from backend.routers.metrics import router as metrics_router
 from backend.routers.search import router as search_router
 from backend.services.search_jobs import SearchJobService
+from backend.observability import observe_http_request
 
 
 PUBLIC_MAX_DURATION_SECONDS = 180
@@ -93,6 +96,25 @@ def create_public_app(
         app = FastAPI(title="VodHunter Public API")
 
     app.state.internal_api_key = configured_internal_api_key
+
+    @app.middleware("http")
+    async def measure_public_request(request, call_next):
+        started = time.perf_counter()
+        status_code = 500
+        try:
+            response = await call_next(request)
+            status_code = response.status_code
+            return response
+        finally:
+            # Routing has completed. Unknown paths share one label, and the
+            # private scrape endpoint does not measure itself.
+            route = getattr(request.scope.get("route"), "path", "unmatched")
+            if route.startswith("/api/") or route == "unmatched":
+                try:
+                    observe_http_request(route, request.method, status_code, time.perf_counter() - started)
+                except Exception:
+                    logging.getLogger("uvicorn.error").exception("Unable to observe API request")
+
     _configure_cors(app)
     app.include_router(health_router)
     app.include_router(metrics_router)

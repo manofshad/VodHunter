@@ -8,6 +8,7 @@ import { formatTimelineTime } from "./searchUtils";
 interface SearchResultCardProps {
   result: SearchResponse;
   lastSubmittedUrl: string;
+  onResultClick?: (linkKind: "source" | "segment") => void;
 }
 
 function getSearchSources(result: SearchResponse): SearchSource[] {
@@ -173,11 +174,17 @@ function SearchSourceBlock({ source, fallbackStreamer, fallbackProfileImageUrl }
   );
 }
 
-export function SearchResultCard({ result, lastSubmittedUrl }: SearchResultCardProps) {
+export function SearchResultCard({ result, lastSubmittedUrl, onResultClick }: SearchResultCardProps) {
   const sources = getSearchSources(result);
 
   return (
-    <section className="mx-auto max-w-4xl rounded-xl border border-gray-700 bg-gray-900 p-5 text-left shadow-lg">
+    <section className="mx-auto max-w-4xl rounded-xl border border-gray-700 bg-gray-900 p-5 text-left shadow-lg"
+      onClickCapture={(event) => {
+        const link = (event.target as HTMLElement).closest("a");
+        if (link && /^https:\/\/(www\.)?twitch\.tv\/videos\//.test(link.href)) {
+          onResultClick?.(link.closest("ol") ? "segment" : "source");
+        }
+      }}>
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <span
           className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] ${

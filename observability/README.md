@@ -17,18 +17,19 @@ scope:
 
 | Order | Dashboard | Primary data |
 | --- | --- | --- |
-| 00 | VodHunter Overview | Prometheus, Loki, PostgreSQL |
+| 00 | User Experience Overview | Loki, PostgreSQL |
 | 10 | Search Performance | Prometheus, Loki |
 | 10 | Search Quality | PostgreSQL |
+| 12 | Search Reliability | PostgreSQL |
 | 20 | Streamers & VODs | PostgreSQL |
 | 20 | Ingestion Operations | PostgreSQL, Loki |
 | 30 | Index & Retention | PostgreSQL, Loki |
+| 40 | Monitoring Health | Prometheus, Loki, PostgreSQL |
 
 All dashboards carry the `vodhunter` tag and expose a dashboard-link dropdown.
-Create matching Grafana folders named `00 Overview`, `10 Search`, `20 Content`,
-and `30 Operations`, then place each imported dashboard according to its numeric
-prefix. Folder placement is Grafana instance state and is not part of a portable
-dashboard JSON export.
+Production uses the existing `VodHunter` folder. Preserve stable dashboard UIDs
+when updating; numeric prefixes organize the suite. The Browser experience link
+opens the registered `vodhunter-public` Frontend Observability application.
 
 The dashboards are generated so common datasource definitions and panel
 defaults remain consistent. After editing
@@ -38,6 +39,91 @@ defaults remain consistent. After editing
 python3 observability/grafana/generate_dashboards.py
 python3 observability/grafana/generate_dashboards.py --check
 ```
+
+## Manage dashboards with gcx
+
+Authenticate with `gcx login vodhunter-production --server
+https://vodhunter.grafana.net --oauth`. Credentials belong in the local Keychain,
+not this repository. Discover datasource and folder UIDs before export:
+
+```sh
+gcx --context vodhunter-production config check
+gcx --context vodhunter-production datasources list
+gcx --context vodhunter-production resources get folders
+```
+
+Bind portable datasource inputs to verified instance UIDs and generate API
+resource manifests into a private directory outside the checkout:
+
+```sh
+python3 observability/grafana/export_resources.py \
+  --metrics-uid METRICS_UID --logs-uid LOGS_UID --postgres-uid POSTGRES_UID \
+  --folder-uid FOLDER_UID --namespace STACK_NAMESPACE --output /private/tmp/vodhunter-dashboards
+gcx --context vodhunter-production resources validate -p /private/tmp/vodhunter-dashboards
+gcx --context vodhunter-production resources push -p /private/tmp/vodhunter-dashboards --dry-run
+gcx --context vodhunter-production resources push -p /private/tmp/vodhunter-dashboards
+```
+
+Export the original dashboards before replacing them and render snapshots after
+upload. On this stack the application datasources are `grafanacloud-prom` and
+`grafanacloud-logs`; billing metrics and alert-state history do not contain
+VodHunter application telemetry. Always rediscover UIDs before writing to a
+different stack. SQL inventory panels represent current state; search cohorts
+respect the time picker. Missing latency samples stay unknown.
+
+## Browser experience and rollout
+
+The public frontend uses Grafana Faro for web vitals, error stack locations,
+anonymous session lifecycle, and explicit search events. The registered
+`vodhunter-public` collector accepts the canonical `https://vodhunter.com`
+origin. The collector address is public and carries no administrative token.
+Production Compose embeds it at build time; standalone/local builds leave
+collection off unless configured. Development mode, Do Not Track, Global
+Privacy Control, or `VITE_FARO_URL=disabled` also disable collection.
+
+The telemetry boundary removes query strings, fragments, dynamic page IDs,
+arbitrary input, user metadata, console logs, network traces, exception text,
+external stack URLs, and web-vital DOM attribution. It retains finite outcomes,
+stages, failure categories, random attempt IDs, server search IDs, and timings.
+No session replay or tracing instrumentation is installed. Session collection
+uses the SDK's normal nonpersistent mode and 100% sampling, subject to browser
+blocking and privacy choices; observed sessions are not unique people.
+
+Events include page ready/streamer-list failure, submit attempts, client
+validation blocks, job acceptance, submission/poll failures, stage changes,
+terminal results committed to the UI, resume/shared-link journeys, visibility
+changes while waiting, result-source/segment clicks, history opens, date-filter
+usage, and clipboard failures. Result clicks indicate engagement, not Twitch
+playback or verified correctness. A hidden view does not establish abandonment.
+Accepted jobs that stop polling can still finish on the backend.
+
+Faro requests are bounded and best-effort; search behavior is independent of
+collector availability. Set `SOURCE_COMMIT` to the actual deployed SHA for
+release comparisons; a build with no SHA is explicitly `unversioned`.
+
+Backend additions expose `vodhunter_http_requests_total`,
+`vodhunter_http_request_duration_seconds`, `vodhunter_search_submissions_total`,
+and `vodhunter_search_queue_wait_seconds`. HTTP polling counts as requests,
+never submissions; routes use templates, not raw job paths. Queue measurement
+includes job creation through executor start. Edge Nginx rejections occur
+before the API and are not included in API submission counters. Existing
+outcome counters initialize to zero, while unsampled latency remains unknown.
+
+Merge and deploy the instrumentation through main/Coolify before expecting new
+Faro events or backend metrics. The live SQL-based dashboard improvements do
+not require that deployment. Then exercise match, no-match, validation error,
+rejected submit, failed status fetch, reload/shared result, and result clicks;
+verify sanitized collector payloads and actual Loki fields before building
+custom funnel queries. Grafana's native Frontend views are ready to consume
+the SDK measurements. All essential journey events use the same attempt ID,
+and resumed/shared journeys have separate entry kinds.
+
+Follow-on work: independently deployed VPS/container/database exporters,
+external synthetic probes, worker heartbeat and discovery-to-searchable lag,
+retention capacity history, exact frontend funnel/cohort queries, and baseline
+SLOs/notification rules. API scrape up is not a substitute for a public probe;
+quiet logs are not heartbeats. Choose notification destinations and traffic
+thresholds before enabling alerts.
 
 ## Grafana Cloud values
 

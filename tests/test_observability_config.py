@@ -88,9 +88,11 @@ def test_dashboard_suite_exports_ordered_valid_json() -> None:
         "00-vodhunter-overview.json": "vodhunter-overview",
         "10-search-performance.json": "vodhunter-search-performance",
         "10-search-quality.json": "vodhunter-search-quality",
+        "12-search-reliability.json": "vodhunter-search-reliability",
         "20-streamers-vods.json": "vodhunter-streamers-vods",
         "20-ingestion-operations.json": "vodhunter-ingestion-operations",
         "30-index-retention.json": "vodhunter-index-retention",
+        "40-monitoring-health.json": "vodhunter-monitoring-health",
     }
 
     exports = {
@@ -102,7 +104,7 @@ def test_dashboard_suite_exports_ordered_valid_json() -> None:
     for filename, uid in expected.items():
         dashboard = exports[filename]
         assert dashboard["uid"] == uid
-        assert dashboard["title"].split(" - ", 1)[0] in {"00", "10", "20", "30"}
+        assert dashboard["title"].split(" - ", 1)[0] in {"00", "10", "12", "20", "30", "40"}
         assert "vodhunter" in dashboard["tags"]
         assert dashboard["links"][0]["tags"] == ["vodhunter"]
         assert dashboard["panels"]
@@ -138,3 +140,20 @@ def test_generated_dashboard_exports_are_current() -> None:
     )
 
     assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_dashboard_filters_preserve_sql_quoting_for_all_and_single_values() -> None:
+    # Grafana bypasses formatters for a custom All value. A regex All value
+    # would turn sqlstring interpolation into invalid SQL (IN (.*)).
+    for path in (ROOT / "observability/grafana").glob("*.json"):
+        dashboard = json.loads(path.read_text())
+        for variable in dashboard["templating"]["list"]:
+            if variable["name"] == "streamer":
+                assert not variable.get("allValue")
+        for panel in dashboard["panels"]:
+            for target in panel.get("targets", []):
+                query = target.get("rawSql", "")
+                if "${streamer:sqlstring}" in query:
+                    assert "streamer IN (${streamer:sqlstring})" in query
+                if panel["datasource"]["type"] == "loki":
+                    assert "$__rate_interval" not in target.get("expr", "")

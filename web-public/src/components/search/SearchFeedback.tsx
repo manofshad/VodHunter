@@ -10,6 +10,7 @@ interface SearchFeedbackProps {
   activeSearchStage: string | null;
   result: SearchResponse | null;
   lastSubmittedUrl: string;
+  onResultClick?: (linkKind: "source" | "segment") => void;
 }
 
 export function SearchFeedback({
@@ -18,6 +19,7 @@ export function SearchFeedback({
   activeSearchStage,
   result,
   lastSubmittedUrl,
+  onResultClick,
 }: SearchFeedbackProps) {
   if (!requestError && !submitting && !result) {
     return null;
@@ -45,7 +47,7 @@ export function SearchFeedback({
         </div>
       ) : null}
 
-      {!submitting && result?.found ? <SearchResultCard result={result} lastSubmittedUrl={lastSubmittedUrl} /> : null}
+      {!submitting && result?.found ? <SearchResultCard result={result} lastSubmittedUrl={lastSubmittedUrl} onResultClick={onResultClick} /> : null}
 
       {!submitting && result && !result.found ? (
         <div className="mx-auto max-w-4xl rounded-xl border border-gray-700 bg-gray-900 p-6 text-center shadow-lg">

@@ -4,6 +4,10 @@ WORKDIR /app
 
 ARG VITE_API_BASE
 ENV VITE_API_BASE=${VITE_API_BASE}
+ARG VITE_FARO_URL
+ARG VITE_RELEASE=unversioned
+ENV VITE_FARO_URL=${VITE_FARO_URL}
+ENV VITE_RELEASE=${VITE_RELEASE}
 
 COPY web-public/package.json web-public/package-lock.json ./web-public/
 

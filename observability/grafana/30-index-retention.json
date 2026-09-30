@@ -33,6 +33,12 @@
       "targetBlank": false,
       "title": "VodHunter dashboards",
       "type": "dashboards"
+    },
+    {
+      "title": "Browser experience",
+      "type": "link",
+      "url": "/a/grafana-kowalski-app",
+      "targetBlank": false
     }
   ],
   "panels": [
@@ -54,7 +60,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COALESCE(SUM(estimated_embeddings), 0)::double precision AS value FROM grafana_index_partitions WHERE ('${streamer}' = '.*' OR streamer = '${streamer}')",
+          "rawSql": "SELECT COALESCE(SUM(estimated_embeddings), 0)::double precision AS value FROM grafana_index_partitions WHERE streamer IN (${streamer:sqlstring})",
           "refId": "A",
           "sql": {
             "columns": [],
@@ -64,13 +70,18 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "noValue": "No observations",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
         },
         "overrides": []
       },
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -102,7 +113,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COALESCE(SUM(total_bytes), 0)::double precision AS value FROM grafana_index_partitions WHERE ('${streamer}' = '.*' OR streamer = '${streamer}')",
+          "rawSql": "SELECT COALESCE(SUM(total_bytes), 0)::double precision AS value FROM grafana_index_partitions WHERE streamer IN (${streamer:sqlstring})",
           "refId": "A",
           "sql": {
             "columns": [],
@@ -112,13 +123,18 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "bytes"
+          "unit": "bytes",
+          "noValue": "No observations",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
         },
         "overrides": []
       },
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -150,7 +166,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_index_partitions WHERE ('${streamer}' = '.*' OR streamer = '${streamer}') AND NOT has_hnsw_index",
+          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_index_partitions WHERE streamer IN (${streamer:sqlstring}) AND NOT has_hnsw_index",
           "refId": "A",
           "sql": {
             "columns": [],
@@ -160,13 +176,18 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "noValue": "No observations",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
         },
         "overrides": []
       },
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -198,7 +219,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_retention_inventory WHERE ('${streamer}' = '.*' OR streamer = '${streamer}') AND age_days >= $retention_days - 7 AND age_days < $retention_days AND status <> 'indexing' AND NOT has_active_cursor",
+          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_retention_inventory WHERE streamer IN (${streamer:sqlstring}) AND age_days >= $retention_days - 7 AND age_days < $retention_days AND status <> 'indexing' AND NOT has_active_cursor",
           "refId": "A",
           "sql": {
             "columns": [],
@@ -208,13 +229,18 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "noValue": "No observations",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
         },
         "overrides": []
       },
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -246,7 +272,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_retention_inventory WHERE ('${streamer}' = '.*' OR streamer = '${streamer}') AND age_days >= $retention_days AND (status = 'indexing' OR has_active_cursor)",
+          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_retention_inventory WHERE streamer IN (${streamer:sqlstring}) AND age_days >= $retention_days AND (status = 'indexing' OR has_active_cursor)",
           "refId": "A",
           "sql": {
             "columns": [],
@@ -256,13 +282,18 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "noValue": "No observations",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
         },
         "overrides": []
       },
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -294,7 +325,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT streamer AS \"Streamer\", partition_name AS \"Partition\",\n                   estimated_embeddings AS \"Estimated embeddings\", total_bytes AS \"Storage bytes\",\n                   has_hnsw_index AS \"HNSW ready\", embedding_dim AS \"Dimensions\",\n                   model_version AS \"Model\", preprocessing_version AS \"Preprocessing\",\n                   metadata_updated_at AS \"Metadata updated\"\n            FROM grafana_index_partitions WHERE ('${streamer}' = '.*' OR streamer = '${streamer}')\n            ORDER BY streamer",
+          "rawSql": "SELECT streamer AS \"Streamer\", partition_name AS \"Partition\",\n                   estimated_embeddings AS \"Estimated embeddings\", total_bytes AS \"Storage bytes\",\n                   has_hnsw_index AS \"HNSW ready\", embedding_dim AS \"Dimensions\",\n                   model_version AS \"Model\", preprocessing_version AS \"Preprocessing\",\n                   metadata_updated_at AS \"Metadata updated\"\n            FROM grafana_index_partitions WHERE streamer IN (${streamer:sqlstring})\n            ORDER BY streamer",
           "refId": "A",
           "sql": {
             "columns": [],
@@ -304,9 +335,26 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "noValue": "\u2014",
+          "color": {
+            "mode": "palette-classic"
+          }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^(.*[ _]ID|search_id|Twitch VOD)$"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "cellHeight": "sm",
@@ -332,7 +380,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT status AS metric, COUNT(*)::double precision AS value FROM grafana_vod_inventory WHERE ('${streamer}' = '.*' OR streamer = '${streamer}') GROUP BY status ORDER BY status",
+          "rawSql": "SELECT status AS metric, COUNT(*)::double precision AS value FROM grafana_vod_inventory WHERE streamer IN (${streamer:sqlstring}) GROUP BY status ORDER BY status",
           "refId": "A",
           "sql": {
             "columns": [],
@@ -342,7 +390,11 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "noValue": "No observations",
+          "color": {
+            "mode": "palette-classic"
+          }
         },
         "overrides": []
       },
@@ -385,7 +437,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT check_name AS \"Check\", affected AS \"Affected\"\n            FROM (\n                SELECT 'Indexing VOD without cursor' AS check_name, COUNT(*)::BIGINT AS affected\n                FROM grafana_vod_inventory WHERE ('${streamer}' = '.*' OR streamer = '${streamer}') AND status = 'indexing' AND last_ingest_update IS NULL\n                UNION ALL\n                SELECT 'Stalled ingest cursor', COUNT(*)::BIGINT\n                FROM grafana_vod_inventory WHERE ('${streamer}' = '.*' OR streamer = '${streamer}') AND operational_status = 'stalled'\n                UNION ALL\n                SELECT 'Creator partition missing HNSW', COUNT(*)::BIGINT\n                FROM grafana_index_partitions WHERE ('${streamer}' = '.*' OR streamer = '${streamer}') AND NOT has_hnsw_index\n            ) AS checks ORDER BY check_name",
+          "rawSql": "SELECT check_name AS \"Check\", affected AS \"Affected\"\n            FROM (\n                SELECT 'Indexing VOD without cursor' AS check_name, COUNT(*)::BIGINT AS affected\n                FROM grafana_vod_inventory WHERE streamer IN (${streamer:sqlstring}) AND status = 'indexing' AND last_ingest_update IS NULL\n                UNION ALL\n                SELECT 'Stalled ingest cursor', COUNT(*)::BIGINT\n                FROM grafana_vod_inventory WHERE streamer IN (${streamer:sqlstring}) AND operational_status = 'stalled'\n                UNION ALL\n                SELECT 'Creator partition missing HNSW', COUNT(*)::BIGINT\n                FROM grafana_index_partitions WHERE streamer IN (${streamer:sqlstring}) AND NOT has_hnsw_index\n            ) AS checks ORDER BY check_name",
           "refId": "A",
           "sql": {
             "columns": [],
@@ -395,9 +447,26 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "noValue": "\u2014",
+          "color": {
+            "mode": "palette-classic"
+          }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^(.*[ _]ID|search_id|Twitch VOD)$"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "cellHeight": "sm",
@@ -423,7 +492,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT streamer AS \"Streamer\", title AS \"VOD\", vod_url AS \"VOD URL\",\n                   streamed_at AS \"Streamed at\", ROUND(age_days::numeric, 1) AS \"Age days\",\n                   ROUND(($retention_days - age_days)::numeric, 1) AS \"Days remaining\", status AS \"Status\"\n            FROM grafana_retention_inventory\n            WHERE ('${streamer}' = '.*' OR streamer = '${streamer}') AND age_days >= $retention_days - 7\n              AND status <> 'indexing' AND NOT has_active_cursor\n            ORDER BY age_days DESC LIMIT 200",
+          "rawSql": "SELECT streamer AS \"Streamer\", title AS \"VOD\", vod_url AS \"VOD URL\",\n                   streamed_at AS \"Streamed at\", ROUND(age_days::numeric, 1) AS \"Age days\",\n                   ROUND(($retention_days - age_days)::numeric, 1) AS \"Days remaining\", status AS \"Status\"\n            FROM grafana_retention_inventory\n            WHERE streamer IN (${streamer:sqlstring}) AND age_days >= $retention_days - 7\n              AND status <> 'indexing' AND NOT has_active_cursor\n            ORDER BY age_days DESC LIMIT 200",
           "refId": "A",
           "sql": {
             "columns": [],
@@ -433,9 +502,26 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "noValue": "\u2014",
+          "color": {
+            "mode": "palette-classic"
+          }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^(.*[ _]ID|search_id|Twitch VOD)$"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "cellHeight": "sm",
@@ -465,7 +551,11 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "noValue": "No observations",
+          "color": {
+            "mode": "palette-classic"
+          }
         },
         "overrides": []
       },
@@ -476,12 +566,12 @@
         "showLabels": false,
         "showTime": true,
         "sortOrder": "Descending",
-        "wrapLines": false
+        "wrapLines": true
       },
       "id": 10
     }
   ],
-  "refresh": "30s",
+  "refresh": "1m",
   "schemaVersion": 39,
   "tags": [
     "vodhunter",
@@ -491,7 +581,7 @@
   "templating": {
     "list": [
       {
-        "allValue": ".*",
+        "allValue": "",
         "current": {
           "selected": true,
           "text": "All",
@@ -532,7 +622,7 @@
           }
         ],
         "query": "30",
-        "skipUrlSync": false,
+        "skipUrlSync": true,
         "type": "constant"
       }
     ]

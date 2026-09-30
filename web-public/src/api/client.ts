@@ -9,11 +9,17 @@ function getApiBase(): string {
   return API_BASE;
 }
 
+export class ApiError extends Error {
+  constructor(message: string, public status: number, public code: string) {
+    super(message);
+  }
+}
+
 async function parseJson<T>(resp: Response): Promise<T> {
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok) {
     const message = data?.detail?.message || `Request failed (${resp.status})`;
-    throw new Error(message);
+    throw new ApiError(message, resp.status, data?.detail?.code || "unknown");
   }
   return data as T;
 }

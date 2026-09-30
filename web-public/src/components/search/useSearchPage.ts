@@ -6,6 +6,7 @@ import { createSearchHistoryEntry, SearchHistoryEntry } from "./searchHistory";
 import { isSupportedTikTokUrl } from "./searchUtils";
 import { parseSharedSearchLocation, sharedSearchPath } from "./sharedSearch";
 import { useSearchHistory } from "./useSearchHistory";
+import { journeyAttributes, newJourney, requestFailureDetails, trackEvent, type SearchJourney } from "../../telemetry";
 
 const ACTIVE_SEARCH_STORAGE_KEY = "vodhunter-public-active-search";
 
@@ -73,6 +74,7 @@ export interface SearchPageState {
   onSelectStreamer: (value: string) => void;
   onDateRangeChange: (streamedFrom: string, streamedTo: string) => void;
   onClearHistory: () => void;
+  onResultClick: (linkKind: "source" | "segment") => void;
 }
 
 export function useSearchPage(): SearchPageState {
@@ -92,6 +94,42 @@ export function useSearchPage(): SearchPageState {
   const [lastSubmittedUrl, setLastSubmittedUrl] = useState("");
   const streamerTriggerRef = useRef<HTMLButtonElement>(null);
   const { entries: historyEntries, addEntry, clearEntries: onClearHistory } = useSearchHistory();
+  const journey = useRef<SearchJourney | null>(null);
+  const resultJourney = useRef<SearchJourney | null>(null);
+  const terminalEvent = useRef<Record<string, unknown> | null>(null);
+  const terminalHandled = useRef(false);
+  const pageReadyRecorded = useRef(false);
+  const lastObservedStage = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!loadingStreamers && !pageReadyRecorded.current) {
+      pageReadyRecorded.current = true;
+      trackEvent(streamerLoadError ? "streamer_list_failed" : "search_page_ready");
+    }
+  }, [loadingStreamers, streamerLoadError]);
+
+  useEffect(() => {
+    if (activeSearchStage && activeSearchStage !== lastObservedStage.current && journey.current) {
+      lastObservedStage.current = activeSearchStage;
+      trackEvent("search_stage_changed", { ...journeyAttributes(journey.current), stage: activeSearchStage });
+    }
+  }, [activeSearchStage]);
+
+  useEffect(() => {
+    if (!submitting && terminalEvent.current && journey.current) {
+      trackEvent("search_result_visible", { ...journeyAttributes(journey.current), ...terminalEvent.current });
+      terminalEvent.current = null;
+    }
+  }, [submitting, result, requestError]);
+
+  useEffect(() => {
+    if (!submitting) return;
+    const observeVisibility = () => {
+      if (journey.current) trackEvent(document.hidden ? "search_view_hidden" : "search_view_returned", journeyAttributes(journey.current));
+    };
+    document.addEventListener("visibilitychange", observeVisibility);
+    return () => document.removeEventListener("visibilitychange", observeVisibility);
+  }, [submitting]);
 
   const hasUrl = tiktokUrl.trim().length > 0;
   const searchButtonLabel = useMemo(() => (submitting ? "Searching..." : "Search"), [submitting]);
@@ -145,6 +183,10 @@ export function useSearchPage(): SearchPageState {
       }
 
       setActiveSearchId(sharedSearch.searchId);
+      if (!journey.current) {
+        journey.current = newJourney("shared", sharedSearch.searchId);
+        trackEvent("search_resumed", journeyAttributes(journey.current));
+      }
       setActiveSearchStage("validating");
       setSubmitting(true);
       return;
@@ -156,6 +198,10 @@ export function useSearchPage(): SearchPageState {
     }
 
     setActiveSearchId(activeSearch.searchId);
+    if (!journey.current) {
+      journey.current = newJourney("resumed", activeSearch.searchId);
+      trackEvent("search_resumed", journeyAttributes(journey.current));
+    }
     setActiveSearchStage("validating");
     setLastSubmittedUrl(activeSearch.tiktokUrl);
     setTiktokUrl(activeSearch.tiktokUrl);
@@ -170,8 +216,11 @@ export function useSearchPage(): SearchPageState {
     }
 
     let cancelled = false;
+    let inFlight = false;
 
     const poll = async () => {
+      if (inFlight || cancelled || terminalHandled.current) return;
+      inFlight = true;
       try {
         const job = await getSearchJob(activeSearchId);
         if (cancelled) {
@@ -182,11 +231,16 @@ export function useSearchPage(): SearchPageState {
         if (cancelled) {
           return;
         }
+        terminalHandled.current = true;
+        terminalEvent.current = { outcome: "error", reason: "poll_failed" };
+        if (journey.current) trackEvent("search_poll_failed", { ...journeyAttributes(journey.current), ...requestFailureDetails(err) });
         setSubmitting(false);
         setActiveSearchId(null);
         setActiveSearchStage(null);
         clearActiveSearch();
         setRequestError(err instanceof Error ? err.message : "Search failed");
+      } finally {
+        inFlight = false;
       }
     };
 
@@ -217,11 +271,14 @@ export function useSearchPage(): SearchPageState {
     }
 
     setSubmitting(false);
+    terminalHandled.current = true;
+    terminalEvent.current = { outcome: job.status === "completed" ? (job.result?.found ? "match" : "no_match") : "error", error_code: job.error?.code ?? "unknown" };
     setActiveSearchId(null);
     setActiveSearchStage(null);
     clearActiveSearch();
 
     if (job.status === "completed") {
+      resultJourney.current = journey.current;
       setResult(job.result);
       setRequestError(null);
       if (job.result) {
@@ -243,17 +300,26 @@ export function useSearchPage(): SearchPageState {
 
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (submitting) return;
+    journey.current = newJourney("new");
+    terminalHandled.current = false;
+    terminalEvent.current = null;
+    lastObservedStage.current = null;
+    trackEvent("search_attempted", { ...journeyAttributes(journey.current), has_date_filter: Boolean(streamedFrom || streamedTo) });
     if (!hasUrl) {
+      trackEvent("search_validation_blocked", { ...journeyAttributes(journey.current), reason: "empty_input" });
       return;
     }
 
     const submittedUrl = tiktokUrl.trim();
     if (!isSupportedTikTokUrl(submittedUrl)) {
+      trackEvent("search_validation_blocked", { ...journeyAttributes(journey.current), reason: "unsupported_url" });
       setRequestError("Paste a TikTok video link, not a profile or other TikTok page.");
       return;
     }
 
     if (!streamer.trim()) {
+      trackEvent("search_validation_blocked", { ...journeyAttributes(journey.current), reason: "missing_streamer" });
       setStreamerError("Select a streamer to run the search.");
       streamerTriggerRef.current?.focus();
       return;
@@ -269,6 +335,7 @@ export function useSearchPage(): SearchPageState {
       setStreamerError(null);
       setRequestError(null);
       setResult(null);
+      resultJourney.current = null;
       setLastSubmittedUrl(submittedUrl);
       const created = await createSearchJob({
         tiktokUrl: submittedUrl,
@@ -276,11 +343,16 @@ export function useSearchPage(): SearchPageState {
         streamedFrom: submittedStreamedFrom || undefined,
         streamedTo: submittedStreamedTo || undefined,
       });
+      journey.current.search_id = created.search_id;
+      trackEvent("search_job_accepted", journeyAttributes(journey.current));
       persistActiveSearch(created.search_id, submittedUrl, submittedStreamedFrom, submittedStreamedTo);
       window.history.replaceState(null, "", sharedSearchPath(created.search_id));
       setActiveSearchId(created.search_id);
       setActiveSearchStage(created.stage);
     } catch (err) {
+      terminalHandled.current = true;
+      terminalEvent.current = { outcome: "error", ...requestFailureDetails(err) };
+      trackEvent("search_submit_failed", { ...journeyAttributes(journey.current), ...requestFailureDetails(err) });
       setActiveSearchStage(null);
       setRequestError(err instanceof Error ? err.message : "Search failed");
       setSubmitting(false);
@@ -299,6 +371,7 @@ export function useSearchPage(): SearchPageState {
   };
 
   const onDateRangeChange = (nextFrom: string, nextTo: string) => {
+    trackEvent("date_filter_used", { has_date_filter: Boolean(nextFrom || nextTo) });
     setStreamedFrom(nextFrom);
     setStreamedTo(nextTo);
     setRequestError(null);
@@ -310,6 +383,7 @@ export function useSearchPage(): SearchPageState {
       setTiktokUrl(text);
       setStreamerError(null);
     } catch {
+      trackEvent("clipboard_failed", { reason: "clipboard_denied" });
       setRequestError("Clipboard access was blocked. Paste the TikTok URL manually.");
     }
   };
@@ -338,5 +412,8 @@ export function useSearchPage(): SearchPageState {
     onSelectStreamer,
     onDateRangeChange,
     onClearHistory,
+    onResultClick: (link_kind) => {
+      if (resultJourney.current) trackEvent("result_vod_clicked", { ...journeyAttributes(resultJourney.current), link_kind });
+    },
   };
 }

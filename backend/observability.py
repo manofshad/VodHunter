@@ -47,6 +47,49 @@ SEARCH_FAILURES_TOTAL = Counter(
     labelnames=("error_code",),
 )
 
+# Initialize bounded outcomes so a lack of errors is zero, rather than a
+# missing series. Histogram quantiles still remain unknown without samples.
+for _outcome in _SEARCH_OUTCOMES:
+    SEARCHES_TOTAL.labels(outcome=_outcome).inc(0)
+    SEARCH_DURATION_SECONDS.labels(outcome=_outcome)
+
+HTTP_REQUESTS_TOTAL = Counter(
+    "vodhunter_http_requests_total", "Public API requests, including status polling.",
+    labelnames=("route", "method", "status_class"),
+)
+HTTP_DURATION_SECONDS = Histogram(
+    "vodhunter_http_request_duration_seconds", "Public API response duration.",
+    labelnames=("route", "method"), buckets=_STAGE_BUCKETS,
+)
+SEARCH_SUBMISSIONS_TOTAL = Counter(
+    "vodhunter_search_submissions_total", "Search creation responses by acceptance category.",
+    labelnames=("result",),
+)
+SEARCH_QUEUE_WAIT_SECONDS = Histogram(
+    "vodhunter_search_queue_wait_seconds", "Search creation through executor start.",
+    buckets=_TOTAL_BUCKETS,
+)
+for _submission_result in ("accepted", "invalid", "rate_limited", "server_error", "rejected"):
+    SEARCH_SUBMISSIONS_TOTAL.labels(result=_submission_result).inc(0)
+
+
+def observe_http_request(route: str, method: str, status: int, elapsed: float) -> None:
+    """Use route templates and a finite method vocabulary, never raw paths."""
+    normalized_method = method if method in {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"} else "OTHER"
+    HTTP_REQUESTS_TOTAL.labels(route=route, method=normalized_method, status_class=f"{status // 100}xx").inc()
+    HTTP_DURATION_SECONDS.labels(route=route, method=normalized_method).observe(max(0, elapsed))
+    if route == "/api/search/clip" and method == "POST":
+        result = (
+            "accepted" if status == 202 else "rate_limited" if status == 429
+            else "server_error" if status >= 500 else "invalid" if status in {400, 422}
+            else "rejected"
+        )
+        SEARCH_SUBMISSIONS_TOTAL.labels(result=result).inc()
+
+
+def observe_queue_wait(elapsed: float) -> None:
+    SEARCH_QUEUE_WAIT_SECONDS.observe(max(0, elapsed))
+
 
 def _build_event_logger() -> logging.Logger:
     """Create a logger whose message is a raw JSON line.

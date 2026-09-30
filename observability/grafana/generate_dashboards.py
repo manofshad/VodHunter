@@ -84,14 +84,18 @@ def panel(
         "datasource": DATASOURCES[datasource],
         "gridPos": {"h": h, "w": w, "x": x, "y": y},
         "targets": targets,
-        "fieldConfig": {"defaults": {"unit": unit}, "overrides": []},
+        "fieldConfig": {"defaults": {"unit": unit, "noValue": "No observations", "color": {"mode": "palette-classic"}}, "overrides": []},
     }
     if description:
         result["description"] = description
     if panel_type == "stat":
+        result["fieldConfig"]["defaults"]["color"] = {"mode": "fixed", "fixedColor": "blue"}
+        if datasource == "metrics":
+            for target in targets:
+                target["instant"] = True
         result["options"] = {
             "colorMode": "value",
-            "graphMode": "area",
+            "graphMode": "none",
             "justifyMode": "auto",
             "orientation": "auto",
             "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False},
@@ -99,7 +103,7 @@ def panel(
         }
     elif panel_type == "timeseries":
         result["fieldConfig"]["defaults"]["custom"] = {
-            "drawStyle": "line",
+            "drawStyle": "bars" if datasource == "postgres" else "line",
             "fillOpacity": 12,
             "lineInterpolation": "linear",
             "showPoints": "never",
@@ -117,10 +121,15 @@ def panel(
             "showLabels": False,
             "showTime": True,
             "sortOrder": "Descending",
-            "wrapLines": False,
+            "wrapLines": True,
         }
     elif panel_type == "table":
+        result["fieldConfig"]["defaults"]["noValue"] = "—"
         result["options"] = {"cellHeight": "sm", "showHeader": True}
+        result["fieldConfig"]["overrides"].append({
+            "matcher": {"id": "byRegexp", "options": "^(.*[ _]ID|search_id|Twitch VOD)$"},
+            "properties": [{"id": "unit", "value": "none"}],
+        })
     elif panel_type == "piechart":
         result["options"] = {
             "displayLabels": ["name", "percent"],
@@ -150,7 +159,7 @@ def panel(
 
 def streamer_variable() -> dict[str, Any]:
     return {
-        "allValue": ".*",
+        "allValue": "",
         "current": {"selected": True, "text": "All", "value": "$__all"},
         "datasource": DATASOURCES["postgres"],
         "definition": "SELECT streamer AS __text, streamer AS __value FROM grafana_streamer_summary ORDER BY streamer",
@@ -171,7 +180,7 @@ def streamer_variable() -> dict[str, Any]:
 
 def status_variable() -> dict[str, Any]:
     return {
-        "allValue": "%",
+        "allValue": "'%'",
         "current": {"selected": True, "text": "All", "value": "$__all"},
         "hide": 0,
         "includeAll": True,
@@ -193,7 +202,7 @@ def dashboard(
     panels: list[dict[str, Any]],
     tags: list[str],
     variables: list[dict[str, Any]] | None = None,
-    time_from: str = "now-24h",
+    time_from: str = "now-7d",
 ) -> dict[str, Any]:
     for panel_id, item in enumerate(panels, start=1):
         item["id"] = panel_id
@@ -213,10 +222,11 @@ def dashboard(
                 "targetBlank": False,
                 "title": "VodHunter dashboards",
                 "type": "dashboards",
-            }
+            },
+            {"title": "Browser experience", "type": "link", "url": "/a/grafana-kowalski-app", "targetBlank": False},
         ],
         "panels": panels,
-        "refresh": "30s",
+        "refresh": "1m",
         "schemaVersion": 39,
         "tags": ["vodhunter", *tags],
         "templating": {"list": variables or []},
@@ -230,33 +240,29 @@ def dashboard(
 
 
 def build_overview() -> dict[str, Any]:
+    where = "$__timeFilter(created_at)"
     panels = [
-        panel("stat", "Searches", "metrics", [prom("sum(increase(vodhunter_searches_total[$__range]))")], x=0, y=0, w=4, h=5),
-        panel("stat", "Match rate", "metrics", [prom('sum(increase(vodhunter_searches_total{outcome="match"}[$__range])) / clamp_min(sum(increase(vodhunter_searches_total{outcome=~"match|no_match"}[$__range])), 1)')], x=4, y=0, w=4, h=5, unit="percentunit"),
-        panel("stat", "Search latency p95", "metrics", [prom("histogram_quantile(0.95, sum by (le) (rate(vodhunter_search_duration_seconds_bucket[$__rate_interval])))")], x=8, y=0, w=4, h=5, unit="s"),
-        panel("stat", "Searchable streamers", "postgres", [sql("SELECT COUNT(*)::double precision AS value FROM grafana_streamer_summary WHERE searchable_vods > 0")], x=12, y=0, w=4, h=5),
-        panel("stat", "Active ingests", "postgres", [sql("SELECT COALESCE(SUM(active_vods), 0)::double precision AS value FROM grafana_streamer_summary")], x=16, y=0, w=4, h=5),
-        panel("stat", "Stalled ingests", "postgres", [sql("SELECT COALESCE(SUM(stalled_vods), 0)::double precision AS value FROM grafana_streamer_summary")], x=20, y=0, w=4, h=5, description="Indexing VODs whose cursor has not updated for ten minutes, or which have no cursor."),
-        panel("timeseries", "Search outcomes", "metrics", [prom("sum by (outcome) (rate(vodhunter_searches_total[$__rate_interval]))", "{{outcome}}")], x=0, y=5, w=12, h=8, unit="reqps"),
-        panel("table", "Streamer inventory", "postgres", [sql("""
-            SELECT streamer AS "Streamer", total_vods AS "VODs",
-                   searchable_vods AS "Complete", active_vods AS "Active",
-                   stalled_vods AS "Stalled", reindex_requested_vods AS "Reindex",
-                   newest_vod_at AS "Newest VOD", last_ingest_update AS "Last ingest activity"
-            FROM grafana_streamer_summary
-            ORDER BY stalled_vods DESC, active_vods DESC, streamer
-        """)], x=12, y=5, w=12, h=8),
-        panel("logs", "Recent errors across VodHunter", "logs", [loki('{service_name=~"vodhunter-api|vodhunter-worker|vodhunter-retention"} |~ "(?i)error|failed|exception"')], x=0, y=13, w=24, h=9),
+        panel("stat", "Accepted searches", "postgres", [sql(f"SELECT COUNT(*)::double precision AS value FROM grafana_search_quality WHERE {where}")], x=0, y=0, w=4, h=5, description="Durable accepted jobs in the selected range. Browser validation and edge rate limits are excluded."),
+        panel("stat", "Technical completion", "postgres", [sql(f"SELECT COUNT(*) FILTER (WHERE job_status = 'completed')::double precision / NULLIF(COUNT(*) FILTER (WHERE job_status IN ('completed', 'failed')), 0) AS value FROM grafana_search_quality WHERE {where}")], x=4, y=0, w=4, h=5, unit="percentunit", description="Completed / terminal jobs. No-match is a technical completion; pending jobs appear separately."),
+        panel("stat", "Accepted-to-finish p95", "postgres", [sql(f"SELECT percentile_cont(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM finished_at-created_at)) AS value FROM grafana_search_quality WHERE {where} AND finished_at IS NOT NULL")], x=8, y=0, w=4, h=5, unit="s", description="Durable server wall-clock elapsed time, including queue wait. This does not measure browser result rendering."),
+        panel("stat", "Failed searches", "postgres", [sql(f"SELECT COUNT(*)::double precision AS value FROM grafana_search_quality WHERE {where} AND job_status = 'failed'")], x=12, y=0, w=4, h=5),
+        panel("stat", "Match rate", "postgres", [sql(f"SELECT COUNT(*) FILTER (WHERE outcome = 'match')::double precision / NULLIF(COUNT(*) FILTER (WHERE outcome IN ('match', 'no_match')), 0) AS value FROM grafana_search_quality WHERE {where}")], x=16, y=0, w=4, h=5, unit="percentunit", description="Matches / completed searches. Confidence and match rate do not prove correctness."),
+        panel("stat", "Pending searches now", "postgres", [sql("SELECT COUNT(*)::double precision AS value FROM grafana_search_quality WHERE job_status IN ('queued','running')")], x=20, y=0, w=4, h=5, description="Current persisted pending jobs, independent of the selected historical range."),
+        panel("timeseries", "Accepted search outcomes", "postgres", [sql(f"SELECT $__timeGroupAlias(created_at, $__interval), outcome AS metric, COUNT(*)::double precision AS value FROM grafana_search_quality WHERE {where} GROUP BY 1,outcome ORDER BY 1", time_series=True)], x=0, y=5, w=12, h=8),
+        panel("table", "Current content health", "postgres", [sql("SELECT streamer AS \"Streamer\", searchable_vods AS \"Searchable VODs\", active_vods AS \"Active\", stalled_vods AS \"Stalled\", ROUND(EXTRACT(EPOCH FROM NOW()-newest_vod_at)::numeric / 86400, 1) AS \"Newest age (d)\" FROM grafana_streamer_summary ORDER BY stalled_vods DESC, streamer")], x=12, y=5, w=12, h=8, description="Current state, not historical ingest throughput. An offline creator naturally has older content."),
+        panel("logs", "Recent operational errors", "logs", [loki('{service_name=~"vodhunter-api|vodhunter-worker|vodhunter-retention", environment="production"} |~ "(?i)error|failed|exception"')], x=0, y=13, w=24, h=9, description="No matching lines means no observed errors in this window, provided logs are arriving. Open Monitoring Health to check collection."),
     ]
-    return dashboard(title="00 - VodHunter Overview", uid="vodhunter-overview", inputs=["DS_METRICS", "DS_LOGS", "DS_POSTGRES"], panels=panels, tags=["overview"])
+    panels[3]["fieldConfig"]["defaults"]["color"] = {"mode": "thresholds"}
+    panels[3]["fieldConfig"]["defaults"]["thresholds"] = {"mode": "absolute", "steps": [{"color": "green", "value": None}, {"color": "red", "value": 1}]}
+    return dashboard(title="00 - User Experience Overview", uid="vodhunter-overview", inputs=["DS_LOGS", "DS_POSTGRES"], panels=panels, tags=["overview"])
 
 
 def build_search_performance() -> dict[str, Any]:
     panels = [
-        panel("stat", "Searches", "metrics", [prom("sum(increase(vodhunter_searches_total[$__range]))")], x=0, y=0, w=6, h=5),
+        panel("stat", "Observed terminal searches", "metrics", [prom("sum(increase(vodhunter_searches_total[$__range]))")], x=0, y=0, w=6, h=5, description="Prometheus estimates from scraped process counters; resets and the first observed series can affect counts. Use Overview for exact durable accepted-job counts."),
         panel("stat", "Application errors", "metrics", [prom('sum(increase(vodhunter_searches_total{outcome="error"}[$__range]))')], x=6, y=0, w=6, h=5),
-        panel("stat", "Latency p50", "metrics", [prom("histogram_quantile(0.50, sum by (le) (rate(vodhunter_search_duration_seconds_bucket[$__rate_interval])))")], x=12, y=0, w=6, h=5, unit="s"),
-        panel("stat", "Latency p95", "metrics", [prom("histogram_quantile(0.95, sum by (le) (rate(vodhunter_search_duration_seconds_bucket[$__rate_interval])))")], x=18, y=0, w=6, h=5, unit="s"),
+        panel("stat", "Latency p50", "metrics", [prom("histogram_quantile(0.50, sum by (le) (increase(vodhunter_search_duration_seconds_bucket[$__range])))")], x=12, y=0, w=6, h=5, unit="s"),
+        panel("stat", "Latency p95", "metrics", [prom("histogram_quantile(0.95, sum by (le) (increase(vodhunter_search_duration_seconds_bucket[$__range])))")], x=18, y=0, w=6, h=5, unit="s"),
         panel("timeseries", "Search throughput by outcome", "metrics", [prom("sum by (outcome) (rate(vodhunter_searches_total[$__rate_interval]))", "{{outcome}}")], x=0, y=5, w=12, h=8, unit="reqps"),
         panel("timeseries", "Total latency p50 / p95", "metrics", [
             prom("histogram_quantile(0.50, sum by (le) (rate(vodhunter_search_duration_seconds_bucket[$__rate_interval])))", "p50", "A"),
@@ -267,16 +273,22 @@ def build_search_performance() -> dict[str, Any]:
         panel("logs", "Recent completed searches", "logs", [loki('{service_name="vodhunter-api", event="search_finished"} | json')], x=0, y=21, w=16, h=10),
         panel("logs", "HTTP and application errors", "logs", [loki('{service_name="vodhunter-api"} |~ "\\\"status_code\\\":[45][0-9][0-9]|\\\"level\\\":\\\"error\\\""')], x=16, y=21, w=8, h=10),
     ]
+    panels.extend([
+        panel("timeseries", "API submission responses", "metrics", [prom("sum by (result) (rate(vodhunter_search_submissions_total[$__rate_interval]))", "{{result}}")], x=0, y=31, w=12, h=8, unit="reqps", description="Requires the instrumented release. API responses only; edge rate limits and client validation are observed separately in browser events."),
+        panel("timeseries", "API response latency p95 by route", "metrics", [prom("histogram_quantile(0.95, sum by (le, route) (rate(vodhunter_http_request_duration_seconds_bucket[$__rate_interval])))", "{{route}}")], x=12, y=31, w=12, h=8, unit="s", description="HTTP request duration, including polling. A successful create response does not mean the background search is complete. Requires the instrumented release."),
+        panel("timeseries", "API requests by status class", "metrics", [prom("sum by (status_class) (rate(vodhunter_http_requests_total[$__rate_interval]))", "{{status_class}}")], x=0, y=39, w=12, h=8, unit="reqps", description="Includes polling and unmatched requests. Route labels use templates rather than search IDs. Requires the instrumented release."),
+        panel("timeseries", "Executor queue wait p95", "metrics", [prom("histogram_quantile(0.95, sum by (le) (rate(vodhunter_search_queue_wait_seconds_bucket[$__rate_interval])))", "p95")], x=12, y=39, w=12, h=8, unit="s", description="Creation through executor start, including persistence. Requires the instrumented release and search observations."),
+    ])
     return dashboard(title="10 - Search Performance", uid="vodhunter-search-performance", inputs=["DS_METRICS", "DS_LOGS"], panels=panels, tags=["search", "performance"])
 
 
 def build_search_quality() -> dict[str, Any]:
-    where = "$__timeFilter(created_at) AND ('${streamer}' = '.*' OR streamer = '${streamer}')"
+    where = "$__timeFilter(created_at) AND streamer IN (${streamer:sqlstring})"
     panels = [
         panel("stat", "Completed searches", "postgres", [sql(f"SELECT COUNT(*)::double precision AS value FROM grafana_search_quality WHERE {where} AND job_status = 'completed'")], x=0, y=0, w=6, h=5),
-        panel("stat", "Match rate", "postgres", [sql(f"SELECT COALESCE(COUNT(*) FILTER (WHERE outcome = 'match')::double precision / NULLIF(COUNT(*) FILTER (WHERE outcome IN ('match', 'no_match')), 0), 0) AS value FROM grafana_search_quality WHERE {where}")], x=6, y=0, w=6, h=5, unit="percentunit"),
-        panel("stat", "Average match score", "postgres", [sql(f"SELECT COALESCE(AVG(score), 0)::double precision AS value FROM grafana_search_quality WHERE {where} AND outcome = 'match'")], x=12, y=0, w=6, h=5),
-        panel("stat", "Average candidates", "postgres", [sql(f"SELECT COALESCE(AVG(candidate_count), 0)::double precision AS value FROM grafana_search_quality WHERE {where}")], x=18, y=0, w=6, h=5),
+        panel("stat", "Match rate", "postgres", [sql(f"SELECT COUNT(*) FILTER (WHERE outcome = 'match')::double precision / NULLIF(COUNT(*) FILTER (WHERE outcome IN ('match', 'no_match')), 0) AS value FROM grafana_search_quality WHERE {where}")], x=6, y=0, w=6, h=5, unit="percentunit"),
+        panel("stat", "Average match score", "postgres", [sql(f"SELECT AVG(score)::double precision AS value FROM grafana_search_quality WHERE {where} AND outcome = 'match'")], x=12, y=0, w=6, h=5),
+        panel("stat", "Average candidates", "postgres", [sql(f"SELECT AVG(candidate_count)::double precision AS value FROM grafana_search_quality WHERE {where}")], x=18, y=0, w=6, h=5),
         panel("timeseries", "Outcomes over time", "postgres", [sql(f"SELECT $__timeGroupAlias(created_at, $__interval), outcome AS metric, COUNT(*)::double precision AS value FROM grafana_search_quality WHERE {where} GROUP BY 1, outcome ORDER BY 1", time_series=True)], x=0, y=5, w=12, h=8),
         panel("table", "Quality by streamer", "postgres", [sql(f"""
             SELECT streamer AS "Streamer", COUNT(*) AS "Searches",
@@ -286,7 +298,7 @@ def build_search_quality() -> dict[str, Any]:
             FROM grafana_search_quality WHERE {where}
             GROUP BY streamer ORDER BY "Searches" DESC
         """)], x=12, y=5, w=12, h=8),
-        panel("barchart", "Match score distribution", "postgres", [sql(f"SELECT FLOOR(score * 10) / 10.0 AS bucket, COUNT(*)::double precision AS searches FROM grafana_search_quality WHERE {where} AND outcome = 'match' AND score IS NOT NULL GROUP BY 1 ORDER BY 1")], x=0, y=13, w=10, h=8),
+        panel("barchart", "Match score distribution", "postgres", [sql(f"SELECT (FLOOR(score * 10) / 10.0)::text AS bucket, COUNT(*)::double precision AS searches FROM grafana_search_quality WHERE {where} AND outcome = 'match' AND score IS NOT NULL GROUP BY 1 ORDER BY 1")], x=0, y=13, w=10, h=8),
         panel("table", "No-match and failure reasons", "postgres", [sql(f"""
             SELECT outcome AS "Outcome",
                    COALESCE(error_code, result_reason, 'unspecified') AS "Reason",
@@ -310,8 +322,8 @@ def build_search_quality() -> dict[str, Any]:
 
 
 def build_streamers_vods() -> dict[str, Any]:
-    streamer_filter = "('${streamer}' = '.*' OR streamer = '${streamer}')"
-    vod_filter = f"{streamer_filter} AND status LIKE '${{vod_status}}'"
+    streamer_filter = "streamer IN (${streamer:sqlstring})"
+    vod_filter = f"{streamer_filter} AND status LIKE ${{vod_status:sqlstring}}"
     panels = [
         panel("stat", "Streamers", "postgres", [sql(f"SELECT COUNT(*)::double precision AS value FROM grafana_streamer_summary WHERE {streamer_filter}")], x=0, y=0, w=4, h=5),
         panel("stat", "Retained VODs", "postgres", [sql(f"SELECT COUNT(*)::double precision AS value FROM grafana_vod_inventory WHERE {vod_filter}")], x=4, y=0, w=4, h=5),
@@ -346,8 +358,8 @@ def build_streamers_vods() -> dict[str, Any]:
 
 
 def build_ingestion_operations() -> dict[str, Any]:
-    streamer_filter = "('${streamer}' = '.*' OR streamer = '${streamer}')"
-    log_streamer = ' | regexp "streamer=(?P<streamer>[^ ]+)" | streamer=~"${streamer}"'
+    streamer_filter = "streamer IN (${streamer:sqlstring})"
+    log_streamer = ' | regexp "streamer=(?P<streamer>[^ ]+)" | streamer=~"${streamer:regex}"'
     panels = [
         panel("stat", "Worker log lines", "logs", [loki('sum(count_over_time({service_name="vodhunter-worker"}[$__range]))', instant=True)], x=0, y=0, w=4, h=5, description="Activity in the selected range; this is not a heartbeat because watch mode intentionally logs infrequently."),
         panel("stat", "Active VODs", "postgres", [sql(f"SELECT COUNT(*)::double precision AS value FROM grafana_vod_inventory WHERE {streamer_filter} AND operational_status = 'in_progress'")], x=4, y=0, w=4, h=5),
@@ -366,7 +378,7 @@ def build_ingestion_operations() -> dict[str, Any]:
             ORDER BY operational_status DESC, last_ingest_update DESC NULLS LAST
         """)], x=0, y=5, w=14, h=9),
         panel("logs", "Worker mode and handoff events", "logs", [loki(f'{{service_name="vodhunter-worker"}} |~ "mode=|handoff"{log_streamer}')], x=14, y=5, w=10, h=9),
-        panel("timeseries", "Chunks started per second", "logs", [loki('sum(rate({service_name="vodhunter-worker", action="processing"}[$__rate_interval]))')], x=0, y=14, w=8, h=8, unit="ops"),
+        panel("timeseries", "Chunks started per second", "logs", [loki('sum(rate({service_name="vodhunter-worker", action="processing"}[$__interval]))')], x=0, y=14, w=8, h=8, unit="ops"),
         panel("timeseries", "Worker failures", "logs", [loki('sum by (mode) (count_over_time({service_name="vodhunter-worker", action="failed"}[$__interval]))')], x=8, y=14, w=8, h=8),
         panel("timeseries", "Live/backlog handoffs", "logs", [loki('sum by (event) (count_over_time({service_name="vodhunter-worker", action="handoff"}[$__interval]))')], x=16, y=14, w=8, h=8),
         panel("logs", "Recent ingestion logs", "logs", [loki(f'{{service_name="vodhunter-worker"}}{log_streamer}')], x=0, y=22, w=24, h=11),
@@ -375,7 +387,7 @@ def build_ingestion_operations() -> dict[str, Any]:
 
 
 def build_index_retention() -> dict[str, Any]:
-    streamer_filter = "('${streamer}' = '.*' OR streamer = '${streamer}')"
+    streamer_filter = "streamer IN (${streamer:sqlstring})"
     panels = [
         panel("stat", "Estimated embeddings", "postgres", [sql(f"SELECT COALESCE(SUM(estimated_embeddings), 0)::double precision AS value FROM grafana_index_partitions WHERE {streamer_filter}")], x=0, y=0, w=5, h=5),
         panel("stat", "Index storage", "postgres", [sql(f"SELECT COALESCE(SUM(total_bytes), 0)::double precision AS value FROM grafana_index_partitions WHERE {streamer_filter}")], x=5, y=0, w=5, h=5, unit="bytes"),
@@ -423,10 +435,48 @@ def build_index_retention() -> dict[str, Any]:
         "name": "retention_days",
         "options": [{"selected": True, "text": "30", "value": "30"}],
         "query": "30",
-        "skipUrlSync": False,
+        "skipUrlSync": True,
         "type": "constant",
     }
     return dashboard(title="30 - Index & Retention", uid="vodhunter-index-retention", inputs=["DS_POSTGRES", "DS_LOGS"], panels=panels, tags=["index", "retention"], variables=[streamer_variable(), retention_variable], time_from="now-30d")
+
+
+def build_search_reliability() -> dict[str, Any]:
+    where = "$__timeFilter(created_at)"
+    panels = [
+        panel("stat", "Queued now", "postgres", [sql("SELECT COUNT(*)::double precision AS value FROM grafana_search_quality WHERE job_status = 'queued'")], x=0, y=0, w=6, h=5),
+        panel("stat", "Running now", "postgres", [sql("SELECT COUNT(*)::double precision AS value FROM grafana_search_quality WHERE job_status = 'running'")], x=6, y=0, w=6, h=5),
+        panel("stat", "Oldest pending age", "postgres", [sql("SELECT MAX(EXTRACT(EPOCH FROM NOW()-created_at))::double precision AS value FROM grafana_search_quality WHERE job_status IN ('queued','running')")], x=12, y=0, w=6, h=5, unit="s", description="No observations means there is no pending job, assuming the datasource is healthy."),
+        panel("stat", "Queue wait p95", "postgres", [sql(f"SELECT percentile_cont(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM started_at-created_at)) AS value FROM grafana_search_quality WHERE {where} AND started_at IS NOT NULL")], x=18, y=0, w=6, h=5, unit="s", description="Durable creation-to-start timing for jobs created in the selected range."),
+        panel("timeseries", "Accepted jobs by persisted outcome", "postgres", [sql(f"SELECT $__timeGroupAlias(created_at, $__interval), outcome AS metric, COUNT(*)::double precision AS value FROM grafana_search_quality WHERE {where} GROUP BY 1,outcome ORDER BY 1", time_series=True)], x=0, y=5, w=12, h=8),
+        panel("table", "Failures by code", "postgres", [sql(f"SELECT COALESCE(error_code,'unknown') AS reason, COUNT(*) AS failures FROM grafana_search_quality WHERE {where} AND job_status='failed' GROUP BY 1 ORDER BY failures DESC")], x=12, y=5, w=12, h=8),
+        panel("table", "Execution stage p95", "postgres", [sql(f"""
+            SELECT stage, percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms)/1000.0 AS "p95 seconds", COUNT(*) AS samples
+            FROM grafana_search_quality
+            CROSS JOIN LATERAL (VALUES ('preprocess',preprocess_duration_ms), ('embedding',embed_duration_ms), ('vector query',vector_query_duration_ms), ('alignment',alignment_duration_ms), ('model startup',model_startup_duration_ms)) AS timings(stage,duration_ms)
+            WHERE {where} AND duration_ms IS NOT NULL GROUP BY stage ORDER BY "p95 seconds" DESC
+        """)], x=0, y=13, w=12, h=9, description="Execution timing persisted with each search. Queue and browser delivery are separate measurements."),
+        panel("table", "Pending jobs", "postgres", [sql("SELECT search_id, streamer, job_status, job_stage, created_at, started_at, EXTRACT(EPOCH FROM NOW()-created_at)::bigint AS age_seconds FROM grafana_search_quality WHERE job_status IN ('queued','running') ORDER BY created_at LIMIT 100")], x=12, y=13, w=12, h=9),
+        panel("table", "Recent search diagnostics", "postgres", [sql(f"SELECT created_at, search_id, streamer, outcome, error_code, model_cold_start, query_fingerprint_count, candidate_count, segment_count, model_version, total_duration_ms AS execution_ms FROM grafana_search_quality WHERE {where} ORDER BY created_at DESC LIMIT 100")], x=0, y=22, w=24, h=10),
+    ]
+    return dashboard(title="12 - Search Reliability", uid="vodhunter-search-reliability", inputs=["DS_POSTGRES"], panels=panels, tags=["search", "reliability"])
+
+
+def build_monitoring_health() -> dict[str, Any]:
+    scope = '{job="prometheus.scrape.vodhunter_api"}'
+    panels = [
+        panel("stat", "API scrape up", "metrics", [prom(f"min(up{scope})")], x=0, y=0, w=6, h=5, description="Private telemetry reachability, not an external availability probe."),
+        panel("stat", "Latest scrape age", "metrics", [prom(f"time() - max(timestamp(up{scope}))")], x=6, y=0, w=6, h=5, unit="s", description="A fresh zero up sample indicates scrape failure; no sample indicates unknown collection state."),
+        panel("stat", "API process uptime", "metrics", [prom(f"time() - max(process_start_time_seconds{scope})")], x=12, y=0, w=6, h=5, unit="s", description="Current API process age. A restart resets process-local counters."),
+        panel("stat", "API resident memory", "metrics", [prom(f"sum(process_resident_memory_bytes{scope})")], x=18, y=0, w=6, h=5, unit="bytes", description="API process RSS, not total VPS memory."),
+        panel("timeseries", "API CPU cores used", "metrics", [prom(f"sum(rate(process_cpu_seconds_total{scope}[$__rate_interval]))", "API")], x=0, y=5, w=12, h=8, description="Process CPU seconds / wall seconds; 1 means one core."),
+        panel("timeseries", "API memory", "metrics", [prom(f"sum(process_resident_memory_bytes{scope})", "RSS"), prom(f"sum(process_virtual_memory_bytes{scope})", "Virtual", "B")], x=12, y=5, w=12, h=8, unit="bytes"),
+        panel("timeseries", "Log delivery by service", "logs", [loki('sum by (service_name) (count_over_time({service_name=~"vodhunter-api|vodhunter-worker|vodhunter-retention", environment="production"}[$__interval]))')], x=0, y=13, w=12, h=8, description="Observed log volume. Quiet worker/retention periods do not prove a failed heartbeat."),
+        panel("timeseries", "Scrape duration", "metrics", [prom(f"max(scrape_duration_seconds{scope})", "Scrape")], x=12, y=13, w=12, h=8, unit="s"),
+        panel("table", "Datasource inventory check", "postgres", [sql("SELECT COUNT(*) AS reporting_streamers, SUM(searchable_vods) AS searchable_vods, SUM(stalled_vods) AS stalled_vods FROM grafana_streamer_summary")], x=0, y=21, w=12, h=7, description="Querying the private reporting datasource confirms it is reachable."),
+        panel("timeseries", "Exported metric samples", "metrics", [prom(f"max(scrape_samples_scraped{scope})", "Samples")], x=12, y=21, w=12, h=7),
+    ]
+    return dashboard(title="40 - Monitoring Health", uid="vodhunter-monitoring-health", inputs=["DS_METRICS", "DS_LOGS", "DS_POSTGRES"], panels=panels, tags=["monitoring"])
 
 
 def dashboards() -> dict[str, dict[str, Any]]:
@@ -434,9 +484,11 @@ def dashboards() -> dict[str, dict[str, Any]]:
         "00-vodhunter-overview.json": build_overview(),
         "10-search-performance.json": build_search_performance(),
         "10-search-quality.json": build_search_quality(),
+        "12-search-reliability.json": build_search_reliability(),
         "20-streamers-vods.json": build_streamers_vods(),
         "20-ingestion-operations.json": build_ingestion_operations(),
         "30-index-retention.json": build_index_retention(),
+        "40-monitoring-health.json": build_monitoring_health(),
     }
 
 

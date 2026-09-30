@@ -4,6 +4,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createSearchJob, getSearchJob, listSearchableStreamers } from "../../api/client";
 import { SearchJobResponse, SearchResponse } from "../../api/types";
 import { useSearchPage } from "./useSearchPage";
+import { trackEvent } from "../../telemetry";
+
+vi.mock("../../telemetry", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../telemetry")>(), trackEvent: vi.fn(),
+}));
 
 vi.mock("../../api/client", () => ({
   createSearchJob: vi.fn(),
@@ -57,6 +62,42 @@ describe("useSearchPage shared jobs", () => {
     vi.mocked(listSearchableStreamers).mockResolvedValue([
       { name: "jason", profile_image_url: null },
     ]);
+  });
+
+  it("records one visible result for a shared job and excludes raw input from events", async () => {
+    window.history.replaceState(null, "", "/share?search_id=42");
+    vi.mocked(getSearchJob).mockResolvedValue(job({ status: "completed", result: result(), stage: null }));
+    const { result: hook, rerender } = renderHook(() => useSearchPage());
+    await waitFor(() => expect(hook.current.result?.found).toBe(true));
+    rerender();
+    const visible = vi.mocked(trackEvent).mock.calls.filter(([name]) => name === "search_result_visible");
+    expect(visible).toHaveLength(1);
+    expect(visible[0][1]).toMatchObject({ entry_kind: "shared", search_id: 42, outcome: "match" });
+    expect(JSON.stringify(vi.mocked(trackEvent).mock.calls)).not.toContain(tiktokUrl);
+    act(() => hook.current.onUrlChange("https://example.com/invalid"));
+    await act(async () => hook.current.onSubmit({ preventDefault: vi.fn() } as never));
+    // Validation leaves the previous result visible; clicks retain its journey.
+    act(() => hook.current.onResultClick("segment"));
+    expect(trackEvent).toHaveBeenCalledWith("result_vod_clicked", expect.objectContaining({ link_kind: "segment", search_id: 42 }));
+  });
+
+  it("observes client validation without submitting a backend job", async () => {
+    const { result: hook } = renderHook(() => useSearchPage());
+    await waitFor(() => expect(hook.current.loadingStreamers).toBe(false));
+    act(() => hook.current.onUrlChange("https://example.com/private"));
+    await act(async () => hook.current.onSubmit({ preventDefault: vi.fn() } as never));
+    expect(createSearchJob).not.toHaveBeenCalled();
+    expect(trackEvent).toHaveBeenCalledWith("search_validation_blocked", expect.objectContaining({ reason: "unsupported_url" }));
+    expect(JSON.stringify(vi.mocked(trackEvent).mock.calls)).not.toContain("example.com/private");
+  });
+
+  it("distinguishes a failed status fetch from a failed backend search", async () => {
+    window.history.replaceState(null, "", "/share?search_id=42");
+    vi.mocked(getSearchJob).mockRejectedValue(new TypeError("Failed to fetch"));
+    const { result: hook } = renderHook(() => useSearchPage());
+    await waitFor(() => expect(hook.current.requestError).toBe("Failed to fetch"));
+    expect(trackEvent).toHaveBeenCalledWith("search_poll_failed", expect.objectContaining({ reason: "network", search_id: 42 }));
+    expect(trackEvent).toHaveBeenCalledWith("search_result_visible", expect.objectContaining({ reason: "poll_failed", outcome: "error" }));
   });
 
   it("gives a share URL priority over an older local search", async () => {

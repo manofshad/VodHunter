@@ -100,6 +100,10 @@ services:
       dockerfile: Dockerfile.web-public
       args:
         VITE_API_BASE: /api
+        # Public collector endpoint, not an authentication credential. Set to
+        # "disabled" to opt out without changing the image source.
+        VITE_FARO_URL: ${VITE_FARO_URL:-https://faro-collector-prod-us-east-2.grafana.net/collect/ca7f779e5d1d577feb687502b276db70}
+        VITE_RELEASE: ${SOURCE_COMMIT:-unversioned}
     environment:
       PUBLIC_API_UPSTREAM: http://api:8000
     labels:

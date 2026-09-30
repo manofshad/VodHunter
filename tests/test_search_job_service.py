@@ -118,6 +118,17 @@ def test_search_job_service_completes_job() -> None:
     assert store.failed == []
 
 
+def test_queue_observation_failure_does_not_fail_search(monkeypatch) -> None:
+    def fail(_elapsed):
+        raise RuntimeError("monitoring unavailable")
+    monkeypatch.setattr("backend.services.search_jobs.observe_queue_wait", fail)
+    store = StubStore()
+    service = SearchJobService(jobs=store, search_manager=StubSearchManager(), executor=InlineExecutor())
+    service.create_public_search_job(tiktok_url="https://www.tiktok.com/@u/video/1", streamer="jason", creator_id=2)
+    assert len(store.completed) == 1
+    assert store.failed == []
+
+
 def test_search_job_service_emits_one_terminal_event(monkeypatch) -> None:
     events: list[dict[str, object]] = []
     monkeypatch.setattr(

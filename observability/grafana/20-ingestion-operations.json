@@ -33,6 +33,12 @@
       "targetBlank": false,
       "title": "VodHunter dashboards",
       "type": "dashboards"
+    },
+    {
+      "title": "Browser experience",
+      "type": "link",
+      "url": "/a/grafana-kowalski-app",
+      "targetBlank": false
     }
   ],
   "panels": [
@@ -59,14 +65,19 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "noValue": "No observations",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
         },
         "overrides": []
       },
       "description": "Activity in the selected range; this is not a heartbeat because watch mode intentionally logs infrequently.",
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -98,7 +109,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_vod_inventory WHERE ('${streamer}' = '.*' OR streamer = '${streamer}') AND operational_status = 'in_progress'",
+          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_vod_inventory WHERE streamer IN (${streamer:sqlstring}) AND operational_status = 'in_progress'",
           "refId": "A",
           "sql": {
             "columns": [],
@@ -108,13 +119,18 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "noValue": "No observations",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
         },
         "overrides": []
       },
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -146,7 +162,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_vod_inventory WHERE ('${streamer}' = '.*' OR streamer = '${streamer}') AND operational_status = 'stalled'",
+          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_vod_inventory WHERE streamer IN (${streamer:sqlstring}) AND operational_status = 'stalled'",
           "refId": "A",
           "sql": {
             "columns": [],
@@ -156,13 +172,18 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "noValue": "No observations",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
         },
         "overrides": []
       },
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -194,7 +215,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_vod_inventory WHERE ('${streamer}' = '.*' OR streamer = '${streamer}') AND status = 'reindex_requested'",
+          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_vod_inventory WHERE streamer IN (${streamer:sqlstring}) AND status = 'reindex_requested'",
           "refId": "A",
           "sql": {
             "columns": [],
@@ -204,13 +225,18 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "noValue": "No observations",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
         },
         "overrides": []
       },
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -239,7 +265,7 @@
       },
       "targets": [
         {
-          "expr": "sum(count_over_time({service_name=\"vodhunter-worker\", action=\"failed\"} | regexp \"streamer=(?P<streamer>[^ ]+)\" | streamer=~\"${streamer}\" [$__range]))",
+          "expr": "sum(count_over_time({service_name=\"vodhunter-worker\", action=\"failed\"} | regexp \"streamer=(?P<streamer>[^ ]+)\" | streamer=~\"${streamer:regex}\" [$__range]))",
           "refId": "A",
           "queryType": "instant",
           "instant": true
@@ -247,13 +273,18 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "noValue": "No observations",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
         },
         "overrides": []
       },
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -282,7 +313,7 @@
       },
       "targets": [
         {
-          "expr": "sum(count_over_time({service_name=\"vodhunter-worker\", action=\"handoff\"} | regexp \"streamer=(?P<streamer>[^ ]+)\" | streamer=~\"${streamer}\" [$__range]))",
+          "expr": "sum(count_over_time({service_name=\"vodhunter-worker\", action=\"handoff\"} | regexp \"streamer=(?P<streamer>[^ ]+)\" | streamer=~\"${streamer:regex}\" [$__range]))",
           "refId": "A",
           "queryType": "instant",
           "instant": true
@@ -290,13 +321,18 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "noValue": "No observations",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
         },
         "overrides": []
       },
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -328,7 +364,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT streamer AS \"Streamer\", title AS \"VOD\", vod_url AS \"VOD URL\",\n                   operational_status AS \"Health\", ROUND(progress_percent::numeric, 1) AS \"Progress %\",\n                   last_ingested_seconds AS \"Ingested seconds\",\n                   last_seen_duration_seconds AS \"Observed seconds\",\n                   last_ingest_update AS \"Last update\", cursor_age_seconds AS \"Cursor age seconds\"\n            FROM grafana_vod_inventory\n            WHERE ('${streamer}' = '.*' OR streamer = '${streamer}') AND status = 'indexing'\n            ORDER BY operational_status DESC, last_ingest_update DESC NULLS LAST",
+          "rawSql": "SELECT streamer AS \"Streamer\", title AS \"VOD\", vod_url AS \"VOD URL\",\n                   operational_status AS \"Health\", ROUND(progress_percent::numeric, 1) AS \"Progress %\",\n                   last_ingested_seconds AS \"Ingested seconds\",\n                   last_seen_duration_seconds AS \"Observed seconds\",\n                   last_ingest_update AS \"Last update\", cursor_age_seconds AS \"Cursor age seconds\"\n            FROM grafana_vod_inventory\n            WHERE streamer IN (${streamer:sqlstring}) AND status = 'indexing'\n            ORDER BY operational_status DESC, last_ingest_update DESC NULLS LAST",
           "refId": "A",
           "sql": {
             "columns": [],
@@ -338,9 +374,26 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "noValue": "\u2014",
+          "color": {
+            "mode": "palette-classic"
+          }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^(.*[ _]ID|search_id|Twitch VOD)$"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "cellHeight": "sm",
@@ -363,14 +416,18 @@
       },
       "targets": [
         {
-          "expr": "{service_name=\"vodhunter-worker\"} |~ \"mode=|handoff\" | regexp \"streamer=(?P<streamer>[^ ]+)\" | streamer=~\"${streamer}\"",
+          "expr": "{service_name=\"vodhunter-worker\"} |~ \"mode=|handoff\" | regexp \"streamer=(?P<streamer>[^ ]+)\" | streamer=~\"${streamer:regex}\"",
           "refId": "A",
           "queryType": "range"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "noValue": "No observations",
+          "color": {
+            "mode": "palette-classic"
+          }
         },
         "overrides": []
       },
@@ -381,7 +438,7 @@
         "showLabels": false,
         "showTime": true,
         "sortOrder": "Descending",
-        "wrapLines": false
+        "wrapLines": true
       },
       "id": 8
     },
@@ -400,7 +457,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate({service_name=\"vodhunter-worker\", action=\"processing\"}[$__rate_interval]))",
+          "expr": "sum(rate({service_name=\"vodhunter-worker\", action=\"processing\"}[$__interval]))",
           "refId": "A",
           "queryType": "range"
         }
@@ -408,6 +465,10 @@
       "fieldConfig": {
         "defaults": {
           "unit": "ops",
+          "noValue": "No observations",
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
             "drawStyle": "line",
             "fillOpacity": 12,
@@ -452,6 +513,10 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
+          "noValue": "No observations",
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
             "drawStyle": "line",
             "fillOpacity": 12,
@@ -496,6 +561,10 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
+          "noValue": "No observations",
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
             "drawStyle": "line",
             "fillOpacity": 12,
@@ -532,14 +601,18 @@
       },
       "targets": [
         {
-          "expr": "{service_name=\"vodhunter-worker\"} | regexp \"streamer=(?P<streamer>[^ ]+)\" | streamer=~\"${streamer}\"",
+          "expr": "{service_name=\"vodhunter-worker\"} | regexp \"streamer=(?P<streamer>[^ ]+)\" | streamer=~\"${streamer:regex}\"",
           "refId": "A",
           "queryType": "range"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "noValue": "No observations",
+          "color": {
+            "mode": "palette-classic"
+          }
         },
         "overrides": []
       },
@@ -550,12 +623,12 @@
         "showLabels": false,
         "showTime": true,
         "sortOrder": "Descending",
-        "wrapLines": false
+        "wrapLines": true
       },
       "id": 12
     }
   ],
-  "refresh": "30s",
+  "refresh": "1m",
   "schemaVersion": 39,
   "tags": [
     "vodhunter",
@@ -565,7 +638,7 @@
   "templating": {
     "list": [
       {
-        "allValue": ".*",
+        "allValue": "",
         "current": {
           "selected": true,
           "text": "All",

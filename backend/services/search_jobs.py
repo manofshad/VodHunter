@@ -4,7 +4,7 @@ from concurrent.futures import Executor
 import logging
 import time
 
-from backend.observability import observe_terminal_search
+from backend.observability import observe_terminal_search, observe_queue_wait
 from backend.services.remote_clip_downloader import DownloadError, InvalidTikTokUrlError, validate_tiktok_url
 from backend.services.search_manager import InputDurationExceededError, SearchInputError
 from search.models import SearchDateRange, SearchJobRecord
@@ -84,6 +84,12 @@ class SearchJobService:
             else time.perf_counter()
         )
         stage_durations_ms: dict[str, int] = {}
+
+        if accepted_started_at is not None:
+            try:
+                observe_queue_wait(time.perf_counter() - accepted_started_at)
+            except Exception:
+                logger.exception("Unable to observe search queue wait")
 
         def record_stage(stage: str, duration_ms: int) -> None:
             stage_durations_ms[str(stage)] = max(int(duration_ms), 0)

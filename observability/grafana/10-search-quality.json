@@ -26,6 +26,12 @@
       "targetBlank": false,
       "title": "VodHunter dashboards",
       "type": "dashboards"
+    },
+    {
+      "title": "Browser experience",
+      "type": "link",
+      "url": "/a/grafana-kowalski-app",
+      "targetBlank": false
     }
   ],
   "panels": [
@@ -47,7 +53,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_search_quality WHERE $__timeFilter(created_at) AND ('${streamer}' = '.*' OR streamer = '${streamer}') AND job_status = 'completed'",
+          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_search_quality WHERE $__timeFilter(created_at) AND streamer IN (${streamer:sqlstring}) AND job_status = 'completed'",
           "refId": "A",
           "sql": {
             "columns": [],
@@ -57,13 +63,18 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "noValue": "No observations",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
         },
         "overrides": []
       },
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -95,7 +106,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COALESCE(COUNT(*) FILTER (WHERE outcome = 'match')::double precision / NULLIF(COUNT(*) FILTER (WHERE outcome IN ('match', 'no_match')), 0), 0) AS value FROM grafana_search_quality WHERE $__timeFilter(created_at) AND ('${streamer}' = '.*' OR streamer = '${streamer}')",
+          "rawSql": "SELECT COUNT(*) FILTER (WHERE outcome = 'match')::double precision / NULLIF(COUNT(*) FILTER (WHERE outcome IN ('match', 'no_match')), 0) AS value FROM grafana_search_quality WHERE $__timeFilter(created_at) AND streamer IN (${streamer:sqlstring})",
           "refId": "A",
           "sql": {
             "columns": [],
@@ -105,13 +116,18 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "percentunit"
+          "unit": "percentunit",
+          "noValue": "No observations",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
         },
         "overrides": []
       },
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -143,7 +159,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COALESCE(AVG(score), 0)::double precision AS value FROM grafana_search_quality WHERE $__timeFilter(created_at) AND ('${streamer}' = '.*' OR streamer = '${streamer}') AND outcome = 'match'",
+          "rawSql": "SELECT AVG(score)::double precision AS value FROM grafana_search_quality WHERE $__timeFilter(created_at) AND streamer IN (${streamer:sqlstring}) AND outcome = 'match'",
           "refId": "A",
           "sql": {
             "columns": [],
@@ -153,13 +169,18 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "noValue": "No observations",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
         },
         "overrides": []
       },
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -191,7 +212,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COALESCE(AVG(candidate_count), 0)::double precision AS value FROM grafana_search_quality WHERE $__timeFilter(created_at) AND ('${streamer}' = '.*' OR streamer = '${streamer}')",
+          "rawSql": "SELECT AVG(candidate_count)::double precision AS value FROM grafana_search_quality WHERE $__timeFilter(created_at) AND streamer IN (${streamer:sqlstring})",
           "refId": "A",
           "sql": {
             "columns": [],
@@ -201,13 +222,18 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "noValue": "No observations",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
         },
         "overrides": []
       },
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -239,7 +265,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroupAlias(created_at, $__interval), outcome AS metric, COUNT(*)::double precision AS value FROM grafana_search_quality WHERE $__timeFilter(created_at) AND ('${streamer}' = '.*' OR streamer = '${streamer}') GROUP BY 1, outcome ORDER BY 1",
+          "rawSql": "SELECT $__timeGroupAlias(created_at, $__interval), outcome AS metric, COUNT(*)::double precision AS value FROM grafana_search_quality WHERE $__timeFilter(created_at) AND streamer IN (${streamer:sqlstring}) GROUP BY 1, outcome ORDER BY 1",
           "refId": "A",
           "sql": {
             "columns": [],
@@ -250,8 +276,12 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
+          "noValue": "No observations",
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
-            "drawStyle": "line",
+            "drawStyle": "bars",
             "fillOpacity": 12,
             "lineInterpolation": "linear",
             "showPoints": "never",
@@ -289,7 +319,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT streamer AS \"Streamer\", COUNT(*) AS \"Searches\",\n                   COUNT(*) FILTER (WHERE outcome = 'match') AS \"Matches\",\n                   ROUND(100.0 * COUNT(*) FILTER (WHERE outcome = 'match') / NULLIF(COUNT(*) FILTER (WHERE outcome IN ('match', 'no_match')), 0), 1) AS \"Match %\",\n                   ROUND(AVG(score) FILTER (WHERE outcome = 'match')::numeric, 3) AS \"Avg score\"\n            FROM grafana_search_quality WHERE $__timeFilter(created_at) AND ('${streamer}' = '.*' OR streamer = '${streamer}')\n            GROUP BY streamer ORDER BY \"Searches\" DESC",
+          "rawSql": "SELECT streamer AS \"Streamer\", COUNT(*) AS \"Searches\",\n                   COUNT(*) FILTER (WHERE outcome = 'match') AS \"Matches\",\n                   ROUND(100.0 * COUNT(*) FILTER (WHERE outcome = 'match') / NULLIF(COUNT(*) FILTER (WHERE outcome IN ('match', 'no_match')), 0), 1) AS \"Match %\",\n                   ROUND(AVG(score) FILTER (WHERE outcome = 'match')::numeric, 3) AS \"Avg score\"\n            FROM grafana_search_quality WHERE $__timeFilter(created_at) AND streamer IN (${streamer:sqlstring})\n            GROUP BY streamer ORDER BY \"Searches\" DESC",
           "refId": "A",
           "sql": {
             "columns": [],
@@ -299,9 +329,26 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "noValue": "\u2014",
+          "color": {
+            "mode": "palette-classic"
+          }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^(.*[ _]ID|search_id|Twitch VOD)$"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "cellHeight": "sm",
@@ -327,7 +374,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT FLOOR(score * 10) / 10.0 AS bucket, COUNT(*)::double precision AS searches FROM grafana_search_quality WHERE $__timeFilter(created_at) AND ('${streamer}' = '.*' OR streamer = '${streamer}') AND outcome = 'match' AND score IS NOT NULL GROUP BY 1 ORDER BY 1",
+          "rawSql": "SELECT (FLOOR(score * 10) / 10.0)::text AS bucket, COUNT(*)::double precision AS searches FROM grafana_search_quality WHERE $__timeFilter(created_at) AND streamer IN (${streamer:sqlstring}) AND outcome = 'match' AND score IS NOT NULL GROUP BY 1 ORDER BY 1",
           "refId": "A",
           "sql": {
             "columns": [],
@@ -337,7 +384,11 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "noValue": "No observations",
+          "color": {
+            "mode": "palette-classic"
+          }
         },
         "overrides": []
       },
@@ -374,7 +425,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT outcome AS \"Outcome\",\n                   COALESCE(error_code, result_reason, 'unspecified') AS \"Reason\",\n                   COUNT(*) AS \"Count\"\n            FROM grafana_search_quality\n            WHERE $__timeFilter(created_at) AND ('${streamer}' = '.*' OR streamer = '${streamer}') AND outcome <> 'match'\n            GROUP BY outcome, COALESCE(error_code, result_reason, 'unspecified')\n            ORDER BY \"Count\" DESC",
+          "rawSql": "SELECT outcome AS \"Outcome\",\n                   COALESCE(error_code, result_reason, 'unspecified') AS \"Reason\",\n                   COUNT(*) AS \"Count\"\n            FROM grafana_search_quality\n            WHERE $__timeFilter(created_at) AND streamer IN (${streamer:sqlstring}) AND outcome <> 'match'\n            GROUP BY outcome, COALESCE(error_code, result_reason, 'unspecified')\n            ORDER BY \"Count\" DESC",
           "refId": "A",
           "sql": {
             "columns": [],
@@ -384,9 +435,26 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "noValue": "\u2014",
+          "color": {
+            "mode": "palette-classic"
+          }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^(.*[ _]ID|search_id|Twitch VOD)$"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "cellHeight": "sm",
@@ -412,7 +480,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT created_at AS \"Time\", search_id AS \"Search ID\", streamer AS \"Streamer\",\n                   outcome AS \"Outcome\", ROUND(score::numeric, 3) AS \"Score\",\n                   candidate_count AS \"Candidates\", segment_count AS \"Segments\",\n                   matched_video_title AS \"Matched VOD\", matched_video_url AS \"VOD URL\",\n                   total_duration_ms AS \"Total ms\", model_cold_start AS \"Cold start\"\n            FROM grafana_search_quality WHERE $__timeFilter(created_at) AND ('${streamer}' = '.*' OR streamer = '${streamer}')\n            ORDER BY created_at DESC LIMIT 200",
+          "rawSql": "SELECT created_at AS \"Time\", search_id AS \"Search ID\", streamer AS \"Streamer\",\n                   outcome AS \"Outcome\", ROUND(score::numeric, 3) AS \"Score\",\n                   candidate_count AS \"Candidates\", segment_count AS \"Segments\",\n                   matched_video_title AS \"Matched VOD\", matched_video_url AS \"VOD URL\",\n                   total_duration_ms AS \"Total ms\", model_cold_start AS \"Cold start\"\n            FROM grafana_search_quality WHERE $__timeFilter(created_at) AND streamer IN (${streamer:sqlstring})\n            ORDER BY created_at DESC LIMIT 200",
           "refId": "A",
           "sql": {
             "columns": [],
@@ -422,9 +490,26 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "noValue": "\u2014",
+          "color": {
+            "mode": "palette-classic"
+          }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^(.*[ _]ID|search_id|Twitch VOD)$"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "cellHeight": "sm",
@@ -433,7 +518,7 @@
       "id": 9
     }
   ],
-  "refresh": "30s",
+  "refresh": "1m",
   "schemaVersion": 39,
   "tags": [
     "vodhunter",
@@ -443,7 +528,7 @@
   "templating": {
     "list": [
       {
-        "allValue": ".*",
+        "allValue": "",
         "current": {
           "selected": true,
           "text": "All",

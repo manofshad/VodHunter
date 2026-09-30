@@ -5,6 +5,7 @@ import { HistoryDrawer } from "./search/HistoryDrawer";
 import { SearchFeedback } from "./search/SearchFeedback";
 import { SearchForm } from "./search/SearchForm";
 import { useSearchPage } from "./search/useSearchPage";
+import { trackEvent } from "../telemetry";
 
 export { DateRangePicker } from "./search/DateRangePicker";
 export { SearchResultCard } from "./search/SearchResults";
@@ -88,7 +89,7 @@ export default function SearchPage() {
       <Header
         historyOpen={historyOpen}
         historyButtonRef={historyButtonRef}
-        onOpenHistory={() => setHistoryOpen(true)}
+        onOpenHistory={() => { trackEvent("history_opened"); setHistoryOpen(true); }}
       />
 
       <HistoryDrawer
@@ -133,6 +134,7 @@ export default function SearchPage() {
                   activeSearchStage={page.activeSearchStage}
                   result={page.result}
                   lastSubmittedUrl={page.lastSubmittedUrl}
+                  onResultClick={page.onResultClick}
                 />
               </SearchForm>
             </div>
