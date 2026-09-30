@@ -77,9 +77,11 @@ The public frontend uses Grafana Faro for web vitals, error stack locations,
 anonymous session lifecycle, and explicit search events. The registered
 `vodhunter-public` collector accepts the canonical `https://vodhunter.com`
 origin. The collector address is public and carries no administrative token.
-Production Compose embeds it at build time; standalone/local builds leave
-collection off unless configured. Development mode, Do Not Track, Global
-Privacy Control, or `VITE_FARO_URL=disabled` also disable collection.
+The collector address is versioned as a build argument in
+`compose.production.yaml`, which embeds it at build time. Set that argument to
+`disabled` and rebuild to disable browser telemetry. No manual `.env` entries
+are required. Standalone/local builds leave collection off unless configured;
+development mode, Do Not Track, and Global Privacy Control also disable it.
 
 The telemetry boundary removes query strings, fragments, dynamic page IDs,
 arbitrary input, user metadata, console logs, network traces, exception text,
@@ -98,8 +100,11 @@ playback or verified correctness. A hidden view does not establish abandonment.
 Accepted jobs that stop polling can still finish on the backend.
 
 Faro requests are bounded and best-effort; search behavior is independent of
-collector availability. Set `SOURCE_COMMIT` to the actual deployed SHA for
-release comparisons; a build with no SHA is explicitly `unversioned`.
+collector availability. The release build argument uses Coolify's predefined
+`SOURCE_COMMIT` deployment metadata for release comparisons. Coolify's
+**Include Source Commit in Build** setting enables this metadata for builds;
+do not maintain the SHA in `.env`. A build with no SHA is explicitly
+`unversioned`. See [Coolify's environment variable documentation](https://coolify.io/docs/applications/configuration/environment-variables).
 
 Backend additions expose `vodhunter_http_requests_total`,
 `vodhunter_http_request_duration_seconds`, `vodhunter_search_submissions_total`,
