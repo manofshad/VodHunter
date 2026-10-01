@@ -411,7 +411,7 @@
       },
       "targets": [
         {
-          "expr": "{service_name=~\"vodhunter-api|vodhunter-worker|vodhunter-retention\"} |~ \"(?i)error|failed|exception\"",
+          "expr": "{service_name=~\"vodhunter-api|vodhunter-worker|vodhunter-retention|vodhunter-cobalt\"} |~ \"(?i)error|failed|exception\"",
           "refId": "A",
           "queryType": "range"
         }

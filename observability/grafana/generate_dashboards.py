@@ -246,7 +246,7 @@ def build_overview() -> dict[str, Any]:
             FROM grafana_streamer_summary
             ORDER BY stalled_vods DESC, active_vods DESC, streamer
         """)], x=12, y=5, w=12, h=8),
-        panel("logs", "Recent errors across VodHunter", "logs", [loki('{service_name=~"vodhunter-api|vodhunter-worker|vodhunter-retention"} |~ "(?i)error|failed|exception"')], x=0, y=13, w=24, h=9),
+        panel("logs", "Recent errors across VodHunter", "logs", [loki('{service_name=~"vodhunter-api|vodhunter-worker|vodhunter-retention|vodhunter-cobalt"} |~ "(?i)error|failed|exception"')], x=0, y=13, w=24, h=9),
     ]
     return dashboard(title="00 - VodHunter Overview", uid="vodhunter-overview", inputs=["DS_METRICS", "DS_LOGS", "DS_POSTGRES"], panels=panels, tags=["overview"])
 
@@ -266,6 +266,19 @@ def build_search_performance() -> dict[str, Any]:
         panel("bargauge", "Failures by code", "metrics", [prom("sum by (error_code) (increase(vodhunter_search_failures_total[$__range]))", "{{error_code}}")], x=12, y=13, w=12, h=8),
         panel("logs", "Recent completed searches", "logs", [loki('{service_name="vodhunter-api", event="search_finished"} | json')], x=0, y=21, w=16, h=10),
         panel("logs", "HTTP and application errors", "logs", [loki('{service_name="vodhunter-api"} |~ "\\\"status_code\\\":[45][0-9][0-9]|\\\"level\\\":\\\"error\\\""')], x=16, y=21, w=8, h=10),
+        panel("timeseries", "TikTok download p50 / p90 by provider", "metrics", [
+            prom('histogram_quantile(0.50, sum by (le, provider) (rate(vodhunter_tiktok_download_phase_seconds_bucket{phase="total"}[$__rate_interval])))', "{{provider}} p50", "A"),
+            prom('histogram_quantile(0.90, sum by (le, provider) (rate(vodhunter_tiktok_download_phase_seconds_bucket{phase="total"}[$__rate_interval])))', "{{provider}} p90", "B"),
+        ], x=0, y=31, w=12, h=8, unit="s"),
+        panel("timeseries", "Cobalt resolution / transfer p90", "metrics", [
+            prom('histogram_quantile(0.90, sum by (le, phase) (rate(vodhunter_tiktok_download_phase_seconds_bucket{provider="cobalt",phase=~"cobalt_resolve|media_transfer"}[$__rate_interval])))', "{{phase}}"),
+        ], x=12, y=31, w=12, h=8, unit="s"),
+        panel("timeseries", "TikTok download outcomes", "metrics", [
+            prom('sum by (provider, outcome) (rate(vodhunter_tiktok_downloads_total[$__rate_interval]))', "{{provider}} {{outcome}}"),
+        ], x=0, y=39, w=12, h=8, unit="reqps"),
+        panel("bargauge", "Cobalt failures by category", "metrics", [
+            prom('sum by (category) (increase(vodhunter_tiktok_downloads_total{provider="cobalt",outcome="failure"}[$__range]))', "{{category}}"),
+        ], x=12, y=39, w=12, h=8),
     ]
     return dashboard(title="10 - Search Performance", uid="vodhunter-search-performance", inputs=["DS_METRICS", "DS_LOGS"], panels=panels, tags=["search", "performance"])
 

@@ -18,6 +18,9 @@ services:
       dockerfile: Dockerfile.api-public
     env_file:
       - .env
+    environment:
+      TIKTOK_DOWNLOADER: ${TIKTOK_DOWNLOADER:-yt-dlp}
+      COBALT_API_URL: ${COBALT_API_URL:-http://cobalt:9000/}
     expose:
       - "8000"
     volumes:
@@ -31,6 +34,36 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+    restart: unless-stopped
+
+  cobalt:
+    image: ghcr.io/imputnet/cobalt:11.7.1@sha256:63186dd68afd57ce3bb1f62cc4c139f5fa95b9c3e87a3cf5c6e4c7a570523f62
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    environment:
+      API_URL: http://cobalt:9000/
+      DURATION_LIMIT: "180"
+      CORS_WILDCARD: "0"
+    expose:
+      - "9000"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:9000/').then(async r => { const j = await r.json(); if (!r.ok || !j.cobalt?.services?.includes('tiktok')) process.exit(1) }).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    mem_limit: 512m
+    cpus: 1.0
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
 
   alloy:

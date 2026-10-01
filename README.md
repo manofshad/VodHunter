@@ -28,7 +28,7 @@ flowchart LR
     Align --> Result["primary timestamp + segments + unmatched ranges"]
 ```
 
-Ingestion resolves VOD media with `yt-dlp`, extracts overlapping audio chunks, fingerprints them locally, and stores the timestamped vectors with the model and preprocessing versions. The API preloads the same pinned NMFP model during startup. Search normalizes each query and submits only fingerprint extraction to a single-consumer local queue; downloads, FFmpeg normalization, vector retrieval, and alignment remain independently concurrent. The resulting timestamped fingerprints retrieve the top 10 candidates for every query fingerprint and are aligned by both video ID and stable `VOD time - query time` offset.
+Ingestion resolves Twitch VOD media with `yt-dlp`, extracts overlapping audio chunks, fingerprints them locally, and stores the timestamped vectors with the model and preprocessing versions. The API preloads the same pinned NMFP model during startup. TikTok search downloads the complete MP4 with the selected provider (`yt-dlp` during rollout or private Cobalt), then normalizes its mixed soundtrack through FFmpeg. Search submits only fingerprint extraction to a single-consumer local queue; downloads, FFmpeg normalization, vector retrieval, and alignment remain independently concurrent. The resulting timestamped fingerprints retrieve the top 10 candidates for every query fingerprint and are aligned by both video ID and stable `VOD time - query time` offset.
 
 The public endpoint is asynchronous: `POST /api/search/clip` creates a job and `GET /api/search/clip/{search_id}` returns its state and durable result. A successful result retains the legacy top-level timestamp/URL while adding `segments` and `unmatched_ranges`.
 

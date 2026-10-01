@@ -18,6 +18,10 @@ The worker uses Twitch Helix polling and defaults to a 30-day scan window. The
 retention service is configured for the same 30-day window, so the worker can
 catch up the full retained history without leaving a one-day boundary gap.
 
+TikTok search can use the private Cobalt MP4 service. The staged activation,
+validation, monitoring, and rollback procedure is in
+[`docs/cobalt-tiktok-migration.md`](cobalt-tiktok-migration.md).
+
 ## Standalone database
 
 Create the database before deploying the application. In the same Coolify

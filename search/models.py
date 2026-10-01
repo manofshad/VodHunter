@@ -151,6 +151,10 @@ class AlignmentResult:
 @dataclass
 class SearchExecutionMetadata:
     download_duration_ms: int | None = None
+    download_provider: str | None = None
+    cobalt_resolution_ms: int | None = None
+    media_transfer_ms: int | None = None
+    download_size_bytes: int | None = None
     probe_duration_ms: int | None = None
     preprocess_duration_ms: int | None = None
     embed_duration_ms: int | None = None

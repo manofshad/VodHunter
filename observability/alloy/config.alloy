@@ -234,6 +234,26 @@ loki.process "vodhunter_retention" {
   forward_to = [loki.write.grafana_cloud.receiver]
 }
 
+discovery.relabel "vodhunter_cobalt" {
+  targets = discovery.docker.vodhunter.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    regex         = "cobalt"
+    action        = "keep"
+  }
+}
+
+loki.source.docker "vodhunter_cobalt" {
+  host    = "unix:///var/run/docker.sock"
+  targets = discovery.relabel.vodhunter_cobalt.output
+  labels = {
+    service_name = "vodhunter-cobalt",
+    environment  = sys.env("VODHUNTER_ENVIRONMENT"),
+  }
+  forward_to = [loki.write.grafana_cloud.receiver]
+}
+
 loki.write "grafana_cloud" {
   endpoint {
     url = sys.env("GRAFANA_CLOUD_LOKI_URL")

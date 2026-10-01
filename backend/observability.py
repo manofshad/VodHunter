@@ -46,6 +46,41 @@ SEARCH_FAILURES_TOTAL = Counter(
     "Number of public searches ending with an application error.",
     labelnames=("error_code",),
 )
+TIKTOK_DOWNLOADS_TOTAL = Counter(
+    "vodhunter_tiktok_downloads_total",
+    "TikTok download attempts by provider and outcome.",
+    labelnames=("provider", "outcome", "category"),
+)
+TIKTOK_DOWNLOAD_PHASE_SECONDS = Histogram(
+    "vodhunter_tiktok_download_phase_seconds",
+    "Time spent resolving or transferring a TikTok MP4.",
+    labelnames=("provider", "phase"),
+    buckets=_STAGE_BUCKETS,
+)
+TIKTOK_DOWNLOAD_BYTES = Histogram(
+    "vodhunter_tiktok_download_bytes",
+    "Successful TikTok MP4 download sizes.",
+    labelnames=("provider",),
+    buckets=(100_000, 500_000, 1_000_000, 2_500_000, 5_000_000, 10_000_000, 25_000_000, 50_000_000, 100_000_000, 200_000_000),
+)
+
+
+def observe_tiktok_download(
+    *,
+    provider: str,
+    outcome: str,
+    category: str,
+    total_ms: int | None,
+    resolve_ms: int | None = None,
+    transfer_ms: int | None = None,
+    size_bytes: int | None = None,
+) -> None:
+    TIKTOK_DOWNLOADS_TOTAL.labels(provider=provider, outcome=outcome, category=category).inc()
+    for phase, duration_ms in (("total", total_ms), ("cobalt_resolve", resolve_ms), ("media_transfer", transfer_ms)):
+        if duration_ms is not None:
+            TIKTOK_DOWNLOAD_PHASE_SECONDS.labels(provider=provider, phase=phase).observe(max(0, duration_ms) / 1000)
+    if size_bytes is not None:
+        TIKTOK_DOWNLOAD_BYTES.labels(provider=provider).observe(max(0, size_bytes))
 
 
 def _build_event_logger() -> logging.Logger:

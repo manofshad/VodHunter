@@ -89,6 +89,8 @@ def build_search_stack(
         search_service=search_service,
         remote_downloader=RemoteClipDownloader(
             temp_dir=download_temp_dir,
+            downloader=os.getenv("TIKTOK_DOWNLOADER", "yt-dlp").strip().lower(),
+            cobalt_api_url=os.getenv("COBALT_API_URL", "").strip(),
         ),
         max_duration_seconds=max_duration_seconds,
     )

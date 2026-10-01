@@ -69,6 +69,10 @@ class SearchManager:
                     on_stage_timing,
                 )
             downloaded_path = result.path
+            if result.cobalt_resolution_ms is not None and on_stage_timing is not None:
+                on_stage_timing("cobalt_resolve", result.cobalt_resolution_ms)
+            if result.media_transfer_ms is not None and on_stage_timing is not None:
+                on_stage_timing("media_transfer", result.media_transfer_ms)
             input_duration_seconds = self._validate_duration(
                 downloaded_path,
                 on_stage_change=on_stage_change,
@@ -88,6 +92,10 @@ class SearchManager:
                     execution_result.metadata.download_duration_ms = duration_ms
                 elif stage == "probe":
                     execution_result.metadata.probe_duration_ms = duration_ms
+            execution_result.metadata.download_provider = result.provider
+            execution_result.metadata.cobalt_resolution_ms = result.cobalt_resolution_ms
+            execution_result.metadata.media_transfer_ms = result.media_transfer_ms
+            execution_result.metadata.download_size_bytes = result.size_bytes
             logger.info(
                 "timing event=search_tiktok_url seconds=%.2f streamer=%s",
                 time.perf_counter() - request_started_at,

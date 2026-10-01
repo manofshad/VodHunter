@@ -36,20 +36,52 @@ class FakeSearchService:
 
 
 class FakeDownloader:
-    def __init__(self, downloaded_path: str):
+    def __init__(self, downloaded_path: str, result: DownloadResult | None = None):
         self.downloaded_path = downloaded_path
+        self.result = result
         self.download_calls: list[str] = []
         self.cleaned_paths: list[str] = []
 
     def download_tiktok(self, url: str) -> DownloadResult:
         self.download_calls.append(url)
-        return DownloadResult(path=self.downloaded_path)
+        return self.result or DownloadResult(path=self.downloaded_path)
 
     def cleanup(self, path: str) -> None:
         self.cleaned_paths.append(path)
 
 
 class TestSearchManager:
+    def test_cobalt_phase_timings_reach_search_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            clip_path = os.path.join(tmp, "clip.mp4")
+            with open(clip_path, "wb") as file:
+                file.write(b"clip")
+            downloader = FakeDownloader(
+                downloaded_path=clip_path,
+                result=DownloadResult(
+                    path=clip_path,
+                    provider="cobalt",
+                    size_bytes=4,
+                    cobalt_resolution_ms=120,
+                    media_transfer_ms=450,
+                    download_duration_ms=570,
+                ),
+            )
+            stages: dict[str, int] = {}
+            manager = SearchManager(FakeSearchService(), downloader, duration_probe=lambda _: 1.0)
+            outcome = manager.search_tiktok_url(
+                "https://www.tiktok.com/@user/video/1",
+                "xqc",
+                on_stage_timing=lambda stage, duration: stages.update({stage: duration}),
+            )
+            assert stages["cobalt_resolve"] == 120
+            assert stages["media_transfer"] == 450
+            assert outcome.execution_metadata.download_provider == "cobalt"
+            assert outcome.execution_metadata.download_size_bytes == 4
+            assert outcome.execution_metadata.cobalt_resolution_ms == 120
+            assert outcome.execution_metadata.media_transfer_ms == 450
+            assert downloader.cleaned_paths == [clip_path]
+
     def test_search_tiktok_url_downloads_then_searches(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             clip_path = os.path.join(tmp, "clip.mp4")
