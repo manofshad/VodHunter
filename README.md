@@ -30,7 +30,7 @@ flowchart LR
 
 Ingestion resolves VOD media with `yt-dlp`, extracts overlapping audio chunks, fingerprints them locally, and stores the timestamped vectors with the model and preprocessing versions. The API preloads the same pinned NMFP model during startup. Search normalizes each query and submits only fingerprint extraction to a single-consumer local queue; downloads, FFmpeg normalization, vector retrieval, and alignment remain independently concurrent. The resulting timestamped fingerprints retrieve the top 10 candidates for every query fingerprint and are aligned by both video ID and stable `VOD time - query time` offset.
 
-The public endpoint is asynchronous: `POST /api/search/clip` creates a job and returns a random `search_token`. `GET /api/search/clip` requires `Authorization: Bearer <search_token>` to return its state and durable result. The frontend opens `/share#<search_token>` to support refresh and the iOS Shortcut handoff without putting the credential in server request URLs. A successful result retains the legacy top-level timestamp/URL while adding `segments` and `unmatched_ranges`. See [search link access and rollout](docs/search-link-access.md).
+The public endpoint is asynchronous: `POST /api/search/clip` creates a job and returns a random `search_token`. `GET /api/search/clip` requires `Authorization: Bearer <search_token>` to return its state and durable result. The frontend opens `/share#<search_token>` to support refresh and the iOS Shortcut handoff without putting the credential in server request URLs. A successful result retains the legacy top-level timestamp/URL while adding `segments` and `unmatched_ranges`.
 
 NMFP only reports ranges with enough consistent evidence. Very short sections, fully overlaid audio, silence, heavy transformation, or isolated nearest neighbors can remain unmatched. An unmatched range is an honest lack of support, not proof that the source audio never occurred in a VOD.
 
@@ -56,7 +56,7 @@ files. The pinned upstream repository and checkpoint must be present before
 startup; the public Docker image bakes them in and verifies their immutable
 identities.
 
-For the self-hosted VPS stack, see [VPS deployment](docs/vps-deployment.md). It uses a standalone Coolify PostgreSQL/pgvector resource alongside the public API, polling worker, and public site. Production HTTPS and public routing are supplied by the hosting platform.
+The self-hosted VPS stack uses a standalone Coolify PostgreSQL/pgvector resource alongside the public API, polling worker, and public site. Production HTTPS and public routing are supplied by the hosting platform.
 
 The stack also includes a separate daily VOD retention service. Both the
 retention setting (`VOD_RETENTION_DAYS`) and the worker's independent
@@ -77,7 +77,7 @@ includes the creator predicate, allowing PostgreSQL to prune unrelated
 partitions before vector search. Ingest provisioning creates a missing creator
 partition before any vectors are written.
 
-The production schema migration is destructive to incompatible fingerprint data by design. The old production database no longer exists, so rollout assumes a fresh database or a complete rebuild rather than a zero-downtime vector conversion. Apply migrations and run the guarded first backfill as described in [NMFP production operations](docs/nmfp-production-operations.md). That guide also covers resumability, version checks, metrics, and rollback boundaries.
+The production schema migration is destructive to incompatible fingerprint data by design. The old production database no longer exists, so rollout assumes a fresh database or a complete rebuild rather than a zero-downtime vector conversion.
 
 The Grafana Cloud telemetry setup, Alloy configuration, reporting views,
 dashboard suite, secret names, and smoke-test queries are documented in
