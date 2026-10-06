@@ -11,6 +11,9 @@ vi.mock("../../api/client", () => ({
   listSearchableStreamers: vi.fn(),
 }));
 
+const searchToken = "A".repeat(43);
+const otherToken = "B".repeat(43);
+
 const tiktokUrl = "https://www.tiktok.com/@demo/video/123456789";
 
 function result(): SearchResponse {
@@ -35,7 +38,7 @@ function result(): SearchResponse {
 
 function job(overrides: Partial<SearchJobResponse> = {}): SearchJobResponse {
   return {
-    search_id: 42,
+    search_token: searchToken,
     status: "queued",
     stage: "validating",
     tiktok_url: tiktokUrl,
@@ -62,15 +65,15 @@ describe("useSearchPage shared jobs", () => {
   it("gives a share URL priority over an older local search", async () => {
     window.localStorage.setItem(
       "vodhunter-public-active-search",
-      JSON.stringify({ searchId: 99, tiktokUrl: "https://www.tiktok.com/@old/video/1" }),
+      JSON.stringify({ searchToken: otherToken, tiktokUrl: "https://www.tiktok.com/@old/video/1" }),
     );
-    window.history.replaceState(null, "", "/share?search_id=42");
+    window.history.replaceState(null, "", `/share#${searchToken}`);
     vi.mocked(getSearchJob).mockResolvedValue(job());
 
     const { result: hook } = renderHook(() => useSearchPage());
 
-    await waitFor(() => expect(getSearchJob).toHaveBeenCalledWith(42));
-    expect(getSearchJob).not.toHaveBeenCalledWith(99);
+    await waitFor(() => expect(getSearchJob).toHaveBeenCalledWith(searchToken));
+    expect(getSearchJob).not.toHaveBeenCalledWith(otherToken);
     expect(hook.current.submitting).toBe(true);
     expect(hook.current.activeSearchStage).toBe("validating");
     expect(hook.current.tiktokUrl).toBe(tiktokUrl);
@@ -79,7 +82,7 @@ describe("useSearchPage shared jobs", () => {
   });
 
   it("restores a completed result and its original TikTok URL", async () => {
-    window.history.replaceState(null, "", "/share?search_id=42");
+    window.history.replaceState(null, "", `/share#${searchToken}`);
     vi.mocked(getSearchJob).mockResolvedValue(
       job({
         status: "completed",
@@ -98,7 +101,7 @@ describe("useSearchPage shared jobs", () => {
   });
 
   it("shows a failed job error", async () => {
-    window.history.replaceState(null, "", "/share?search_id=42");
+    window.history.replaceState(null, "", `/share#${searchToken}`);
     vi.mocked(getSearchJob).mockResolvedValue(
       job({
         status: "failed",
@@ -116,7 +119,7 @@ describe("useSearchPage shared jobs", () => {
   });
 
   it("shows an unknown-job error from the API", async () => {
-    window.history.replaceState(null, "", "/share?search_id=404");
+    window.history.replaceState(null, "", `/share#${otherToken}`);
     vi.mocked(getSearchJob).mockRejectedValue(new Error("Search job was not found"));
 
     const { result: hook } = renderHook(() => useSearchPage());
@@ -125,12 +128,12 @@ describe("useSearchPage shared jobs", () => {
     expect(hook.current.submitting).toBe(false);
   });
 
-  it("rejects a malformed link instead of restoring local state", async () => {
+  it.each(["/share?search_id=42", "/share?search_id=not-a-job"])("rejects a legacy or malformed link %s instead of restoring local state", async (path) => {
     window.localStorage.setItem(
       "vodhunter-public-active-search",
-      JSON.stringify({ searchId: 99, tiktokUrl: "https://www.tiktok.com/@old/video/1" }),
+      JSON.stringify({ searchToken: otherToken, tiktokUrl: "https://www.tiktok.com/@old/video/1" }),
     );
-    window.history.replaceState(null, "", "/share?search_id=not-a-job");
+    window.history.replaceState(null, "", path);
 
     const { result: hook } = renderHook(() => useSearchPage());
 
@@ -141,11 +144,11 @@ describe("useSearchPage shared jobs", () => {
 
   it("moves a new browser search onto its canonical share URL", async () => {
     vi.mocked(createSearchJob).mockResolvedValue({
-      search_id: 84,
+      search_token: otherToken,
       status: "queued",
       stage: "validating",
     });
-    vi.mocked(getSearchJob).mockResolvedValue(job({ search_id: 84 }));
+    vi.mocked(getSearchJob).mockResolvedValue(job({ search_token: otherToken }));
     const { result: hook } = renderHook(() => useSearchPage());
 
     act(() => {
@@ -158,6 +161,22 @@ describe("useSearchPage shared jobs", () => {
 
     await waitFor(() => expect(createSearchJob).toHaveBeenCalled());
     expect(window.location.pathname).toBe("/share");
-    expect(window.location.search).toBe("?search_id=84");
+    expect(window.location.search).toBe("");
+    expect(window.location.hash).toBe(`#${otherToken}`);
+  });
+
+  it("does not resume legacy numeric local storage", async () => {
+    window.localStorage.setItem("vodhunter-public-active-search", JSON.stringify({ searchId: 99, tiktokUrl }));
+    const { result: hook } = renderHook(() => useSearchPage());
+    await waitFor(() => expect(hook.current.loadingStreamers).toBe(false));
+    expect(getSearchJob).not.toHaveBeenCalled();
+    expect(hook.current.submitting).toBe(false);
+  });
+
+  it("resumes a token-based search from local storage", async () => {
+    window.localStorage.setItem("vodhunter-public-active-search", JSON.stringify({ searchToken, tiktokUrl }));
+    vi.mocked(getSearchJob).mockResolvedValue(job());
+    renderHook(() => useSearchPage());
+    await waitFor(() => expect(getSearchJob).toHaveBeenCalledWith(searchToken));
   });
 });

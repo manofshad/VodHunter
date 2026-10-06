@@ -7,6 +7,7 @@ import time
 from backend.observability import observe_terminal_search
 from backend.services.remote_clip_downloader import DownloadError, InvalidTikTokUrlError, validate_tiktok_url
 from backend.services.search_manager import InputDurationExceededError, SearchInputError
+from search.access import create_search_token
 from search.models import SearchDateRange, SearchJobRecord
 from storage.search_job_repository import SearchJobRepository
 
@@ -31,10 +32,12 @@ class SearchJobService:
         streamer: str,
         creator_id: int | None,
         date_range: SearchDateRange | None = None,
-    ) -> int:
+    ) -> str:
         accepted_started_at = time.perf_counter()
         normalized_tiktok_url = validate_tiktok_url(tiktok_url)
+        search_token = create_search_token()
         search_id = self.jobs.create_public_search_job(
+            search_token=search_token,
             tiktok_url=normalized_tiktok_url,
             streamer=streamer,
             creator_id=creator_id,
@@ -48,10 +51,10 @@ class SearchJobService:
             date_range,
             accepted_started_at,
         )
-        return search_id
+        return search_token
 
-    def get_public_search_job(self, search_id: int) -> SearchJobRecord | None:
-        return self.jobs.get_public_search_job(search_id)
+    def get_public_search_job(self, search_token: str) -> SearchJobRecord | None:
+        return self.jobs.get_public_search_job(search_token)
 
     def fail_incomplete_public_search_jobs(self) -> None:
         recovered = self.jobs.fail_incomplete_public_search_jobs(

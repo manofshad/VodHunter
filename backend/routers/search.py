@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Form, HTTPException, Request, Response, status
+from fastapi import APIRouter, Form, Header, HTTPException, Request, Response, status
 
 from backend.search_date_range import parse_search_date_range
 from backend.schemas import (
@@ -10,9 +10,11 @@ from backend.schemas import (
     StreamerListItem,
 )
 from backend.services.remote_clip_downloader import InvalidTikTokUrlError, validate_tiktok_url
+from search.access import is_search_token
 
 router = APIRouter(prefix="/api", tags=["search"])
 STREAMER_LIST_CACHE_CONTROL = "public, max-age=300, stale-while-revalidate=3600"
+SEARCH_ACCESS_HEADERS = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
 
 
 def _normalize_and_validate_streamer(request: Request, streamer: str | None) -> str:
@@ -55,6 +57,7 @@ def _resolve_creator_id(request: Request, streamer: str | None) -> int | None:
 )
 def create_search_clip_job(
     request: Request,
+    response: Response,
     tiktok_url: str | None = Form(default=None),
     streamer: str | None = Form(default=None),
     streamed_from: str | None = Form(default=None),
@@ -84,22 +87,30 @@ def create_search_clip_job(
     normalized_streamer = _normalize_and_validate_streamer(request, streamer)
     creator_id = _resolve_creator_id(request, normalized_streamer)
     date_range = parse_search_date_range(streamed_from, streamed_to)
-    search_id = request.app.state.search_job_service.create_public_search_job(
+    search_token = request.app.state.search_job_service.create_public_search_job(
         tiktok_url=normalized_tiktok_url,
         streamer=normalized_streamer,
         creator_id=creator_id,
         date_range=date_range,
     )
-    return SearchJobCreatedResponse(search_id=search_id, status="queued", stage="validating")
+    response.headers.update(SEARCH_ACCESS_HEADERS)
+    return SearchJobCreatedResponse(search_token=search_token, status="queued", stage="validating")
 
 
 @router.get(
-    "/search/clip/{search_id}",
+    "/search/clip",
     response_model=SearchJobResponse,
     responses={404: {"model": ErrorResponse}},
 )
-def get_search_clip_job(request: Request, search_id: int) -> SearchJobResponse:
-    job = request.app.state.search_job_service.get_public_search_job(search_id)
+def get_search_clip_job(
+    request: Request,
+    response: Response,
+    authorization: str | None = Header(default=None),
+) -> SearchJobResponse:
+    scheme, _, search_token = (authorization or "").partition(" ")
+    job = None
+    if scheme.lower() == "bearer" and is_search_token(search_token):
+        job = request.app.state.search_job_service.get_public_search_job(search_token)
     if job is None:
         raise HTTPException(
             status_code=404,
@@ -107,10 +118,12 @@ def get_search_clip_job(request: Request, search_id: int) -> SearchJobResponse:
                 "code": "SEARCH_NOT_FOUND",
                 "message": "Search job was not found",
             },
+            headers=SEARCH_ACCESS_HEADERS,
         )
 
+    response.headers.update(SEARCH_ACCESS_HEADERS)
     return SearchJobResponse(
-        search_id=job.id,
+        search_token=search_token,
         status=job.status,
         stage=job.stage,
         tiktok_url=job.tiktok_url,

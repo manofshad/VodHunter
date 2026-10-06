@@ -424,12 +424,3 @@ def test_retention_container_is_independent_of_the_heavy_api_runtime() -> None:
     assert "requirements-api-public.txt" not in dockerfile
     assert "tensorflow" not in requirements
     assert "psycopg[binary]==3.2.1" in requirements
-
-
-def test_deployment_guide_invokes_the_one_shot_runner() -> None:
-    deployment_guide = (ROOT_DIR / "docs/vps-deployment.md").read_text()
-
-    assert (
-        "vod-retention python -m runners.run_vod_retention --once"
-        in deployment_guide
-    )

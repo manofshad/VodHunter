@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import json
 from typing import Any
 
+from search.access import hash_search_token, is_search_token
 from search.models import (
     SearchDateRange,
     SearchJobRecord,
@@ -28,16 +29,19 @@ class SearchJobRepository:
     def create_public_search_job(
         self,
         *,
+        search_token: str,
         tiktok_url: str,
         streamer: str,
         creator_id: int | None,
         date_range: SearchDateRange | None = None,
     ) -> int:
+        access_token_hash = hash_search_token(search_token)
         with self.database.connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
                     INSERT INTO search_requests (
+                        access_token_hash,
                         source_app,
                         route,
                         input_type,
@@ -52,10 +56,11 @@ class SearchJobRepository:
                         model_version,
                         preprocessing_version
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
                     """,
                     (
+                        access_token_hash,
                         "public",
                         "/api/search/clip",
                         "tiktok_url",
@@ -226,7 +231,9 @@ class SearchJobRepository:
                     ),
                 )
 
-    def get_public_search_job(self, search_id: int) -> SearchJobRecord | None:
+    def get_public_search_job(self, search_token: str) -> SearchJobRecord | None:
+        if not is_search_token(search_token):
+            return None
         with self.database.connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -249,11 +256,11 @@ class SearchJobRepository:
                         result_payload,
                         tiktok_url
                     FROM search_requests
-                    WHERE id = %s
+                    WHERE access_token_hash = %s
                       AND source_app = 'public'
                     LIMIT 1
                     """,
-                    (int(search_id),),
+                    (hash_search_token(search_token),),
                 )
                 row = cur.fetchone()
         if row is None:

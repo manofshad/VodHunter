@@ -162,6 +162,7 @@ class PostgresDatabase:
                     ("search_requests", "started_at"),
                     ("search_requests", "finished_at"),
                     ("search_requests", "tiktok_url"),
+                    ("search_requests", "access_token_hash"),
                     ("search_requests", "streamed_from"),
                     ("search_requests", "streamed_to"),
                     ("search_requests", "result_payload"),

@@ -4,22 +4,22 @@ import { createSearchJob, getSearchJob, listSearchableStreamers } from "../../ap
 import { SearchJobResponse, SearchResponse, StreamerListItem } from "../../api/types";
 import { createSearchHistoryEntry, SearchHistoryEntry } from "./searchHistory";
 import { isSupportedTikTokUrl } from "./searchUtils";
-import { parseSharedSearchLocation, sharedSearchPath } from "./sharedSearch";
+import { isSearchToken, parseSharedSearchLocation, sharedSearchPath } from "./sharedSearch";
 import { useSearchHistory } from "./useSearchHistory";
 
 const ACTIVE_SEARCH_STORAGE_KEY = "vodhunter-public-active-search";
 
 interface ActiveSearchState {
-  searchId: number;
+  searchToken: string;
   tiktokUrl: string;
   streamedFrom?: string;
   streamedTo?: string;
 }
 
-function persistActiveSearch(searchId: number, tiktokUrl: string, streamedFrom: string, streamedTo: string): void {
+function persistActiveSearch(searchToken: string, tiktokUrl: string, streamedFrom: string, streamedTo: string): void {
   window.localStorage.setItem(
     ACTIVE_SEARCH_STORAGE_KEY,
-    JSON.stringify({ searchId, tiktokUrl, streamedFrom, streamedTo }),
+    JSON.stringify({ searchToken, tiktokUrl, streamedFrom, streamedTo }),
   );
 }
 
@@ -35,11 +35,11 @@ function readActiveSearch(): ActiveSearchState | null {
 
   try {
     const parsed = JSON.parse(raw) as Partial<ActiveSearchState>;
-    if (typeof parsed.searchId !== "number" || typeof parsed.tiktokUrl !== "string") {
+    if (!isSearchToken(parsed.searchToken) || typeof parsed.tiktokUrl !== "string") {
       return null;
     }
     return {
-      searchId: parsed.searchId,
+      searchToken: parsed.searchToken,
       tiktokUrl: parsed.tiktokUrl,
       streamedFrom: typeof parsed.streamedFrom === "string" ? parsed.streamedFrom : "",
       streamedTo: typeof parsed.streamedTo === "string" ? parsed.streamedTo : "",
@@ -87,7 +87,7 @@ export function useSearchPage(): SearchPageState {
   const [requestError, setRequestError] = useState<string | null>(null);
   const [streamerError, setStreamerError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [activeSearchId, setActiveSearchId] = useState<number | null>(null);
+  const [activeSearchToken, setActiveSearchToken] = useState<string | null>(null);
   const [activeSearchStage, setActiveSearchStage] = useState<string | null>(null);
   const [lastSubmittedUrl, setLastSubmittedUrl] = useState("");
   const streamerTriggerRef = useRef<HTMLButtonElement>(null);
@@ -144,7 +144,7 @@ export function useSearchPage(): SearchPageState {
         return;
       }
 
-      setActiveSearchId(sharedSearch.searchId);
+      setActiveSearchToken(sharedSearch.searchToken);
       setActiveSearchStage("validating");
       setSubmitting(true);
       return;
@@ -155,7 +155,7 @@ export function useSearchPage(): SearchPageState {
       return;
     }
 
-    setActiveSearchId(activeSearch.searchId);
+    setActiveSearchToken(activeSearch.searchToken);
     setActiveSearchStage("validating");
     setLastSubmittedUrl(activeSearch.tiktokUrl);
     setTiktokUrl(activeSearch.tiktokUrl);
@@ -165,7 +165,7 @@ export function useSearchPage(): SearchPageState {
   }, []);
 
   useEffect(() => {
-    if (activeSearchId === null) {
+    if (activeSearchToken === null) {
       return;
     }
 
@@ -173,7 +173,7 @@ export function useSearchPage(): SearchPageState {
 
     const poll = async () => {
       try {
-        const job = await getSearchJob(activeSearchId);
+        const job = await getSearchJob(activeSearchToken);
         if (cancelled) {
           return;
         }
@@ -183,7 +183,7 @@ export function useSearchPage(): SearchPageState {
           return;
         }
         setSubmitting(false);
-        setActiveSearchId(null);
+        setActiveSearchToken(null);
         setActiveSearchStage(null);
         clearActiveSearch();
         setRequestError(err instanceof Error ? err.message : "Search failed");
@@ -199,7 +199,7 @@ export function useSearchPage(): SearchPageState {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [activeSearchId]);
+  }, [activeSearchToken]);
 
   const handlePolledJob = (job: SearchJobResponse) => {
     setActiveSearchStage(job.stage);
@@ -217,7 +217,7 @@ export function useSearchPage(): SearchPageState {
     }
 
     setSubmitting(false);
-    setActiveSearchId(null);
+    setActiveSearchToken(null);
     setActiveSearchStage(null);
     clearActiveSearch();
 
@@ -264,7 +264,7 @@ export function useSearchPage(): SearchPageState {
 
     try {
       setSubmitting(true);
-      setActiveSearchId(null);
+      setActiveSearchToken(null);
       setActiveSearchStage("validating");
       setStreamerError(null);
       setRequestError(null);
@@ -276,9 +276,12 @@ export function useSearchPage(): SearchPageState {
         streamedFrom: submittedStreamedFrom || undefined,
         streamedTo: submittedStreamedTo || undefined,
       });
-      persistActiveSearch(created.search_id, submittedUrl, submittedStreamedFrom, submittedStreamedTo);
-      window.history.replaceState(null, "", sharedSearchPath(created.search_id));
-      setActiveSearchId(created.search_id);
+      if (!isSearchToken(created.search_token)) {
+        throw new Error("Could not open the search. Please refresh and try again.");
+      }
+      persistActiveSearch(created.search_token, submittedUrl, submittedStreamedFrom, submittedStreamedTo);
+      window.history.replaceState(null, "", sharedSearchPath(created.search_token));
+      setActiveSearchToken(created.search_token);
       setActiveSearchStage(created.stage);
     } catch (err) {
       setActiveSearchStage(null);

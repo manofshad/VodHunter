@@ -43,7 +43,7 @@ export interface SearchResponse {
 }
 
 export interface SearchJobCreatedResponse {
-  search_id: number;
+  search_token: string;
   status: "queued" | "running" | "completed" | "failed";
   stage: string | null;
 }
@@ -54,7 +54,7 @@ export interface SearchJobError {
 }
 
 export interface SearchJobResponse {
-  search_id: number;
+  search_token: string;
   status: "queued" | "running" | "completed" | "failed";
   stage: string | null;
   tiktok_url: string | null;

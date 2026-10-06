@@ -6,6 +6,7 @@ import json
 import numpy as np
 import pytest
 
+from search.access import create_search_token, hash_search_token
 from search.models import (
     SearchDateRange,
     SearchExecutionMetadata,
@@ -405,7 +406,13 @@ def test_get_public_search_job_restores_nested_multi_segment_payload() -> None:
     )
     store = build_search_job_repository(cursor)
 
-    job = store.get_public_search_job(55)
+    token = create_search_token()
+    job = store.get_public_search_job(token)
+    query, params = cursor.executed[0]
+    assert "WHERE access_token_hash = %s" in query
+    assert "source_app = 'public'" in query
+    assert params == (hash_search_token(token),)
+    assert token not in str(cursor.executed)
 
     assert job is not None
     assert job.result is not None
@@ -415,3 +422,24 @@ def test_get_public_search_job_restores_nested_multi_segment_payload() -> None:
     assert job.result.unmatched_ranges[0].query_start == 5.0
     assert job.tiktok_url == "https://www.tiktok.com/@alice/video/123"
     assert job.streamer == "alice"
+
+
+@pytest.mark.parametrize("token", [55, "55", "", None, "A" * 42, "A" * 44])
+def test_public_search_repository_rejects_non_capabilities_without_querying(token) -> None:
+    cursor = FakeCursor()
+    store = build_search_job_repository(cursor)
+    assert store.get_public_search_job(token) is None
+    assert cursor.executed == []
+
+
+def test_public_search_repository_stores_only_a_capability_hash() -> None:
+    cursor = FakeCursor(row=(55,))
+    store = build_search_job_repository(cursor)
+    token = create_search_token()
+    assert store.create_public_search_job(search_token=token,
+                                          tiktok_url="https://www.tiktok.com/@u/video/1",
+                                          streamer="alice", creator_id=2) == 55
+    query, params = cursor.executed[0]
+    assert "access_token_hash" in query
+    assert params[0] == hash_search_token(token)
+    assert token not in str(cursor.executed)
