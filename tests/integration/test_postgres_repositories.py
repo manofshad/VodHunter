@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import numpy as np
 import pytest
 
+from search.access import create_search_token, hash_search_token
 from search.models import (
     SearchExecutionMetadata,
     SearchRequestOutcome,
@@ -80,15 +81,23 @@ def test_migrated_schema_accepts_real_nmfp_vector_round_trip(store, database_sco
 def test_search_job_payload_survives_real_database_round_trip(store, database_scope) -> None:
     creator_id = _create_creator(store, database_scope)
     video_id = _create_video(store, database_scope, creator_id)
+    search_token = create_search_token()
     search_id = database_scope.remember_search(
         store.search_jobs.create_public_search_job(
+            search_token=search_token,
             tiktok_url="https://www.tiktok.com/@integration/video/123456789",
             streamer=database_scope.streamer,
             creator_id=creator_id,
         )
     )
 
-    queued = store.search_jobs.get_public_search_job(search_id)
+    queued = store.search_jobs.get_public_search_job(search_token)
+    assert store.search_jobs.get_public_search_job(str(search_id)) is None
+    assert store.search_jobs.get_public_search_job(create_search_token()) is None
+    with store.database.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT access_token_hash FROM search_requests WHERE id = %s", (search_id,))
+            assert cur.fetchone()[0] == hash_search_token(search_token)
     assert queued is not None
     assert queued.status == "queued"
     assert queued.result is None
@@ -152,7 +161,7 @@ def test_search_job_payload_survives_real_database_round_trip(store, database_sc
 
     store.search_jobs.complete_search_job(search_id, outcome)
 
-    completed = store.search_jobs.get_public_search_job(search_id)
+    completed = store.search_jobs.get_public_search_job(search_token)
     assert completed is not None
     assert completed.status == "completed"
     assert completed.stage is None

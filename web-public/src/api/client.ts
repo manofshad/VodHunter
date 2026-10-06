@@ -48,7 +48,10 @@ export async function createSearchJob(input: SearchClipInput): Promise<SearchJob
   return parseJson<SearchJobCreatedResponse>(resp);
 }
 
-export async function getSearchJob(searchId: number): Promise<SearchJobResponse> {
-  const resp = await fetch(`${getApiBase()}/search/clip/${searchId}`);
+export async function getSearchJob(searchToken: string): Promise<SearchJobResponse> {
+  const resp = await fetch(`${getApiBase()}/search/clip`, {
+    headers: { Authorization: `Bearer ${searchToken}` },
+    cache: "no-store",
+  });
   return parseJson<SearchJobResponse>(resp);
 }

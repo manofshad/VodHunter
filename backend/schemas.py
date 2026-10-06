@@ -127,13 +127,13 @@ class SearchJobError(BaseModel):
 
 
 class SearchJobCreatedResponse(BaseModel):
-    search_id: int
+    search_token: str
     status: SearchJobStatus
     stage: str | None = None
 
 
 class SearchJobResponse(BaseModel):
-    search_id: int
+    search_token: str
     status: SearchJobStatus
     stage: str | None = None
     tiktok_url: str | None = None

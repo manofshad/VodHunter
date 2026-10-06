@@ -15,7 +15,9 @@ def test_public_web_client_defaults_to_same_origin_api() -> None:
 def test_nginx_public_template_proxies_api_and_rate_limits_search() -> None:
     nginx_template = (ROOT_DIR / "nginx.public.conf.template").read_text()
 
-    assert "limit_req_zone $binary_remote_addr zone=public_search:10m rate=6r/m;" in nginx_template
+    assert "limit_req_zone $public_search_create_key zone=public_search:10m rate=6r/m;" in nginx_template
+    assert 'POST $binary_remote_addr;' in nginx_template
+    assert 'default "";' in nginx_template
     assert "location = /api/search/clip {" in nginx_template
     assert "limit_req zone=public_search burst=2 nodelay;" in nginx_template
     assert "location /api/ {" in nginx_template

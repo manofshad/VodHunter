@@ -6,6 +6,7 @@ import pytest
 from backend.services.search_jobs import SearchJobService
 from backend.services.remote_clip_downloader import DownloadError, InvalidTikTokUrlError
 from backend.services.search_manager import SearchInputError
+from search.access import is_search_token
 from search.models import SearchDateRange, SearchExecutionMetadata, SearchRequestOutcome, SearchResult
 
 
@@ -22,6 +23,7 @@ class InlineExecutor:
 class StubStore:
     def __init__(self):
         self.created_jobs = []
+        self.search_tokens = []
         self.status_updates = []
         self.completed = []
         self.failed = []
@@ -32,11 +34,13 @@ class StubStore:
     def create_public_search_job(
         self,
         *,
+        search_token: str,
         tiktok_url: str,
         streamer: str,
         creator_id: int | None,
         date_range: SearchDateRange | None = None,
     ) -> int:
+        self.search_tokens.append(search_token)
         self.created_jobs.append((tiktok_url, streamer, creator_id, date_range))
         return 7
 
@@ -59,7 +63,7 @@ class StubStore:
         self.failed.append((search_id, error_code, error_message, http_status, input_duration_seconds))
         self.failure_total_duration_ms.append(total_duration_ms)
 
-    def get_public_search_job(self, search_id: int):
+    def get_public_search_job(self, search_token: str):
         return None
 
     def fail_incomplete_public_search_jobs(self, *, error_code: str, error_message: str):
@@ -102,13 +106,14 @@ def test_search_job_service_completes_job() -> None:
     store = StubStore()
     service = SearchJobService(jobs=store, search_manager=StubSearchManager(), executor=InlineExecutor())
 
-    search_id = service.create_public_search_job(
+    search_token = service.create_public_search_job(
         tiktok_url="https://www.tiktok.com/@u/video/1",
         streamer="jason",
         creator_id=2,
     )
 
-    assert search_id == 7
+    assert is_search_token(search_token)
+    assert store.search_tokens == [search_token]
     assert store.created_jobs == [("https://www.tiktok.com/@u/video/1", "jason", 2, None)]
     assert store.status_updates[0] == (7, "running", "validating", True)
     assert (7, None, "downloading", False) in store.status_updates
@@ -271,3 +276,14 @@ def test_search_job_service_emits_recovery_event_for_incomplete_job(monkeypatch)
             "http_status": 500,
         }
     ]
+
+
+def test_each_search_gets_a_new_capability_without_exposing_internal_id() -> None:
+    store = StubStore()
+    service = SearchJobService(jobs=store, search_manager=StubSearchManager(), executor=InlineExecutor())
+    tokens = [service.create_public_search_job(tiktok_url="https://www.tiktok.com/@u/video/1",
+                                             streamer="jason", creator_id=2) for _ in range(2)]
+    assert all(is_search_token(token) for token in tokens)
+    assert tokens[0] != tokens[1]
+    assert store.search_tokens == tokens
+    assert all(search_id == 7 for search_id, _ in store.completed)

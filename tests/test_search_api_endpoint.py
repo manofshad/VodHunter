@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.apps.public import create_public_app
@@ -11,6 +12,10 @@ from search.models import (
     SearchResult,
 )
 from storage.records import SearchableStreamer
+
+
+SEARCH_TOKEN = "A" * 43
+AUTH_HEADERS = {"Authorization": f"Bearer {SEARCH_TOKEN}"}
 
 
 class StubSearchManager:
@@ -66,7 +71,7 @@ class StubStore:
 class StubSearchJobService:
     def __init__(self):
         self.created_jobs: list[dict[str, object]] = []
-        self.jobs: dict[int, SearchJobRecord] = {}
+        self.jobs: dict[str, SearchJobRecord] = {}
 
     def create_public_search_job(
         self,
@@ -75,7 +80,7 @@ class StubSearchJobService:
         streamer: str,
         creator_id: int | None,
         date_range: SearchDateRange | None = None,
-    ) -> int:
+    ) -> str:
         self.created_jobs.append(
             {
                 "tiktok_url": tiktok_url,
@@ -84,10 +89,10 @@ class StubSearchJobService:
                 "date_range": date_range,
             }
         )
-        return 101
+        return SEARCH_TOKEN
 
-    def get_public_search_job(self, search_id: int) -> SearchJobRecord | None:
-        return self.jobs.get(search_id)
+    def get_public_search_job(self, search_token: str) -> SearchJobRecord | None:
+        return self.jobs.get(search_token)
 
 
 def build_client(app_factory):
@@ -124,7 +129,9 @@ def test_public_search_endpoint_accepts_tiktok_url_only() -> None:
         )
 
     assert response.status_code == 202
-    assert response.json() == {"search_id": 101, "status": "queued", "stage": "validating"}
+    assert response.headers["cache-control"] == "no-store"
+    assert "search_id" not in response.json()
+    assert response.json() == {"search_token": SEARCH_TOKEN, "status": "queued", "stage": "validating"}
     assert app.state.search_manager.url_calls == 0
     assert app.state.search_job_service.created_jobs == [
         {
@@ -244,7 +251,7 @@ def test_public_search_endpoint_rejects_invalid_date_range() -> None:
 
 def test_public_search_job_endpoint_returns_job_status() -> None:
     app, client = build_client(create_public_app)
-    app.state.search_job_service.jobs[101] = SearchJobRecord(
+    app.state.search_job_service.jobs[SEARCH_TOKEN] = SearchJobRecord(
         id=101,
         status="completed",
         stage=None,
@@ -259,10 +266,13 @@ def test_public_search_job_endpoint_returns_job_status() -> None:
     )
 
     with client:
-        response = client.get("/api/search/clip/101")
+        response = client.get("/api/search/clip", headers=AUTH_HEADERS)
 
     assert response.status_code == 200
-    assert response.json()["search_id"] == 101
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["referrer-policy"] == "no-referrer"
+    assert "search_id" not in response.json()
+    assert response.json()["search_token"] == SEARCH_TOKEN
     assert response.json()["status"] == "completed"
     assert response.json()["tiktok_url"] == "https://www.tiktok.com/@u/video/1"
     assert response.json()["streamer"] == "jason"
@@ -271,7 +281,7 @@ def test_public_search_job_endpoint_returns_job_status() -> None:
 
 def test_public_search_job_endpoint_returns_queued_job_context() -> None:
     app, client = build_client(create_public_app)
-    app.state.search_job_service.jobs[101] = SearchJobRecord(
+    app.state.search_job_service.jobs[SEARCH_TOKEN] = SearchJobRecord(
         id=101,
         status="queued",
         stage="validating",
@@ -286,11 +296,11 @@ def test_public_search_job_endpoint_returns_queued_job_context() -> None:
     )
 
     with client:
-        response = client.get("/api/search/clip/101")
+        response = client.get("/api/search/clip", headers=AUTH_HEADERS)
 
     assert response.status_code == 200
     assert response.json() == {
-        "search_id": 101,
+        "search_token": SEARCH_TOKEN,
         "status": "queued",
         "stage": "validating",
         "tiktok_url": "https://www.tiktok.com/t/ZP8ctwC2V/",
@@ -305,7 +315,7 @@ def test_public_search_job_endpoint_returns_queued_job_context() -> None:
 
 def test_public_search_job_endpoint_returns_failed_job() -> None:
     app, client = build_client(create_public_app)
-    app.state.search_job_service.jobs[101] = SearchJobRecord(
+    app.state.search_job_service.jobs[SEARCH_TOKEN] = SearchJobRecord(
         id=101,
         status="failed",
         stage=None,
@@ -320,7 +330,7 @@ def test_public_search_job_endpoint_returns_failed_job() -> None:
     )
 
     with client:
-        response = client.get("/api/search/clip/101")
+        response = client.get("/api/search/clip", headers=AUTH_HEADERS)
 
     assert response.status_code == 200
     assert response.json()["status"] == "failed"
@@ -382,7 +392,7 @@ def test_public_search_job_endpoint_returns_restored_multi_segment_payload() -> 
             "query_duration_seconds": 16.0,
         }
     )
-    app.state.search_job_service.jobs[101] = SearchJobRecord(
+    app.state.search_job_service.jobs[SEARCH_TOKEN] = SearchJobRecord(
         id=101,
         status="completed",
         stage=None,
@@ -395,7 +405,7 @@ def test_public_search_job_endpoint_returns_restored_multi_segment_payload() -> 
     )
 
     with client:
-        response = client.get("/api/search/clip/101")
+        response = client.get("/api/search/clip", headers=AUTH_HEADERS)
 
     assert response.status_code == 200
     payload = response.json()["result"]
@@ -422,7 +432,38 @@ def test_public_search_job_endpoint_returns_404_for_unknown_job() -> None:
     app, client = build_client(create_public_app)
 
     with client:
-        response = client.get("/api/search/clip/999")
+        response = client.get("/api/search/clip", headers={"Authorization": f"Bearer {'B' * 43}"})
 
     assert response.status_code == 404
     assert response.json()["detail"]["code"] == "SEARCH_NOT_FOUND"
+
+
+@pytest.mark.parametrize("authorization", [
+    None, "", "Bearer 101", "Basic " + SEARCH_TOKEN,
+    "Bearer " + "A" * 42, "Bearer " + "A" * 44,
+])
+def test_search_reads_require_an_exact_bearer_capability(authorization) -> None:
+    app, client = build_client(create_public_app)
+    # Invalid credentials must be rejected before a service lookup.
+    def unexpected_lookup(token):
+        raise AssertionError("Invalid credential reached search lookup")
+
+    app.state.search_job_service.get_public_search_job = unexpected_lookup
+    headers = {"Authorization": authorization} if authorization is not None else {}
+    response = client.get("/api/search/clip", headers=headers)
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "SEARCH_NOT_FOUND"
+    assert response.headers["cache-control"] == "no-store"
+
+
+def test_numbered_search_route_is_removed_even_with_a_valid_token() -> None:
+    _, client = build_client(create_public_app)
+    for search_id in (1, 101, 161):
+        response = client.get(f"/api/search/clip/{search_id}", headers=AUTH_HEADERS)
+        assert response.status_code == 404
+
+
+def test_query_string_tokens_do_not_grant_access() -> None:
+    _, client = build_client(create_public_app)
+    response = client.get("/api/search/clip", params={"search_token": SEARCH_TOKEN, "search_id": "101"})
+    assert response.status_code == 404

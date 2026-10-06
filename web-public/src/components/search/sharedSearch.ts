@@ -1,28 +1,29 @@
 export type SharedSearchLocation =
   | { kind: "none" }
   | { kind: "invalid" }
-  | { kind: "search"; searchId: number };
+  | { kind: "search"; searchToken: string };
+
+export function isSearchToken(value: unknown): value is string {
+  return typeof value === "string" && value.length === 43 && /^[A-Za-z0-9_-]{43}$/.test(value);
+}
 
 export function parseSharedSearchLocation(
-  location: Pick<Location, "pathname" | "search">,
+  location: Pick<Location, "pathname" | "search" | "hash">,
 ): SharedSearchLocation {
   if (location.pathname !== "/share" && location.pathname !== "/share/") {
     return { kind: "none" };
   }
 
-  const values = new URLSearchParams(location.search).getAll("search_id");
-  if (values.length !== 1 || !/^[1-9]\d*$/.test(values[0])) {
+  // A fragment never reaches web servers or travels in a Referer header.
+  // Reject numbered links rather than upgrading them into access capabilities.
+  const searchToken = location.hash.slice(1);
+  if (location.search || !isSearchToken(searchToken)) {
     return { kind: "invalid" };
   }
 
-  const searchId = Number(values[0]);
-  if (!Number.isSafeInteger(searchId)) {
-    return { kind: "invalid" };
-  }
-
-  return { kind: "search", searchId };
+  return { kind: "search", searchToken };
 }
 
-export function sharedSearchPath(searchId: number): string {
-  return `/share?search_id=${searchId}`;
+export function sharedSearchPath(searchToken: string): string {
+  return `/share#${searchToken}`;
 }

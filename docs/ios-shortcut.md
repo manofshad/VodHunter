@@ -35,9 +35,11 @@ Apple references:
    - Request Body: `Form`
    - `tiktok_url`: the `TikTok URL` magic variable
    - `streamer`: the `Streamer` magic variable
-11. Add **Get Dictionary Value** for `search_id` from the POST response. Rename the output to `Search ID`.
-12. Add **Text** containing `https://vodhunter.com/share?search_id=` followed by the `Search ID` magic variable.
+11. Add **Get Dictionary Value** for `search_token` from the POST response. Rename the output to `Search Token`.
+12. Add **Text** containing `https://vodhunter.com/share#` followed by the `Search Token` magic variable.
 13. Add **Open URLs** using that Text result.
+
+Older installed Shortcuts must update actions 11–12 to this token contract; numbered search links no longer grant access. Re-share the updated iCloud Shortcut after verifying it on a physical iPhone.
 
 The Shortcut must not poll the job. Opening the frontend immediately lets the normal VodHunter polling UI take over and avoids depending on a long-running Shortcut process.
 
@@ -54,6 +56,6 @@ The iCloud Shortcut itself is maintained in Apple's Shortcuts app. Update this d
 - No-input error
 - Streamer list loads and only one streamer can be selected
 - Cancel does not create a search
-- Search creates exactly one job and opens `/share?search_id=...`
+- Search creates exactly one job and opens `/share#<token>`
 - Queued/running progress, completed match, no match, failed job, and unknown job
 - Refresh during processing and opening a completed URL on another device

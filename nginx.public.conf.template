@@ -1,4 +1,8 @@
-limit_req_zone $binary_remote_addr zone=public_search:10m rate=6r/m;
+map $request_method $public_search_create_key {
+    default "";
+    POST $binary_remote_addr;
+}
+limit_req_zone $public_search_create_key zone=public_search:10m rate=6r/m;
 
 server {
     listen 80;

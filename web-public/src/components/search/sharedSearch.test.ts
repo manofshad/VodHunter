@@ -2,34 +2,32 @@ import { describe, expect, it } from "vitest";
 
 import { parseSharedSearchLocation, sharedSearchPath } from "./sharedSearch";
 
+const searchToken = "Ab_-" + "x".repeat(39);
+
 describe("parseSharedSearchLocation", () => {
-  it("reads a positive integer job id from the share page", () => {
-    expect(parseSharedSearchLocation({ pathname: "/share", search: "?search_id=123" })).toEqual({
+  it("reads a capability from the fragment", () => {
+    expect(parseSharedSearchLocation({ pathname: "/share", search: "", hash: `#${searchToken}` })).toEqual({
       kind: "search",
-      searchId: 123,
+      searchToken,
     });
   });
 
-  it.each([
-    "",
-    "?search_id=",
-    "?search_id=0",
-    "?search_id=-1",
-    "?search_id=1.5",
-    "?search_id=abc",
-    "?search_id=1&search_id=2",
-    "?search_id=9007199254740992",
-  ])("rejects an invalid share query %s", (search) => {
-    expect(parseSharedSearchLocation({ pathname: "/share", search })).toEqual({ kind: "invalid" });
+  it.each(["", "#123", "#" + "x".repeat(42), "#" + "x".repeat(44), "#" + "!".repeat(43),
+           `#${searchToken}&extra`, `#${searchToken}%20`, `#${searchToken}\n`])("rejects an invalid share fragment %s", (hash) => {
+    expect(parseSharedSearchLocation({ pathname: "/share", search: "", hash })).toEqual({ kind: "invalid" });
   });
 
-  it("ignores search_id outside the share page", () => {
-    expect(parseSharedSearchLocation({ pathname: "/", search: "?search_id=123" })).toEqual({ kind: "none" });
+  it.each(["?search_id=123", `?search_token=${searchToken}`])("rejects query-based access %s", (search) => {
+    expect(parseSharedSearchLocation({ pathname: "/share", search, hash: `#${searchToken}` })).toEqual({ kind: "invalid" });
+  });
+
+  it("ignores tokens outside the share page", () => {
+    expect(parseSharedSearchLocation({ pathname: "/", search: "", hash: `#${searchToken}` })).toEqual({ kind: "none" });
   });
 });
 
 describe("sharedSearchPath", () => {
-  it("builds the canonical frontend job URL", () => {
-    expect(sharedSearchPath(123)).toBe("/share?search_id=123");
+  it("keeps the capability out of the request URL and query string", () => {
+    expect(sharedSearchPath(searchToken)).toBe(`/share#${searchToken}`);
   });
 });

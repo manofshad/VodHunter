@@ -313,3 +313,18 @@ class TestAlembicMigrations:
         )
         assert 'DROP TABLE IF EXISTS fingerprint_index_metadata' in combined_sql
         assert 'DROP COLUMN IF EXISTS result_payload' in combined_sql
+    def test_search_capability_migration_does_not_grant_tokens_to_legacy_rows(self) -> None:
+        revision = self._load_module(
+            'alembic/versions/20261005_0016_add_search_access_tokens.py',
+            'vodhunter_alembic_revision_search_access',
+        )
+        fake_op = FakeOp()
+        with patch.object(revision, 'op', fake_op):
+            revision.upgrade()
+        combined_sql = '\n'.join(fake_op.executed)
+        assert revision.down_revision == '20260923_0015'
+        assert 'ADD COLUMN IF NOT EXISTS access_token_hash TEXT' in combined_sql
+        assert 'CREATE UNIQUE INDEX IF NOT EXISTS idx_search_requests_access_token_hash' in combined_sql
+        assert 'WHERE access_token_hash IS NOT NULL' in combined_sql
+        assert 'UPDATE' not in combined_sql
+        assert 'DEFAULT' not in combined_sql

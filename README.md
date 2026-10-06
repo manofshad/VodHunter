@@ -30,7 +30,7 @@ flowchart LR
 
 Ingestion resolves VOD media with `yt-dlp`, extracts overlapping audio chunks, fingerprints them locally, and stores the timestamped vectors with the model and preprocessing versions. The API preloads the same pinned NMFP model during startup. Search normalizes each query and submits only fingerprint extraction to a single-consumer local queue; downloads, FFmpeg normalization, vector retrieval, and alignment remain independently concurrent. The resulting timestamped fingerprints retrieve the top 10 candidates for every query fingerprint and are aligned by both video ID and stable `VOD time - query time` offset.
 
-The public endpoint is asynchronous: `POST /api/search/clip` creates a job and `GET /api/search/clip/{search_id}` returns its state and durable result. A successful result retains the legacy top-level timestamp/URL while adding `segments` and `unmatched_ranges`.
+The public endpoint is asynchronous: `POST /api/search/clip` creates a job and returns a random `search_token`. `GET /api/search/clip` requires `Authorization: Bearer <search_token>` to return its state and durable result. The frontend opens `/share#<search_token>` to support refresh and the iOS Shortcut handoff without putting the credential in server request URLs. A successful result retains the legacy top-level timestamp/URL while adding `segments` and `unmatched_ranges`. See [search link access and rollout](docs/search-link-access.md).
 
 NMFP only reports ranges with enough consistent evidence. Very short sections, fully overlaid audio, silence, heavy transformation, or isolated nearest neighbors can remain unmatched. An unmatched range is an honest lack of support, not proof that the source audio never occurred in a VOD.
 
