@@ -117,10 +117,6 @@ docker compose -f compose.test.yaml down
 
 The production stack is never used by these tests.
 
-## Third-party licensing status
-
-The upstream `neural-music-fp` implementation used by NMFP is identified as AGPLv3. The product owner confirmed that the production licensing decision is resolved for this migration. Preserve the upstream notices and the separately distributed checkpoint terms when packaging the worker.
-
 ## License
 
 VodHunter's own source is licensed under the MIT License.
