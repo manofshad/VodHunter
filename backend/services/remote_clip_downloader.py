@@ -65,6 +65,10 @@ _TIKTOK_RESOLVER_USER_AGENT = (
     "Chrome/131.0.0.0 Safari/537.36"
 )
 _SHORT_LINK_TARGET_ERROR = "TikTok short link must resolve to a single TikTok video"
+_TIKTOK_LOGIN_REQUIRED_ERROR = re.compile(
+    r"^ERROR: \[TikTok\] [0-9]+: [^\r\n]*\bLog in for access\.",
+    re.MULTILINE,
+)
 _TRANSIENT_RESOLVE_EXCEPTIONS = (
     _TransientTikTokResolveError,
     http.client.HTTPException,
@@ -303,6 +307,12 @@ class RemoteClipDownloader:
 
         if result.returncode != 0:
             message = (result.stderr or result.stdout or "yt-dlp failed").strip()
+            if _TIKTOK_LOGIN_REQUIRED_ERROR.search(result.stderr or ""):
+                logger.warning("tiktok_download_login_required error=%s", message)
+                raise DownloadError(
+                    "This TikTok requires login, so VodHunter cannot download it. "
+                    "Try a publicly accessible TikTok video."
+                )
             raise DownloadError(message)
 
         pattern = os.path.join(self.temp_dir, f"tiktok_{token}.*")
