@@ -10,4 +10,4 @@ python-dotenv>=1.0.1
 psycopg[binary]==3.2.1
 # Newer releases require typing extensions that conflict with TensorFlow 2.13.
 pgvector==0.3.6
-yt-dlp>=2026.8.19
+yt-dlp[curl-cffi]>=2026.8.19
