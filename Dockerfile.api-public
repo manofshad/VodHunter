@@ -38,7 +38,10 @@ ARG NMFP_MODEL_ARCHIVE_MD5=ee8a3358fc5e5cdd09d6d2245d395021
 
 RUN git clone https://github.com/raraz15/neural-music-fp.git "$NMFP_REPOSITORY_PATH" \
     && git -C "$NMFP_REPOSITORY_PATH" checkout --detach "$NMFP_CODE_COMMIT" \
-    && curl -L --fail --silent --show-error -o /tmp/nmfp-triplet.zip "$NMFP_MODEL_URL" \
+    && for attempt in 1 2 3 4 5; do \
+        curl -L --fail --silent --show-error --connect-timeout 30 --max-time 600 \
+            --continue-at - -o /tmp/nmfp-triplet.zip "$NMFP_MODEL_URL" && break; \
+    done \
     && echo "$NMFP_MODEL_ARCHIVE_MD5  /tmp/nmfp-triplet.zip" | md5sum -c - \
     && mkdir -p "$NMFP_REPOSITORY_PATH/pretrained_models" \
     && unzip -q /tmp/nmfp-triplet.zip -d "$NMFP_REPOSITORY_PATH/pretrained_models" \
