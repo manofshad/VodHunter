@@ -29,7 +29,8 @@ RUN apt-get update \
 COPY backend/requirements-api-public.txt ./backend/requirements-api-public.txt
 COPY backend/requirements-nmfp.txt ./backend/requirements-nmfp.txt
 
-RUN pip install --no-cache-dir -r backend/requirements-api-public.txt
+RUN python -m pip install --no-cache-dir --timeout=60 --upgrade pip==26.2.1 \
+    && python -m pip install --no-cache-dir --timeout=60 --retries=10 --resume-retries=10 -r backend/requirements-api-public.txt
 
 ARG NMFP_CODE_COMMIT=15c6f3bcdf6a6da1daddfe47a1ffa5a0d22deadc
 ARG NMFP_MODEL_URL=https://zenodo.org/api/records/15719945/files/nmfp-triplet.zip/content
