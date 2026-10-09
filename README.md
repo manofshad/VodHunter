@@ -1,121 +1,43 @@
 # VodHunter
 
-[vodhunter.com](https://vodhunter.com/) searches short-form audio against Twitch VODs. The production search path uses NMFP neural audio fingerprints and can map an edited query to multiple, possibly non-contiguous VOD ranges.
+Find the original Twitch moment behind a TikTok clip.
 
-## Production architecture
+[Try VodHunter at vodhunter.com](https://vodhunter.com/)
 
-The ingest and query paths share one immutable fingerprint identity:
+VodHunter matches a clip's audio to a streamer's Twitch VODs and gives you links
+to the matching timestamps. An edited clip can contain several moments, even
+from different VODs. VodHunter groups the matches by source so you can open each
+one.
 
-- model: `nmfp-triplet@15c6f3bcdf6a6da1daddfe47a1ffa5a0d22deadc+zenodo-15719945+ckpt-100`
-- preprocessing: `nmfp-8khz-mono-1s-hop0.5-mel-v1`
-- output width: 128 dimensions
-- audio: 8 kHz mono, 1-second windows, 0.5-second fingerprint hop
+## Find a moment
 
-The service rejects a database, worker response, or local runtime whose dimensions or version identifiers differ. Do not change any part of this identity in isolation; a different checkpoint or preprocessing contract requires a new index and a full reindex.
+1. Paste a TikTok link and choose a streamer.
+2. Narrow the search by date if you know when the stream happened.
+3. Open a match to jump to that moment in the original Twitch VOD.
+
+Your search history lets you revisit previous results. You can also share a
+result link or reopen a search while it is still running.
+
+On iPhone, the site's **iPhone shortcut** button lets you add **Search with
+VodHunter** to your share sheet. Then you can start a search directly from TikTok.
+
+## How it works
+
+VodHunter turns audio from Twitch VODs into neural fingerprints, each tied to a
+timestamp. It fingerprints the TikTok audio, finds similar fingerprints, and
+checks that they line up into consistent stretches of audio.
 
 ```mermaid
 flowchart LR
-    VOD["Twitch VOD"] --> Extract["ffmpeg: 8 kHz mono"]
-    Extract --> IngestNMFP["persistent NMFP ingest model"]
-    IngestNMFP --> Vectors["Postgres + pgvector(128)"]
-
-    Query["TikTok clip"] --> Normalize["ffmpeg normalization"]
-    Normalize --> Queue["single-consumer local NMFP queue"]
-    Queue --> LocalNMFP["preloaded backend NMFP model"]
-    LocalNMFP --> Candidates["top-k neighbors per fingerprint"]
-    Vectors --> Candidates
-    Candidates --> Align["video + stable-offset track alignment"]
-    Align --> Result["primary timestamp + segments + unmatched ranges"]
+    Clip["TikTok clip"] --> Audio["Match the audio"]
+    VODs["Indexed Twitch VODs"] --> Audio
+    Audio --> Moments["Matched moments"]
+    Moments --> Watch["Open Twitch at the timestamp"]
 ```
 
-Ingestion resolves VOD media with `yt-dlp`, extracts overlapping audio chunks, fingerprints them locally, and stores the timestamped vectors with the model and preprocessing versions. The API preloads the same pinned NMFP model during startup. Search normalizes each query and submits only fingerprint extraction to a single-consumer local queue; downloads, FFmpeg normalization, vector retrieval, and alignment remain independently concurrent. The resulting timestamped fingerprints retrieve the top 10 candidates for every query fingerprint and are aligned by both video ID and stable `VOD time - query time` offset.
-
-The public endpoint is asynchronous: `POST /api/search/clip` creates a job and returns a random `search_token`. `GET /api/search/clip` requires `Authorization: Bearer <search_token>` to return its state and durable result. The frontend opens `/share#<search_token>` to support refresh and the iOS Shortcut handoff without putting the credential in server request URLs. A successful result retains the legacy top-level timestamp/URL while adding `segments` and `unmatched_ranges`.
-
-NMFP only reports ranges with enough consistent evidence. Very short sections, fully overlaid audio, silence, heavy transformation, or isolated nearest neighbors can remain unmatched. An unmatched range is an honest lack of support, not proof that the source audio never occurred in a VOD.
-
-## Cut-aware alignment defaults
-
-Alignment thresholds are code-owned defaults in
-`search/alignment_service.py`. The current defaults are 10 neighbors per
-fingerprint, a 0.5-second fingerprint hop, a 0.5-second offset bin, +/-1
-second offset tolerance, a 2-second unsupported-gap limit, six-fingerprint
-minimum support, a 4-second minimum segment, 0.4 minimum density, a 1-second
-merge gap, a 4-second merge offset tolerance, and at most 12 returned
-segments. Treat these as tuned defaults, not guarantees; evaluate code changes
-against representative edits before rollout.
-
-## Setup and operations
-
-Copy `.env.example` to an ignored `.env` and fill in deployment values and
-secrets locally. NMFP's model, preprocessing, sample-rate, window, hop, and
-vector-dimension identity is pinned in code; only the repository and model
-configuration paths vary by environment. The production API uses Python 3.11
-and installs the TensorFlow/Essentia NMFP runtime from the backend requirements
-files. The pinned upstream repository and checkpoint must be present before
-startup; the public Docker image bakes them in and verifies their immutable
-identities.
-
-The self-hosted VPS stack uses a standalone Coolify PostgreSQL/pgvector resource alongside the public API, polling worker, and public site. Production HTTPS and public routing are supplied by the hosting platform.
-
-The stack also includes a separate daily VOD retention service. Both the
-retention setting (`VOD_RETENTION_DAYS`) and the worker's independent
-`HYBRID_INGEST_DAYS` setting default to 30 days, keeping ingestion aligned with
-the retained search history.
-
-The ingest worker has a code-owned default roster of `jasontheween` and
-`stableronaldo`. One process loads NMFP once, runs an independent controller
-for each streamer, and serializes model inference through a priority queue so
-live chunks run before queued backlog chunks. Repeat `--streamer` (or use
-`--streamers` with a comma-separated list) to override the roster for a manual
-run. Streamer names and HNSW scan tuning are intentionally not environment
-settings.
-
-`fingerprint_embeddings` is LIST-partitioned by `creator_id`; every creator has
-its own HNSW index. Search still uses the same repository API and always
-includes the creator predicate, allowing PostgreSQL to prune unrelated
-partitions before vector search. Ingest provisioning creates a missing creator
-partition before any vectors are written.
-
-The production schema migration is destructive to incompatible fingerprint data by design. The old production database no longer exists, so rollout assumes a fresh database or a complete rebuild rather than a zero-downtime vector conversion.
-
-The Grafana Cloud telemetry setup, Alloy configuration, reporting views,
-dashboard suite, secret names, and smoke-test queries are documented in
-[observability](observability/README.md).
-
-No application deployment or external database creation is performed by repository commands unless an operator explicitly runs the relevant external tooling.
-
-## Latency measurements
-
-The experiment's roughly 231-240 ms median was cached NMFP alignment using already-extracted query fingerprints. It excluded TensorFlow/container startup and query fingerprint extraction, so it is not end-to-end production latency.
-
-Production records audio normalization, cold model startup, fingerprint preprocessing/inference/total extraction, vector retrieval, cut alignment, and total request latency separately. Compare cold requests with cold requests and warm requests with warm requests; do not present the cached experiment number as clip-to-result latency.
-
-## Testing
-
-Run the Python suite with:
-
-```bash
-python3 -m pytest -m "not integration"
-```
-
-The public frontend tests and production build can be run with:
-
-```bash
-(cd web-public && npm ci && npm test && npm run build)
-```
-
-Integration tests use a disposable PostgreSQL/pgvector database. Start the local
-test database with:
-
-```bash
-docker compose -f compose.test.yaml up -d
-DATABASE_URL=postgresql://vodhunter:vodhunter@localhost:55432/vodhunter_test alembic upgrade head
-VODHUNTER_TEST_DATABASE_URL=postgresql://vodhunter:vodhunter@localhost:55432/vodhunter_test python3 -m pytest -m integration
-docker compose -f compose.test.yaml down
-```
-
-The production stack is never used by these tests.
+Search covers the VODs VodHunter has indexed for the selected streamer. Very
+short clips, heavy music overlays, or heavily altered audio can leave some or
+all of a clip unmatched.
 
 ## License
 
