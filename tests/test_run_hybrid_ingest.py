@@ -683,19 +683,18 @@ class TestRunHybridIngest:
         )
         store = FakeStore()
         logs: list[str] = []
-        stop_flag = {"done": False}
-        FakeBacklogSession.run_started_event = threading.Event()
+        started = threading.Event()
+        stopped = threading.Event()
 
-        def should_stop() -> bool:
-            return stop_flag["done"]
+        class BlockingBacklogSession(FakeBacklogSession):
+            def run(self) -> None:
+                started.set()
+                assert stopped.wait(timeout=5.0)
 
-        def trigger_stop() -> None:
-            assert FakeBacklogSession.run_started_event is not None
-            FakeBacklogSession.run_started_event.wait(timeout=1.0)
-            stop_flag["done"] = True
+            def stop(self) -> None:
+                super().stop()
+                stopped.set()
 
-        stopper = threading.Thread(target=trigger_stop, daemon=True)
-        stopper.start()
         result = run_hybrid_ingest(
             "alice",
             monitor=monitor,
@@ -703,16 +702,16 @@ class TestRunHybridIngest:
             build_ingest=lambda: {"embedder": object()},
             historical_source_factory=FakeSource,
             live_source_factory=FakeSource,
-            session_factory=HybridSessionFactory(),
+            session_factory=BlockingBacklogSession,
             out=logs.append,
-            should_stop=should_stop,
+            should_stop=started.is_set,
             watch_poll_seconds=0.0,
             backlog_live_poll_seconds=0.0,
             session_wait_seconds=0.0,
             retry_seconds=0.0,
         )
-        stopper.join(timeout=1.0)
-
+        assert stopped.is_set()
+        assert FakeBacklogSession.stop_calls == ["vod-1"]
         assert result.backlog_ingested == 0
         assert result.handoffs_to_live == 0
         assert not any(line == "completed mode=backlog vod=vod-1 url=https://www.twitch.tv/videos/vod-1" for line in logs)

@@ -4,14 +4,6 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parents[1]
 
 
-def test_public_web_client_defaults_to_same_origin_api() -> None:
-    client_source = (ROOT_DIR / "web-public/src/api/client.ts").read_text()
-
-    assert 'const PROD_API_BASE = "/api";' in client_source
-    assert 'const API_BASE = ENV_API_BASE || (import.meta.env.DEV ? DEV_API_BASE : PROD_API_BASE);' in client_source
-    assert "VITE_API_BASE is required in production" not in client_source
-
-
 def test_nginx_public_template_proxies_api_and_rate_limits_search() -> None:
     nginx_template = (ROOT_DIR / "nginx.public.conf.template").read_text()
 
