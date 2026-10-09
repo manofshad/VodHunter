@@ -40,6 +40,11 @@ server {
         return 429 '{"detail":{"code":"RATE_LIMITED","message":"Too many search requests. Please wait a moment and try again."}}';
     }
 
+    location ^~ /shortcuts/ {
+        types { application/x-apple-shortcut shortcut; }
+        try_files $uri =404;
+    }
+
     location / {
         try_files $uri $uri/ /index.html;
     }

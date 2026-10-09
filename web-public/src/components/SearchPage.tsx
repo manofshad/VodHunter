@@ -1,40 +1,57 @@
 import { RefObject, useRef, useState } from "react";
-import { History as HistoryIcon } from "lucide-react";
+import { History as HistoryIcon, Smartphone } from "lucide-react";
 
 import { HistoryDrawer } from "./search/HistoryDrawer";
 import { SearchFeedback } from "./search/SearchFeedback";
 import { SearchForm } from "./search/SearchForm";
+import { ShortcutDialog } from "./search/ShortcutDialog";
 import { useSearchPage } from "./search/useSearchPage";
 
 export { DateRangePicker } from "./search/DateRangePicker";
 export { SearchResultCard } from "./search/SearchResults";
 export { formatTimelineTime, isSupportedTikTokUrl } from "./search/searchUtils";
 
+type OpenPanel = "history" | "shortcut" | null;
+
 interface HeaderProps {
-  historyOpen: boolean;
+  openPanel: OpenPanel;
   historyButtonRef: RefObject<HTMLButtonElement>;
+  shortcutButtonRef: RefObject<HTMLButtonElement>;
   onOpenHistory: () => void;
+  onOpenShortcut: () => void;
 }
 
-function Header({ historyOpen, historyButtonRef, onOpenHistory }: HeaderProps) {
+function Header({ openPanel, historyButtonRef, shortcutButtonRef, onOpenHistory, onOpenShortcut }: HeaderProps) {
   return (
-    <header className="border-b border-gray-700 bg-gray-900 px-6 py-4">
-      <div className="mx-auto flex max-w-7xl items-center justify-between">
+    <header className="border-b border-gray-700 bg-gray-900 px-3 py-4 sm:px-6">
+      <div className="mx-auto flex max-w-7xl items-center justify-between gap-2">
         <div className="flex items-center gap-2" aria-label="VodHunter">
-          <span className="text-xl font-bold text-white">
+          <span className="text-lg font-bold text-white sm:text-xl">
             <span className="font-bold">Vod</span>
             <span className="font-bold text-[#fb2844]">Hunter</span>
           </span>
         </div>
-        <nav>
+        <nav aria-label="Search tools" className="flex shrink-0 items-center gap-1 sm:gap-2">
+          <button
+            ref={shortcutButtonRef}
+            type="button"
+            aria-haspopup="dialog"
+            aria-expanded={openPanel === "shortcut"}
+            aria-controls="vodhunter-shortcut-dialog"
+            onClick={onOpenShortcut}
+            className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-800 px-2 text-xs font-semibold text-gray-200 transition hover:border-[#fb2844] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#fb2844] sm:gap-2 sm:px-3 sm:text-sm"
+          >
+            <Smartphone aria-hidden="true" className="size-4 shrink-0 sm:size-5" />
+            <span>iPhone shortcut</span>
+          </button>
           <button
             ref={historyButtonRef}
             type="button"
             aria-label="History"
-            aria-expanded={historyOpen}
+            aria-expanded={openPanel === "history"}
             aria-controls="vodhunter-history-drawer"
             onClick={onOpenHistory}
-            className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-gray-300 transition hover:bg-gray-800 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#fb2844]"
+            className="inline-flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-lg px-2 py-2 text-sm font-semibold text-gray-300 transition hover:bg-gray-800 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#fb2844] sm:px-3"
           >
             <HistoryIcon aria-hidden="true" className="size-5" />
             <span className="hidden sm:inline">History</span>
@@ -80,23 +97,32 @@ function FeatureGrid() {
 
 export default function SearchPage() {
   const page = useSearchPage();
-  const [historyOpen, setHistoryOpen] = useState(false);
+  const [openPanel, setOpenPanel] = useState<OpenPanel>(null);
   const historyButtonRef = useRef<HTMLButtonElement>(null);
+  const shortcutButtonRef = useRef<HTMLButtonElement>(null);
 
   return (
     <div className="min-h-screen bg-gray-900">
       <Header
-        historyOpen={historyOpen}
+        openPanel={openPanel}
         historyButtonRef={historyButtonRef}
-        onOpenHistory={() => setHistoryOpen(true)}
+        shortcutButtonRef={shortcutButtonRef}
+        onOpenHistory={() => setOpenPanel("history")}
+        onOpenShortcut={() => setOpenPanel("shortcut")}
       />
 
       <HistoryDrawer
-        open={historyOpen}
+        open={openPanel === "history"}
         entries={page.historyEntries}
         returnFocusRef={historyButtonRef}
-        onClose={() => setHistoryOpen(false)}
+        onClose={() => setOpenPanel(null)}
         onClear={page.onClearHistory}
+      />
+
+      <ShortcutDialog
+        open={openPanel === "shortcut"}
+        returnFocusRef={shortcutButtonRef}
+        onClose={() => setOpenPanel(null)}
       />
 
       <main>

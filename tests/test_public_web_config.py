@@ -35,6 +35,15 @@ def test_public_web_dockerfile_uses_templated_nginx_config() -> None:
     assert "COPY docker/web-public/40-validate-public-api-upstream.sh /docker-entrypoint.d/40-validate-public-api-upstream.sh" in dockerfile
 
 
+def test_shortcut_downloads_use_apple_mime_type_and_missing_files_return_404() -> None:
+    nginx_template = (ROOT_DIR / "nginx.public.conf.template").read_text()
+    shortcut_location = nginx_template.split("location ^~ /shortcuts/ {", 1)[1].split("\n    }", 1)[0]
+
+    assert "types { application/x-apple-shortcut shortcut; }" in shortcut_location
+    assert "try_files $uri =404;" in shortcut_location
+    assert "/index.html" not in shortcut_location
+
+
 def test_public_web_startup_requires_public_api_upstream() -> None:
     startup_script = (ROOT_DIR / "docker/web-public/40-validate-public-api-upstream.sh").read_text()
 

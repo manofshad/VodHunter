@@ -1,0 +1,34 @@
+#define name Search with VodHunter
+#define color red
+#define inputs url, text
+#define from sharesheet
+#define noinput stopwith "Share a TikTok video with this shortcut."
+#define version 16
+
+#include 'actions/web'
+
+const sharedURLs = getURLs(ShortcutInput)
+const tiktokURL = getFirstItem(sharedURLs)
+if !tiktokURL {
+    alert("No TikTok URL was found. Share a TikTok video and try again.", "VodHunter")
+    stop()
+}
+
+const streamers = downloadURL("https://vodhunter.com/api/search/streamers")
+@streamerNames: array
+for item in streamers {
+    const itemDictionary = getDictionary(@item)
+    const itemName = getValue(itemDictionary, "name")
+    @streamerNames += itemName
+}
+const streamer = chooseFromList(@streamerNames, "Choose a streamer")
+confirm("Search this TikTok clip with {streamer}?", "VodHunter")
+
+const created = formRequest("https://vodhunter.com/api/search/clip", "POST", {"tiktok_url": "{tiktokURL}", "streamer": "{streamer}"})
+const response = getDictionary(created)
+const searchToken = getValue(response, "search_token")
+if !searchToken {
+    alert("VodHunter could not start the search. Open vodhunter.com and try again.", "Search failed")
+    stop()
+}
+openURL("https://vodhunter.com/share#{searchToken}")
