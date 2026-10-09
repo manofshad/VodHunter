@@ -39,11 +39,12 @@ function Header({ openPanel, historyButtonRef, shortcutButtonRef, onOpenHistory,
             aria-expanded={openPanel === "shortcut"}
             aria-controls="vodhunter-shortcut-dialog"
             onClick={onOpenShortcut}
-            className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-800 px-2 text-xs font-semibold text-gray-200 transition hover:border-[#fb2844] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#fb2844] sm:gap-2 sm:px-3 sm:text-sm"
+            className="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-xs text-gray-300 transition hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#fb2844] sm:gap-2 sm:text-sm"
           >
-            <Smartphone aria-hidden="true" className="size-4 shrink-0 sm:size-5" />
             <span>iPhone shortcut</span>
+            <Smartphone aria-hidden="true" className="size-4 shrink-0 sm:size-5" />
           </button>
+          <span aria-hidden="true" className="h-6 w-px shrink-0 bg-gray-700" />
           <button
             ref={historyButtonRef}
             type="button"
