@@ -3,9 +3,7 @@
 // committed to the repository.
 
 prometheus.scrape "vodhunter_api" {
-  targets = [{
-    __address__ = "api:8000",
-  }]
+  targets         = discovery.relabel.vodhunter_api_metrics.output
   metrics_path    = "/internal/metrics"
   scrape_interval = "15s"
   scrape_timeout  = "10s"
@@ -24,15 +22,44 @@ prometheus.remote_write "grafana_cloud" {
 }
 
 discovery.docker "vodhunter" {
-  host = "unix:///var/run/docker.sock"
+  host                = "unix:///var/run/docker.sock"
+  match_first_network = false
+}
+
+discovery.relabel "vodhunter_api_metrics" {
+  targets = discovery.docker.vodhunter.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service", "__meta_docker_container_label_vodhunter_service"]
+    regex         = "api;.*|.*;api"
+    action        = "keep"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_network_name"]
+    regex         = "coolify"
+    action        = "keep"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_port_private"]
+    regex         = "8000"
+    action        = "keep"
+  }
 }
 
 discovery.relabel "vodhunter_api" {
   targets = discovery.docker.vodhunter.targets
 
   rule {
-    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
-    regex         = "api"
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service", "__meta_docker_container_label_vodhunter_service"]
+    regex         = "api;.*|.*;api"
+    action        = "keep"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_network_name"]
+    regex         = "coolify"
     action        = "keep"
   }
 }

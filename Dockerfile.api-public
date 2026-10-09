@@ -1,3 +1,16 @@
+FROM node:20-alpine AS public-web-build
+
+WORKDIR /app/web-public
+
+ARG VITE_API_BASE=/api
+ENV VITE_API_BASE=${VITE_API_BASE}
+
+COPY web-public/package.json web-public/package-lock.json ./
+RUN npm ci
+
+COPY web-public/ ./
+RUN npm run build
+
 FROM python:3.11-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -45,3 +58,26 @@ RUN mkdir -p data/temp_search_downloads data/temp_search
 EXPOSE 8000
 
 CMD ["uvicorn", "backend.apps.public:app", "--host", "0.0.0.0", "--port", "8000", "--log-config", "/app/backend/logging.json"]
+
+FROM runtime AS public-rolling
+
+LABEL vodhunter.service=api
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends nginx supervisor gettext-base \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -f /etc/nginx/sites-enabled/default
+
+COPY nginx.public.conf.template /etc/nginx/templates/default.conf.template
+COPY --from=public-web-build /app/web-public/dist /usr/share/nginx/html
+COPY docker/public-rolling /app/docker/public-rolling
+
+RUN chmod +x /app/docker/public-rolling/entrypoint.sh
+
+EXPOSE 80
+
+HEALTHCHECK --interval=5s --timeout=10s --start-period=180s --retries=3 \
+    CMD ["python", "/app/docker/public-rolling/healthcheck.py"]
+
+ENTRYPOINT ["/app/docker/public-rolling/entrypoint.sh"]
+CMD ["/usr/bin/supervisord", "-c", "/app/docker/public-rolling/supervisord.conf"]
