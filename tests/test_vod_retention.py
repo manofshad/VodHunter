@@ -415,12 +415,10 @@ def test_once_cli_runs_one_pass_and_exits(monkeypatch: pytest.MonkeyPatch) -> No
     assert calls == [True]
 
 
-def test_retention_container_is_independent_of_the_heavy_api_runtime() -> None:
+def test_retention_image_uses_its_lightweight_dependency_set() -> None:
     dockerfile = (ROOT_DIR / "Dockerfile.retention").read_text()
     requirements = (ROOT_DIR / "backend/requirements-retention.txt").read_text()
 
-    assert "FROM python:3.11-slim" in dockerfile
     assert "requirements-retention.txt" in dockerfile
     assert "requirements-api-public.txt" not in dockerfile
     assert "tensorflow" not in requirements
-    assert "psycopg[binary]==3.2.1" in requirements

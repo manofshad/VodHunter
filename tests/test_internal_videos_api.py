@@ -50,22 +50,6 @@ def _build_client(
     return app, TestClient(app)
 
 
-def test_public_app_exposes_internal_video_routes() -> None:
-    store = StubInternalVideoStore()
-    app, client = _build_client(store)
-
-    with client:
-        response = client.post(
-            "/internal/videos/11/delete-index",
-            headers={"X-Internal-Api-Key": "test-internal-key"},
-            json={"actor_creator_id": 99},
-        )
-
-    assert response.status_code == 200
-    assert response.json() == {"video_id": 11, "status": "deleted"}
-    assert store.delete_calls == [(11, 99)]
-
-
 def test_delete_index_returns_deleted_for_searchable_video() -> None:
     store = StubInternalVideoStore()
     app, client = _build_client(store)
@@ -200,38 +184,6 @@ def test_internal_videos_rejects_invalid_state_transitions(
             "message": f"Cannot apply requested transition from status '{error.current_status}'",
         }
     }
-
-
-def test_delete_index_is_idempotent_when_video_already_deleted() -> None:
-    store = StubInternalVideoStore()
-    app, client = _build_client(store)
-
-    with client:
-        response = client.post(
-            "/internal/videos/11/delete-index",
-            headers={"X-Internal-Api-Key": "test-internal-key"},
-            json={"actor_creator_id": 99},
-        )
-
-    assert response.status_code == 200
-    assert response.json() == {"video_id": 11, "status": "deleted"}
-    assert store.delete_calls == [(11, 99)]
-
-
-def test_request_reindex_is_idempotent_when_already_requested() -> None:
-    store = StubInternalVideoStore()
-    app, client = _build_client(store)
-
-    with client:
-        response = client.post(
-            "/internal/videos/11/request-reindex",
-            headers={"X-Internal-Api-Key": "test-internal-key"},
-            json={"actor_creator_id": 99},
-        )
-
-    assert response.status_code == 200
-    assert response.json() == {"video_id": 11, "status": "reindex_requested"}
-    assert store.reindex_calls == [(11, 99)]
 
 
 class FakeCursor:

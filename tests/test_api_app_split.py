@@ -7,6 +7,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 from backend.apps import public as public_app_module
 from backend.bootstrap_shared import SearchStack
+from pipeline.nmfp_inference import model_artifact_identity
 
 
 def _route_paths(routes) -> set[str]:
@@ -34,14 +35,6 @@ class StubQueryEmbedder:
         self.close_calls += 1
 
 class TestApiAppSplit:
-
-    def test_route_paths_support_lazy_included_router(self) -> None:
-        class IncludedRouter:
-
-            def effective_candidates(self):
-                return [type('Route', (), {'path': '/api/health'})()]
-
-        assert _route_paths([IncludedRouter()]) == {'/api/health'}
 
     def test_ingest_bootstrap_does_not_import_fastapi(self) -> None:
         root = Path(__file__).resolve().parents[1]
@@ -101,7 +94,7 @@ import backend.bootstrap_shared
             'embedding_dim': 128,
             'model_version': 'nmfp-model',
             'preprocessing_version': 'nmfp-preprocessing',
-            'artifact_identity': response.json()['artifact_identity'],
+            'artifact_identity': model_artifact_identity(),
         }
 
     def test_public_lifespan_initializes_search_only(self) -> None:

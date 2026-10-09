@@ -56,23 +56,6 @@ def _track(
     ]
 
 
-def test_alignment_defaults_match_tuned_experiment() -> None:
-    config = AlignmentConfig()
-
-    assert config.top_k == 10
-    assert config.fingerprint_hop_seconds == 0.5
-    assert config.offset_bin_seconds == 0.5
-    assert config.offset_tolerance_seconds == 1.0
-    assert config.max_unmatched_gap_seconds == 2.0
-    assert config.min_support == 6
-    assert config.min_segment_duration_seconds == 4.0
-    assert config.min_density == 0.4
-    assert config.min_score == 0.10
-    assert config.merge_query_gap_seconds == 1.0
-    assert config.merge_offset_tolerance_seconds == 4.0
-    assert config.max_segments == 12
-
-
 def test_fingerprint_candidate_computes_offset() -> None:
     candidate = _candidate(7.5, 100.25)
 

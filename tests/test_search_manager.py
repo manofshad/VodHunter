@@ -78,6 +78,7 @@ class TestSearchManager:
             assert {stage for stage, _ in stage_timings} >= {"download", "probe"}
             assert outcome.execution_metadata.download_duration_ms is not None
             assert outcome.execution_metadata.probe_duration_ms is not None
+            assert outcome.total_duration_ms is not None
 
     def test_search_tiktok_url_forwards_date_range(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -115,23 +116,6 @@ class TestSearchManager:
             with pytest.raises(RuntimeError):
                 manager.search_tiktok_url("https://www.tiktok.com/@user/video/1", "xqc")
             assert downloader.cleaned_paths == [clip_path]
-
-    def test_search_tiktok_url_not_blocked_when_monitor_would_be_busy(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            clip_path = os.path.join(tmp, "clip.mp4")
-            with open(clip_path, "wb") as f:
-                f.write(b"clip")
-            service = FakeSearchService()
-            downloader = FakeDownloader(downloaded_path=clip_path)
-            manager = SearchManager(
-                search_service=service,
-                remote_downloader=downloader,
-                duration_probe=lambda _: 1.0,
-            )
-            outcome = manager.search_tiktok_url("https://www.tiktok.com/@user/video/1", "xqc")
-            assert downloader.download_calls == ["https://www.tiktok.com/@user/video/1"]
-            assert service.searched_paths == [(clip_path, "xqc")]
-            assert outcome.total_duration_ms is not None
 
     def test_tiktok_rejects_when_duration_exceeds_limit_and_cleans(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

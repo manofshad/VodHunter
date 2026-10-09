@@ -5,6 +5,10 @@ on:
     branches:
       - main
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   web-public-tests:
     name: Public web tests
@@ -27,6 +31,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Type check frontend tests
+        run: npm run typecheck:test
 
       - name: Run frontend tests
         run: npm test

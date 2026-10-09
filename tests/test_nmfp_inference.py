@@ -143,10 +143,23 @@ def test_rejects_wrong_embedding_dimension() -> None:
         fingerprinter.extract_audio(np.zeros(8_000, dtype=np.float32), 8_000)
 
 
-def test_artifact_identity_is_stable_sha256() -> None:
+@pytest.mark.parametrize(
+    ("attribute", "changed_value"),
+    [
+        ("NMFP_MODEL_VERSION", "different-model"),
+        ("NMFP_PREPROCESSING_VERSION", "different-preprocessing"),
+        ("NMFP_EMBEDDING_DIM", 256),
+        ("NMFP_MODEL_ARCHIVE_MD5", "different-archive"),
+    ],
+)
+def test_artifact_identity_is_stable_and_tracks_model_compatibility(
+    monkeypatch, attribute, changed_value,
+) -> None:
     identity = model_artifact_identity()
     assert len(identity) == 64
     assert identity == model_artifact_identity()
+    monkeypatch.setattr(f"pipeline.nmfp_inference.{attribute}", changed_value)
+    assert identity != model_artifact_identity()
 
 
 def test_repository_commit_reader_handles_detached_head(tmp_path) -> None:
