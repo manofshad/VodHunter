@@ -1,3 +1,16 @@
+FROM node:20-alpine AS public-web-build
+
+WORKDIR /app/web-public
+
+ARG VITE_API_BASE=/api
+ENV VITE_API_BASE=${VITE_API_BASE}
+
+COPY web-public/package.json web-public/package-lock.json ./
+RUN npm ci
+
+COPY web-public/ ./
+RUN npm run build
+
 FROM python:3.11-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -16,7 +29,8 @@ RUN apt-get update \
 COPY backend/requirements-api-public.txt ./backend/requirements-api-public.txt
 COPY backend/requirements-nmfp.txt ./backend/requirements-nmfp.txt
 
-RUN pip install --no-cache-dir -r backend/requirements-api-public.txt
+RUN python -m pip install --no-cache-dir --timeout=60 --upgrade pip==26.2.1 \
+    && python -m pip install --no-cache-dir --timeout=60 --retries=10 --resume-retries=10 -r backend/requirements-api-public.txt
 
 ARG NMFP_CODE_COMMIT=15c6f3bcdf6a6da1daddfe47a1ffa5a0d22deadc
 ARG NMFP_MODEL_URL=https://zenodo.org/api/records/15719945/files/nmfp-triplet.zip/content
@@ -24,7 +38,10 @@ ARG NMFP_MODEL_ARCHIVE_MD5=ee8a3358fc5e5cdd09d6d2245d395021
 
 RUN git clone https://github.com/raraz15/neural-music-fp.git "$NMFP_REPOSITORY_PATH" \
     && git -C "$NMFP_REPOSITORY_PATH" checkout --detach "$NMFP_CODE_COMMIT" \
-    && curl -L --fail --silent --show-error -o /tmp/nmfp-triplet.zip "$NMFP_MODEL_URL" \
+    && for attempt in 1 2 3 4 5; do \
+        curl -L --fail --silent --show-error --connect-timeout 30 --max-time 600 \
+            --continue-at - -o /tmp/nmfp-triplet.zip "$NMFP_MODEL_URL" && break; \
+    done \
     && echo "$NMFP_MODEL_ARCHIVE_MD5  /tmp/nmfp-triplet.zip" | md5sum -c - \
     && mkdir -p "$NMFP_REPOSITORY_PATH/pretrained_models" \
     && unzip -q /tmp/nmfp-triplet.zip -d "$NMFP_REPOSITORY_PATH/pretrained_models" \
@@ -45,3 +62,26 @@ RUN mkdir -p data/temp_search_downloads data/temp_search
 EXPOSE 8000
 
 CMD ["uvicorn", "backend.apps.public:app", "--host", "0.0.0.0", "--port", "8000", "--log-config", "/app/backend/logging.json"]
+
+FROM runtime AS public-rolling
+
+LABEL vodhunter.service=api
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends nginx supervisor gettext-base \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -f /etc/nginx/sites-enabled/default
+
+COPY nginx.public.conf.template /etc/nginx/templates/default.conf.template
+COPY --from=public-web-build /app/web-public/dist /usr/share/nginx/html
+COPY docker/public-rolling /app/docker/public-rolling
+
+RUN chmod +x /app/docker/public-rolling/entrypoint.sh
+
+EXPOSE 80
+
+HEALTHCHECK --interval=5s --timeout=10s --start-period=180s --retries=3 \
+    CMD ["python", "/app/docker/public-rolling/healthcheck.py"]
+
+ENTRYPOINT ["/app/docker/public-rolling/entrypoint.sh"]
+CMD ["/usr/bin/supervisord", "-c", "/app/docker/public-rolling/supervisord.conf"]

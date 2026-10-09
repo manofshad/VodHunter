@@ -5,6 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.api-public
+      target: runtime
     env_file:
       - .env
     command: ["alembic", "upgrade", "head"]
@@ -16,6 +17,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.api-public
+      target: runtime
     env_file:
       - .env
     expose:
@@ -65,6 +67,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.api-public
+      target: runtime
     env_file:
       - .env
     command:
