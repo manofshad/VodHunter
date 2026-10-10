@@ -1,13 +1,6 @@
 {
   "__inputs": [
     {
-      "name": "DS_METRICS",
-      "label": "Metrics datasource",
-      "type": "datasource",
-      "pluginId": "prometheus",
-      "pluginName": "Prometheus"
-    },
-    {
       "name": "DS_LOGS",
       "label": "Logs datasource",
       "type": "datasource",
@@ -16,14 +9,27 @@
     },
     {
       "name": "DS_POSTGRES",
-      "label": "Reporting datasource",
+      "label": "PostgreSQL datasource",
       "type": "datasource",
       "pluginId": "grafana-postgresql-datasource",
       "pluginName": "PostgreSQL"
     }
   ],
   "annotations": {
-    "list": []
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
   },
   "editable": true,
   "fiscalYearStartMonth": 0,
@@ -44,11 +50,21 @@
   ],
   "panels": [
     {
-      "type": "stat",
-      "title": "Searches",
       "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_METRICS}"
+        "type": "grafana-postgresql-datasource",
+        "uid": "${DS_POSTGRES}"
+      },
+      "description": "Durable accepted jobs in the selected range. Browser validation and edge rate limits are excluded.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
+          "noValue": "No observations",
+          "unit": "short"
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 5,
@@ -56,22 +72,10 @@
         "x": 0,
         "y": 0
       },
-      "targets": [
-        {
-          "expr": "sum(increase(vodhunter_searches_total[$__range]))",
-          "legendFormat": "",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
+      "id": 1,
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -83,14 +87,38 @@
         },
         "textMode": "auto"
       },
-      "id": 1
+      "targets": [
+        {
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_search_quality WHERE $__timeFilter(created_at)",
+          "refId": "A",
+          "sql": {
+            "columns": [],
+            "groupBy": []
+          }
+        }
+      ],
+      "title": "Accepted searches",
+      "type": "stat"
     },
     {
-      "type": "stat",
-      "title": "Match rate",
       "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_METRICS}"
+        "type": "grafana-postgresql-datasource",
+        "uid": "${DS_POSTGRES}"
+      },
+      "description": "Completed / terminal jobs. No-match is a technical completion; pending jobs appear separately.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
+          "noValue": "No observations",
+          "unit": "percentunit"
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 5,
@@ -98,22 +126,10 @@
         "x": 4,
         "y": 0
       },
-      "targets": [
-        {
-          "expr": "sum(increase(vodhunter_searches_total{outcome=\"match\"}[$__range])) / clamp_min(sum(increase(vodhunter_searches_total{outcome=~\"match|no_match\"}[$__range])), 1)",
-          "legendFormat": "",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percentunit"
-        },
-        "overrides": []
-      },
+      "id": 2,
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -125,14 +141,38 @@
         },
         "textMode": "auto"
       },
-      "id": 2
+      "targets": [
+        {
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*) FILTER (WHERE job_status = 'completed')::double precision / NULLIF(COUNT(*) FILTER (WHERE job_status IN ('completed', 'failed')), 0) AS value FROM grafana_search_quality WHERE $__timeFilter(created_at)",
+          "refId": "A",
+          "sql": {
+            "columns": [],
+            "groupBy": []
+          }
+        }
+      ],
+      "title": "Technical completion",
+      "type": "stat"
     },
     {
-      "type": "stat",
-      "title": "Search latency p95",
       "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_METRICS}"
+        "type": "grafana-postgresql-datasource",
+        "uid": "${DS_POSTGRES}"
+      },
+      "description": "Durable server wall-clock elapsed time, including queue wait. This does not measure browser result rendering.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
+          "noValue": "No observations",
+          "unit": "s"
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 5,
@@ -140,22 +180,10 @@
         "x": 8,
         "y": 0
       },
-      "targets": [
-        {
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(vodhunter_search_duration_seconds_bucket[$__rate_interval])))",
-          "legendFormat": "",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s"
-        },
-        "overrides": []
-      },
+      "id": 3,
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -167,14 +195,48 @@
         },
         "textMode": "auto"
       },
-      "id": 3
+      "targets": [
+        {
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT percentile_cont(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM finished_at-created_at)) AS value FROM grafana_search_quality WHERE $__timeFilter(created_at) AND finished_at IS NOT NULL",
+          "refId": "A",
+          "sql": {
+            "columns": [],
+            "groupBy": []
+          }
+        }
+      ],
+      "title": "Accepted-to-finish p95",
+      "type": "stat"
     },
     {
-      "type": "stat",
-      "title": "Searchable streamers",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "${DS_POSTGRES}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "noValue": "No observations",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 5,
@@ -182,28 +244,10 @@
         "x": 12,
         "y": 0
       },
-      "targets": [
-        {
-          "editorMode": "code",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_streamer_summary WHERE searchable_vods > 0",
-          "refId": "A",
-          "sql": {
-            "columns": [],
-            "groupBy": []
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
+      "id": 4,
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -215,14 +259,38 @@
         },
         "textMode": "auto"
       },
-      "id": 4
+      "targets": [
+        {
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_search_quality WHERE $__timeFilter(created_at) AND job_status = 'failed'",
+          "refId": "A",
+          "sql": {
+            "columns": [],
+            "groupBy": []
+          }
+        }
+      ],
+      "title": "Failed searches",
+      "type": "stat"
     },
     {
-      "type": "stat",
-      "title": "Active ingests",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "${DS_POSTGRES}"
+      },
+      "description": "Matches / completed searches. Confidence and match rate do not prove correctness.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
+          "noValue": "No observations",
+          "unit": "percentunit"
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 5,
@@ -230,28 +298,10 @@
         "x": 16,
         "y": 0
       },
-      "targets": [
-        {
-          "editorMode": "code",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT COALESCE(SUM(active_vods), 0)::double precision AS value FROM grafana_streamer_summary",
-          "refId": "A",
-          "sql": {
-            "columns": [],
-            "groupBy": []
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
+      "id": 5,
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -263,14 +313,38 @@
         },
         "textMode": "auto"
       },
-      "id": 5
+      "targets": [
+        {
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*) FILTER (WHERE outcome = 'match')::double precision / NULLIF(COUNT(*) FILTER (WHERE outcome IN ('match', 'no_match')), 0) AS value FROM grafana_search_quality WHERE $__timeFilter(created_at)",
+          "refId": "A",
+          "sql": {
+            "columns": [],
+            "groupBy": []
+          }
+        }
+      ],
+      "title": "Match rate",
+      "type": "stat"
     },
     {
-      "type": "stat",
-      "title": "Stalled ingests",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "${DS_POSTGRES}"
+      },
+      "description": "Current persisted pending jobs, independent of the selected historical range.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
+          "noValue": "No observations",
+          "unit": "short"
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 5,
@@ -278,29 +352,10 @@
         "x": 20,
         "y": 0
       },
-      "targets": [
-        {
-          "editorMode": "code",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT COALESCE(SUM(stalled_vods), 0)::double precision AS value FROM grafana_streamer_summary",
-          "refId": "A",
-          "sql": {
-            "columns": [],
-            "groupBy": []
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "description": "Indexing VODs whose cursor has not updated for ten minutes, or which have no cursor.",
+      "id": 6,
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -312,14 +367,43 @@
         },
         "textMode": "auto"
       },
-      "id": 6
+      "targets": [
+        {
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_search_quality WHERE job_status IN ('queued','running')",
+          "refId": "A",
+          "sql": {
+            "columns": [],
+            "groupBy": []
+          }
+        }
+      ],
+      "title": "Pending searches now",
+      "type": "stat"
     },
     {
-      "type": "timeseries",
-      "title": "Search outcomes",
       "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_METRICS}"
+        "type": "grafana-postgresql-datasource",
+        "uid": "${DS_POSTGRES}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 12,
+            "lineInterpolation": "linear",
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "noValue": "No observations",
+          "unit": "short"
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 8,
@@ -327,26 +411,7 @@
         "x": 0,
         "y": 5
       },
-      "targets": [
-        {
-          "expr": "sum by (outcome) (rate(vodhunter_searches_total[$__rate_interval]))",
-          "legendFormat": "{{outcome}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "reqps",
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 12,
-            "lineInterpolation": "linear",
-            "showPoints": "never",
-            "spanNulls": false
-          }
-        },
-        "overrides": []
-      },
+      "id": 7,
       "options": {
         "legend": {
           "displayMode": "list",
@@ -356,27 +421,12 @@
           "mode": "multi"
         }
       },
-      "id": 7
-    },
-    {
-      "type": "table",
-      "title": "Streamer inventory",
-      "datasource": {
-        "type": "grafana-postgresql-datasource",
-        "uid": "${DS_POSTGRES}"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 5
-      },
       "targets": [
         {
           "editorMode": "code",
-          "format": "table",
+          "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT streamer AS \"Streamer\", total_vods AS \"VODs\",\n                   searchable_vods AS \"Complete\", active_vods AS \"Active\",\n                   stalled_vods AS \"Stalled\", reindex_requested_vods AS \"Reindex\",\n                   newest_vod_at AS \"Newest VOD\", last_ingest_update AS \"Last ingest activity\"\n            FROM grafana_streamer_summary\n            ORDER BY stalled_vods DESC, active_vods DESC, streamer",
+          "rawSql": "SELECT $__timeGroupAlias(created_at, $__interval), outcome AS metric, COUNT(*)::double precision AS value FROM grafana_search_quality WHERE $__timeFilter(created_at) GROUP BY 1,outcome ORDER BY 1",
           "refId": "A",
           "sql": {
             "columns": [],
@@ -384,24 +434,80 @@
           }
         }
       ],
+      "title": "Accepted search outcomes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${DS_POSTGRES}"
+      },
+      "description": "Current state, not historical ingest throughput. An offline creator naturally has older content. The reporting view calls an indexing VOD active when its cursor was updated within 10 minutes. An older or missing update is a stale cursor. This does not prove that processing is advancing or that the worker failed.",
       "fieldConfig": {
         "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "noValue": "No rows",
           "unit": "short"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^(.*[ _]ID|search_id|Twitch VOD)$"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              }
+            ]
+          }
+        ]
       },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 5
+      },
+      "id": 8,
       "options": {
         "cellHeight": "sm",
         "showHeader": true
       },
-      "id": 8
+      "targets": [
+        {
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT streamer AS \"Streamer\", searchable_vods AS \"Searchable VODs\", active_vods AS \"Recent cursors\", stalled_vods AS \"Stale cursors\", ROUND(EXTRACT(EPOCH FROM NOW()-newest_vod_at)::numeric / 86400, 1) AS \"Newest age (d)\" FROM grafana_streamer_summary ORDER BY stalled_vods DESC, streamer",
+          "refId": "A",
+          "sql": {
+            "columns": [],
+            "groupBy": []
+          }
+        }
+      ],
+      "title": "Current content health",
+      "type": "table"
     },
     {
-      "type": "logs",
-      "title": "Recent errors across VodHunter",
       "datasource": {
         "type": "loki",
         "uid": "${DS_LOGS}"
+      },
+      "description": "API error and critical levels, worker failed lines and error= diagnostics, and failed retention events. No matching lines means no observed errors in this window, provided logs are arriving. Open Monitoring Health to check collection.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "noValue": "No observations",
+          "unit": "short"
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 9,
@@ -409,19 +515,7 @@
         "x": 0,
         "y": 13
       },
-      "targets": [
-        {
-          "expr": "{service_name=~\"vodhunter-api|vodhunter-worker|vodhunter-retention\"} |~ \"(?i)error|failed|exception\"",
-          "refId": "A",
-          "queryType": "range"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
+      "id": 9,
       "options": {
         "enableLogDetails": true,
         "prettifyLogMessage": true,
@@ -429,13 +523,34 @@
         "showLabels": false,
         "showTime": true,
         "sortOrder": "Descending",
-        "wrapLines": false
+        "wrapLines": true
       },
-      "id": 9
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "{service_name=\"vodhunter-api\", environment=\"production\", level=~\"error|critical\"}",
+          "queryType": "range",
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "{service_name=\"vodhunter-worker\", environment=\"production\"} |~ \"^failed |(^| )error=\"",
+          "queryType": "range",
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "{service_name=\"vodhunter-retention\", environment=\"production\", event=\"vod_retention_failed\"}",
+          "queryType": "range",
+          "refId": "C"
+        }
+      ],
+      "title": "Recent operational errors",
+      "type": "logs"
     }
   ],
-  "refresh": "30s",
-  "schemaVersion": 39,
+  "refresh": "1m",
+  "schemaVersion": 42,
   "tags": [
     "vodhunter",
     "overview"
@@ -444,12 +559,12 @@
     "list": []
   },
   "time": {
-    "from": "now-24h",
+    "from": "now-7d",
     "to": "now"
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "00 - VodHunter Overview",
-  "uid": "vodhunter-overview",
-  "version": 1
+  "title": "00 - User Experience Overview",
+  "weekStart": "",
+  "uid": "vodhunter-overview"
 }

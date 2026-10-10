@@ -9,14 +9,27 @@
     },
     {
       "name": "DS_POSTGRES",
-      "label": "Reporting datasource",
+      "label": "PostgreSQL datasource",
       "type": "datasource",
       "pluginId": "grafana-postgresql-datasource",
       "pluginName": "PostgreSQL"
     }
   ],
   "annotations": {
-    "list": []
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
   },
   "editable": true,
   "fiscalYearStartMonth": 0,
@@ -37,11 +50,21 @@
   ],
   "panels": [
     {
-      "type": "stat",
-      "title": "Worker log lines",
       "datasource": {
         "type": "loki",
         "uid": "${DS_LOGS}"
+      },
+      "description": "Worker logs cover all streamers regardless of the SQL streamer selection. No matching events means no events were observed in the selected range. Monitoring Health verifies telemetry collection separately. Watch mode intentionally logs infrequently, so this is activity rather than a heartbeat.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
+          "noValue": "No matching events",
+          "unit": "short"
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 5,
@@ -49,24 +72,10 @@
         "x": 0,
         "y": 0
       },
-      "targets": [
-        {
-          "expr": "sum(count_over_time({service_name=\"vodhunter-worker\"}[$__range]))",
-          "refId": "A",
-          "queryType": "instant",
-          "instant": true
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "description": "Activity in the selected range; this is not a heartbeat because watch mode intentionally logs infrequently.",
+      "id": 1,
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -78,14 +87,32 @@
         },
         "textMode": "auto"
       },
-      "id": 1
+      "targets": [
+        {
+          "expr": "sum(count_over_time({service_name=\"vodhunter-worker\", environment=\"production\"}[$__range]))",
+          "instant": true,
+          "queryType": "instant",
+          "refId": "A"
+        }
+      ],
+      "title": "Worker log lines (all streamers)",
+      "type": "stat"
     },
     {
-      "type": "stat",
-      "title": "Active VODs",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "${DS_POSTGRES}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
+          "noValue": "No observations",
+          "unit": "short"
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 5,
@@ -93,28 +120,10 @@
         "x": 4,
         "y": 0
       },
-      "targets": [
-        {
-          "editorMode": "code",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_vod_inventory WHERE ('${streamer}' = '.*' OR streamer = '${streamer}') AND operational_status = 'in_progress'",
-          "refId": "A",
-          "sql": {
-            "columns": [],
-            "groupBy": []
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
+      "id": 2,
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -126,14 +135,38 @@
         },
         "textMode": "auto"
       },
-      "id": 2
+      "targets": [
+        {
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_vod_inventory WHERE streamer IN (${streamer:sqlstring}) AND operational_status = 'in_progress'",
+          "refId": "A",
+          "sql": {
+            "columns": [],
+            "groupBy": []
+          }
+        }
+      ],
+      "title": "Recently updated ingest cursors",
+      "type": "stat",
+      "description": "The reporting view calls an indexing VOD active when its cursor was updated within 10 minutes. An older or missing update is a stale cursor. This does not prove that processing is advancing or that the worker failed."
     },
     {
-      "type": "stat",
-      "title": "Stalled VODs",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "${DS_POSTGRES}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
+          "noValue": "No observations",
+          "unit": "short"
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 5,
@@ -141,28 +174,10 @@
         "x": 8,
         "y": 0
       },
-      "targets": [
-        {
-          "editorMode": "code",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_vod_inventory WHERE ('${streamer}' = '.*' OR streamer = '${streamer}') AND operational_status = 'stalled'",
-          "refId": "A",
-          "sql": {
-            "columns": [],
-            "groupBy": []
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
+      "id": 3,
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -174,14 +189,38 @@
         },
         "textMode": "auto"
       },
-      "id": 3
+      "targets": [
+        {
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_vod_inventory WHERE streamer IN (${streamer:sqlstring}) AND operational_status = 'stalled'",
+          "refId": "A",
+          "sql": {
+            "columns": [],
+            "groupBy": []
+          }
+        }
+      ],
+      "title": "Stale ingest cursors",
+      "type": "stat",
+      "description": "The reporting view calls an indexing VOD active when its cursor was updated within 10 minutes. An older or missing update is a stale cursor. This does not prove that processing is advancing or that the worker failed."
     },
     {
-      "type": "stat",
-      "title": "Reindex queue",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "${DS_POSTGRES}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
+          "noValue": "No observations",
+          "unit": "short"
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 5,
@@ -189,12 +228,27 @@
         "x": 12,
         "y": 0
       },
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
       "targets": [
         {
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_vod_inventory WHERE ('${streamer}' = '.*' OR streamer = '${streamer}') AND status = 'reindex_requested'",
+          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_vod_inventory WHERE streamer IN (${streamer:sqlstring}) AND status = 'reindex_requested'",
           "refId": "A",
           "sql": {
             "columns": [],
@@ -202,34 +256,24 @@
           }
         }
       ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "id": 4
+      "title": "Reindex queue",
+      "type": "stat"
     },
     {
-      "type": "stat",
-      "title": "Failures",
       "datasource": {
         "type": "loki",
         "uid": "${DS_LOGS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
+          "noValue": "No matching events",
+          "unit": "short"
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 5,
@@ -237,23 +281,10 @@
         "x": 16,
         "y": 0
       },
-      "targets": [
-        {
-          "expr": "sum(count_over_time({service_name=\"vodhunter-worker\", action=\"failed\"} | regexp \"streamer=(?P<streamer>[^ ]+)\" | streamer=~\"${streamer}\" [$__range]))",
-          "refId": "A",
-          "queryType": "instant",
-          "instant": true
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
+      "id": 5,
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -265,14 +296,33 @@
         },
         "textMode": "auto"
       },
-      "id": 5
+      "targets": [
+        {
+          "expr": "sum(count_over_time({service_name=\"vodhunter-worker\", environment=\"production\"} |~ \"^failed |(^| )error=\" [$__range]))",
+          "instant": true,
+          "queryType": "instant",
+          "refId": "A"
+        }
+      ],
+      "title": "Failures (all streamers)",
+      "type": "stat",
+      "description": "Worker logs cover all streamers regardless of the SQL streamer selection. No matching events means no events were observed in the selected range. Monitoring Health verifies telemetry collection separately. Includes failed action lines and error= diagnostics such as watch-mode live_check_failed DNS errors."
     },
     {
-      "type": "stat",
-      "title": "Handoffs",
       "datasource": {
         "type": "loki",
         "uid": "${DS_LOGS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
+          "noValue": "No matching events",
+          "unit": "short"
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 5,
@@ -280,23 +330,10 @@
         "x": 20,
         "y": 0
       },
-      "targets": [
-        {
-          "expr": "sum(count_over_time({service_name=\"vodhunter-worker\", action=\"handoff\"} | regexp \"streamer=(?P<streamer>[^ ]+)\" | streamer=~\"${streamer}\" [$__range]))",
-          "refId": "A",
-          "queryType": "instant",
-          "instant": true
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
+      "id": 6,
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -308,14 +345,45 @@
         },
         "textMode": "auto"
       },
-      "id": 6
+      "targets": [
+        {
+          "expr": "sum(count_over_time({service_name=\"vodhunter-worker\", environment=\"production\", action=\"handoff\"}[$__range]))",
+          "instant": true,
+          "queryType": "instant",
+          "refId": "A"
+        }
+      ],
+      "title": "Handoffs (all streamers)",
+      "type": "stat",
+      "description": "Worker logs cover all streamers regardless of the SQL streamer selection. No matching events means no events were observed in the selected range. Monitoring Health verifies telemetry collection separately."
     },
     {
-      "type": "table",
-      "title": "Current ingest cursors",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "${DS_POSTGRES}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "noValue": "No rows",
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^(.*[ _]ID|search_id|Twitch VOD)$"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 9,
@@ -323,12 +391,17 @@
         "x": 0,
         "y": 5
       },
+      "id": 7,
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true
+      },
       "targets": [
         {
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT streamer AS \"Streamer\", title AS \"VOD\", vod_url AS \"VOD URL\",\n                   operational_status AS \"Health\", ROUND(progress_percent::numeric, 1) AS \"Progress %\",\n                   last_ingested_seconds AS \"Ingested seconds\",\n                   last_seen_duration_seconds AS \"Observed seconds\",\n                   last_ingest_update AS \"Last update\", cursor_age_seconds AS \"Cursor age seconds\"\n            FROM grafana_vod_inventory\n            WHERE ('${streamer}' = '.*' OR streamer = '${streamer}') AND status = 'indexing'\n            ORDER BY operational_status DESC, last_ingest_update DESC NULLS LAST",
+          "rawSql": "SELECT streamer AS \"Streamer\", title AS \"VOD\", vod_url AS \"VOD URL\",\n                   operational_status AS \"Health\", ROUND(progress_percent::numeric, 1) AS \"Progress %\",\n                   last_ingested_seconds AS \"Ingested seconds\",\n                   last_seen_duration_seconds AS \"Observed seconds\",\n                   last_ingest_update AS \"Last update\", cursor_age_seconds AS \"Cursor age seconds\"\n            FROM grafana_vod_inventory\n            WHERE streamer IN (${streamer:sqlstring}) AND status = 'indexing'\n            ORDER BY operational_status DESC, last_ingest_update DESC NULLS LAST",
           "refId": "A",
           "sql": {
             "columns": [],
@@ -336,24 +409,24 @@
           }
         }
       ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "options": {
-        "cellHeight": "sm",
-        "showHeader": true
-      },
-      "id": 7
+      "title": "Current ingest cursors",
+      "type": "table",
+      "description": "The reporting view calls an indexing VOD active when its cursor was updated within 10 minutes. An older or missing update is a stale cursor. This does not prove that processing is advancing or that the worker failed."
     },
     {
-      "type": "logs",
-      "title": "Worker mode and handoff events",
       "datasource": {
         "type": "loki",
         "uid": "${DS_LOGS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "noValue": "No matching events",
+          "unit": "short"
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 9,
@@ -361,19 +434,7 @@
         "x": 14,
         "y": 5
       },
-      "targets": [
-        {
-          "expr": "{service_name=\"vodhunter-worker\"} |~ \"mode=|handoff\" | regexp \"streamer=(?P<streamer>[^ ]+)\" | streamer=~\"${streamer}\"",
-          "refId": "A",
-          "queryType": "range"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
+      "id": 8,
       "options": {
         "enableLogDetails": true,
         "prettifyLogMessage": true,
@@ -381,16 +442,40 @@
         "showLabels": false,
         "showTime": true,
         "sortOrder": "Descending",
-        "wrapLines": false
+        "wrapLines": true
       },
-      "id": 8
+      "targets": [
+        {
+          "expr": "{service_name=\"vodhunter-worker\", environment=\"production\"} |~ \"mode=|handoff\"",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Worker mode and handoff events (all streamers)",
+      "type": "logs",
+      "description": "Worker logs cover all streamers regardless of the SQL streamer selection. No matching events means no events were observed in the selected range. Monitoring Health verifies telemetry collection separately."
     },
     {
-      "type": "timeseries",
-      "title": "Chunks started per second",
       "datasource": {
         "type": "loki",
         "uid": "${DS_LOGS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 12,
+            "lineInterpolation": "linear",
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "noValue": "No matching events",
+          "unit": "ops"
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 8,
@@ -398,26 +483,7 @@
         "x": 0,
         "y": 14
       },
-      "targets": [
-        {
-          "expr": "sum(rate({service_name=\"vodhunter-worker\", action=\"processing\"}[$__rate_interval]))",
-          "refId": "A",
-          "queryType": "range"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "ops",
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 12,
-            "lineInterpolation": "linear",
-            "showPoints": "never",
-            "spanNulls": false
-          }
-        },
-        "overrides": []
-      },
+      "id": 9,
       "options": {
         "legend": {
           "displayMode": "list",
@@ -427,14 +493,38 @@
           "mode": "multi"
         }
       },
-      "id": 9
+      "targets": [
+        {
+          "expr": "sum(rate({service_name=\"vodhunter-worker\", environment=\"production\", action=\"processing\"}[$__auto]))",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Chunks started per second (all streamers)",
+      "type": "timeseries",
+      "description": "Worker logs cover all streamers regardless of the SQL streamer selection. No matching events means no events were observed in the selected range. Monitoring Health verifies telemetry collection separately."
     },
     {
-      "type": "timeseries",
-      "title": "Worker failures",
       "datasource": {
         "type": "loki",
         "uid": "${DS_LOGS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 12,
+            "lineInterpolation": "linear",
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "noValue": "No matching events",
+          "unit": "short"
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 8,
@@ -442,26 +532,7 @@
         "x": 8,
         "y": 14
       },
-      "targets": [
-        {
-          "expr": "sum by (mode) (count_over_time({service_name=\"vodhunter-worker\", action=\"failed\"}[$__interval]))",
-          "refId": "A",
-          "queryType": "range"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 12,
-            "lineInterpolation": "linear",
-            "showPoints": "never",
-            "spanNulls": false
-          }
-        },
-        "overrides": []
-      },
+      "id": 10,
       "options": {
         "legend": {
           "displayMode": "list",
@@ -471,14 +542,38 @@
           "mode": "multi"
         }
       },
-      "id": 10
+      "targets": [
+        {
+          "expr": "sum by (mode) (count_over_time({service_name=\"vodhunter-worker\", environment=\"production\"} |~ \"^failed |(^| )error=\" [$__auto]))",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Worker failure events per interval (all streamers)",
+      "type": "timeseries",
+      "description": "Worker logs cover all streamers regardless of the SQL streamer selection. No matching events means no events were observed in the selected range. Monitoring Health verifies telemetry collection separately. Includes failed action lines and error= diagnostics such as watch-mode live_check_failed DNS errors."
     },
     {
-      "type": "timeseries",
-      "title": "Live/backlog handoffs",
       "datasource": {
         "type": "loki",
         "uid": "${DS_LOGS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 12,
+            "lineInterpolation": "linear",
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "noValue": "No matching events",
+          "unit": "short"
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 8,
@@ -486,26 +581,7 @@
         "x": 16,
         "y": 14
       },
-      "targets": [
-        {
-          "expr": "sum by (event) (count_over_time({service_name=\"vodhunter-worker\", action=\"handoff\"}[$__interval]))",
-          "refId": "A",
-          "queryType": "range"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 12,
-            "lineInterpolation": "linear",
-            "showPoints": "never",
-            "spanNulls": false
-          }
-        },
-        "overrides": []
-      },
+      "id": 11,
       "options": {
         "legend": {
           "displayMode": "list",
@@ -515,14 +591,31 @@
           "mode": "multi"
         }
       },
-      "id": 11
+      "targets": [
+        {
+          "expr": "sum by (event) (count_over_time({service_name=\"vodhunter-worker\", environment=\"production\", action=\"handoff\"}[$__auto]))",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Live/backlog handoff events per interval (all streamers)",
+      "type": "timeseries",
+      "description": "Worker logs cover all streamers regardless of the SQL streamer selection. No matching events means no events were observed in the selected range. Monitoring Health verifies telemetry collection separately."
     },
     {
-      "type": "logs",
-      "title": "Recent ingestion logs",
       "datasource": {
         "type": "loki",
         "uid": "${DS_LOGS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "noValue": "No matching events",
+          "unit": "short"
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 11,
@@ -530,19 +623,7 @@
         "x": 0,
         "y": 22
       },
-      "targets": [
-        {
-          "expr": "{service_name=\"vodhunter-worker\"} | regexp \"streamer=(?P<streamer>[^ ]+)\" | streamer=~\"${streamer}\"",
-          "refId": "A",
-          "queryType": "range"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
+      "id": 12,
       "options": {
         "enableLogDetails": true,
         "prettifyLogMessage": true,
@@ -550,13 +631,22 @@
         "showLabels": false,
         "showTime": true,
         "sortOrder": "Descending",
-        "wrapLines": false
+        "wrapLines": true
       },
-      "id": 12
+      "targets": [
+        {
+          "expr": "{service_name=\"vodhunter-worker\", environment=\"production\"}",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Recent ingestion logs (all streamers)",
+      "type": "logs",
+      "description": "Worker logs cover all streamers regardless of the SQL streamer selection. No matching events means no events were observed in the selected range. Monitoring Health verifies telemetry collection separately."
     }
   ],
-  "refresh": "30s",
-  "schemaVersion": 39,
+  "refresh": "1m",
+  "schemaVersion": 42,
   "tags": [
     "vodhunter",
     "content",
@@ -565,12 +655,7 @@
   "templating": {
     "list": [
       {
-        "allValue": ".*",
-        "current": {
-          "selected": true,
-          "text": "All",
-          "value": "$__all"
-        },
+        "allValue": "",
         "datasource": {
           "type": "grafana-postgresql-datasource",
           "uid": "${DS_POSTGRES}"
@@ -587,7 +672,11 @@
         "regex": "",
         "skipUrlSync": false,
         "sort": 1,
-        "type": "query"
+        "type": "query",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
       }
     ]
   },
@@ -598,6 +687,6 @@
   "timepicker": {},
   "timezone": "browser",
   "title": "20 - Ingestion Operations",
-  "uid": "vodhunter-ingestion-operations",
-  "version": 1
+  "weekStart": "",
+  "uid": "vodhunter-ingestion-operations"
 }
