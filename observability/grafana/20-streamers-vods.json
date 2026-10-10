@@ -2,14 +2,27 @@
   "__inputs": [
     {
       "name": "DS_POSTGRES",
-      "label": "Reporting datasource",
+      "label": "PostgreSQL datasource",
       "type": "datasource",
       "pluginId": "grafana-postgresql-datasource",
       "pluginName": "PostgreSQL"
     }
   ],
   "annotations": {
-    "list": []
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
   },
   "editable": true,
   "fiscalYearStartMonth": 0,
@@ -30,11 +43,20 @@
   ],
   "panels": [
     {
-      "type": "stat",
-      "title": "Streamers",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "${DS_POSTGRES}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
+          "noValue": "No observations",
+          "unit": "short"
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 5,
@@ -42,28 +64,10 @@
         "x": 0,
         "y": 0
       },
-      "targets": [
-        {
-          "editorMode": "code",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_streamer_summary WHERE ('${streamer}' = '.*' OR streamer = '${streamer}')",
-          "refId": "A",
-          "sql": {
-            "columns": [],
-            "groupBy": []
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
+      "id": 1,
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -75,14 +79,37 @@
         },
         "textMode": "auto"
       },
-      "id": 1
+      "targets": [
+        {
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_streamer_summary WHERE streamer IN (${streamer:sqlstring})",
+          "refId": "A",
+          "sql": {
+            "columns": [],
+            "groupBy": []
+          }
+        }
+      ],
+      "title": "Streamers",
+      "type": "stat"
     },
     {
-      "type": "stat",
-      "title": "Retained VODs",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "${DS_POSTGRES}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
+          "noValue": "No observations",
+          "unit": "short"
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 5,
@@ -90,28 +117,10 @@
         "x": 4,
         "y": 0
       },
-      "targets": [
-        {
-          "editorMode": "code",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_vod_inventory WHERE ('${streamer}' = '.*' OR streamer = '${streamer}') AND status LIKE '${vod_status}'",
-          "refId": "A",
-          "sql": {
-            "columns": [],
-            "groupBy": []
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
+      "id": 2,
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -123,14 +132,37 @@
         },
         "textMode": "auto"
       },
-      "id": 2
+      "targets": [
+        {
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_vod_inventory WHERE streamer IN (${streamer:sqlstring}) AND status LIKE ${vod_status:sqlstring}",
+          "refId": "A",
+          "sql": {
+            "columns": [],
+            "groupBy": []
+          }
+        }
+      ],
+      "title": "Retained VODs",
+      "type": "stat"
     },
     {
-      "type": "stat",
-      "title": "Complete",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "${DS_POSTGRES}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
+          "noValue": "No observations",
+          "unit": "short"
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 5,
@@ -138,28 +170,10 @@
         "x": 8,
         "y": 0
       },
-      "targets": [
-        {
-          "editorMode": "code",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_vod_inventory WHERE ('${streamer}' = '.*' OR streamer = '${streamer}') AND status = 'searchable'",
-          "refId": "A",
-          "sql": {
-            "columns": [],
-            "groupBy": []
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
+      "id": 3,
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -171,14 +185,37 @@
         },
         "textMode": "auto"
       },
-      "id": 3
+      "targets": [
+        {
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_vod_inventory WHERE streamer IN (${streamer:sqlstring}) AND status = 'searchable'",
+          "refId": "A",
+          "sql": {
+            "columns": [],
+            "groupBy": []
+          }
+        }
+      ],
+      "title": "Complete",
+      "type": "stat"
     },
     {
-      "type": "stat",
-      "title": "In progress",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "${DS_POSTGRES}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
+          "noValue": "No observations",
+          "unit": "short"
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 5,
@@ -186,28 +223,10 @@
         "x": 12,
         "y": 0
       },
-      "targets": [
-        {
-          "editorMode": "code",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_vod_inventory WHERE ('${streamer}' = '.*' OR streamer = '${streamer}') AND operational_status = 'in_progress'",
-          "refId": "A",
-          "sql": {
-            "columns": [],
-            "groupBy": []
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
+      "id": 4,
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -219,14 +238,38 @@
         },
         "textMode": "auto"
       },
-      "id": 4
+      "targets": [
+        {
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_vod_inventory WHERE streamer IN (${streamer:sqlstring}) AND operational_status = 'in_progress'",
+          "refId": "A",
+          "sql": {
+            "columns": [],
+            "groupBy": []
+          }
+        }
+      ],
+      "title": "Recently updated ingest cursors",
+      "type": "stat",
+      "description": "The reporting view calls an indexing VOD active when its cursor was updated within 10 minutes. An older or missing update is a stale cursor. This does not prove that processing is advancing or that the worker failed."
     },
     {
-      "type": "stat",
-      "title": "Stalled",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "${DS_POSTGRES}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
+          "noValue": "No observations",
+          "unit": "short"
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 5,
@@ -234,28 +277,10 @@
         "x": 16,
         "y": 0
       },
-      "targets": [
-        {
-          "editorMode": "code",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_vod_inventory WHERE ('${streamer}' = '.*' OR streamer = '${streamer}') AND operational_status = 'stalled'",
-          "refId": "A",
-          "sql": {
-            "columns": [],
-            "groupBy": []
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
+      "id": 5,
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -267,14 +292,38 @@
         },
         "textMode": "auto"
       },
-      "id": 5
+      "targets": [
+        {
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_vod_inventory WHERE streamer IN (${streamer:sqlstring}) AND operational_status = 'stalled'",
+          "refId": "A",
+          "sql": {
+            "columns": [],
+            "groupBy": []
+          }
+        }
+      ],
+      "title": "Stale ingest cursors",
+      "type": "stat",
+      "description": "The reporting view calls an indexing VOD active when its cursor was updated within 10 minutes. An older or missing update is a stale cursor. This does not prove that processing is advancing or that the worker failed."
     },
     {
-      "type": "stat",
-      "title": "Reindex requested",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "${DS_POSTGRES}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
+          "noValue": "No observations",
+          "unit": "short"
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 5,
@@ -282,28 +331,10 @@
         "x": 20,
         "y": 0
       },
-      "targets": [
-        {
-          "editorMode": "code",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_vod_inventory WHERE ('${streamer}' = '.*' OR streamer = '${streamer}') AND status = 'reindex_requested'",
-          "refId": "A",
-          "sql": {
-            "columns": [],
-            "groupBy": []
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
+      "id": 6,
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -315,14 +346,49 @@
         },
         "textMode": "auto"
       },
-      "id": 6
+      "targets": [
+        {
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_vod_inventory WHERE streamer IN (${streamer:sqlstring}) AND status = 'reindex_requested'",
+          "refId": "A",
+          "sql": {
+            "columns": [],
+            "groupBy": []
+          }
+        }
+      ],
+      "title": "Reindex requested",
+      "type": "stat"
     },
     {
-      "type": "table",
-      "title": "Streamer summary",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "${DS_POSTGRES}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "noValue": "No rows",
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^(.*[ _]ID|search_id|Twitch VOD)$"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 9,
@@ -330,12 +396,17 @@
         "x": 0,
         "y": 5
       },
+      "id": 7,
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true
+      },
       "targets": [
         {
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT profile_image_url AS \"Avatar\", streamer AS \"Streamer\", streamer_url AS \"Twitch\",\n                   total_vods AS \"VODs\", searchable_vods AS \"Complete\", active_vods AS \"Active\",\n                   stalled_vods AS \"Stalled\", reindex_requested_vods AS \"Reindex\",\n                   newest_vod_at AS \"Newest VOD\", last_ingest_update AS \"Last activity\"\n            FROM grafana_streamer_summary WHERE ('${streamer}' = '.*' OR streamer = '${streamer}')\n            ORDER BY stalled_vods DESC, active_vods DESC, streamer",
+          "rawSql": "SELECT profile_image_url AS \"Avatar\", streamer AS \"Streamer\", streamer_url AS \"Twitch\",\n                   total_vods AS \"VODs\", searchable_vods AS \"Complete\", active_vods AS \"Recent cursors\",\n                   stalled_vods AS \"Stale cursors\", reindex_requested_vods AS \"Reindex\",\n                   newest_vod_at AS \"Newest VOD\", last_ingest_update AS \"Last cursor update\"\n            FROM grafana_streamer_summary WHERE streamer IN (${streamer:sqlstring})\n            ORDER BY stalled_vods DESC, active_vods DESC, streamer",
           "refId": "A",
           "sql": {
             "columns": [],
@@ -343,24 +414,24 @@
           }
         }
       ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "options": {
-        "cellHeight": "sm",
-        "showHeader": true
-      },
-      "id": 7
+      "title": "Streamer summary",
+      "type": "table",
+      "description": "The reporting view calls an indexing VOD active when its cursor was updated within 10 minutes. An older or missing update is a stale cursor. This does not prove that processing is advancing or that the worker failed."
     },
     {
-      "type": "piechart",
-      "title": "VOD lifecycle",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "${DS_POSTGRES}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "noValue": "No observations",
+          "unit": "short"
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 9,
@@ -368,25 +439,7 @@
         "x": 16,
         "y": 5
       },
-      "targets": [
-        {
-          "editorMode": "code",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT status AS metric, COUNT(*)::double precision AS value FROM grafana_vod_inventory WHERE ('${streamer}' = '.*' OR streamer = '${streamer}') AND status LIKE '${vod_status}' GROUP BY status ORDER BY status",
-          "refId": "A",
-          "sql": {
-            "columns": [],
-            "groupBy": []
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
+      "id": 8,
       "options": {
         "displayLabels": [
           "name",
@@ -406,27 +459,12 @@
           "values": true
         }
       },
-      "id": 8
-    },
-    {
-      "type": "table",
-      "title": "VOD inventory",
-      "datasource": {
-        "type": "grafana-postgresql-datasource",
-        "uid": "${DS_POSTGRES}"
-      },
-      "gridPos": {
-        "h": 13,
-        "w": 24,
-        "x": 0,
-        "y": 14
-      },
       "targets": [
         {
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT thumbnail_url AS \"Thumbnail\", streamer AS \"Streamer\", title AS \"Title\",\n                   vod_platform_id AS \"Twitch VOD\", vod_url AS \"VOD URL\", streamed_at AS \"Streamed at\",\n                   status AS \"Lifecycle\", operational_status AS \"Operational health\",\n                   ROUND(progress_percent::numeric, 1) AS \"Progress %\",\n                   last_ingested_seconds AS \"Ingested seconds\",\n                   last_seen_duration_seconds AS \"Observed seconds\",\n                   last_ingest_update AS \"Last progress\", cursor_age_seconds AS \"Cursor age seconds\"\n            FROM grafana_vod_inventory\n            WHERE ('${streamer}' = '.*' OR streamer = '${streamer}') AND status LIKE '${vod_status}'\n              AND (streamed_at IS NULL OR $__timeFilter(streamed_at))\n            ORDER BY streamed_at DESC NULLS LAST, video_id DESC LIMIT 500",
+          "rawSql": "SELECT status AS metric, COUNT(*)::double precision AS value FROM grafana_vod_inventory WHERE streamer IN (${streamer:sqlstring}) AND status LIKE ${vod_status:sqlstring} GROUP BY status ORDER BY status",
           "refId": "A",
           "sql": {
             "columns": [],
@@ -434,22 +472,68 @@
           }
         }
       ],
+      "title": "VOD lifecycle",
+      "type": "piechart"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${DS_POSTGRES}"
+      },
+      "description": "Complete VODs have no cursor row because finalization deletes resumable ingest state; their lifecycle status is authoritative. Cursor age reports time since its last update and does not prove processing progress.",
       "fieldConfig": {
         "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "noValue": "No rows",
           "unit": "short"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^(.*[ _]ID|search_id|Twitch VOD)$"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              }
+            ]
+          }
+        ]
       },
-      "description": "Complete VODs have no cursor row because finalization deletes resumable ingest state; their lifecycle status is authoritative.",
+      "gridPos": {
+        "h": 13,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "id": 9,
       "options": {
         "cellHeight": "sm",
         "showHeader": true
       },
-      "id": 9
+      "targets": [
+        {
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT thumbnail_url AS \"Thumbnail\", streamer AS \"Streamer\", title AS \"Title\",\n                   vod_platform_id AS \"Twitch VOD\", vod_url AS \"VOD URL\", streamed_at AS \"Streamed at\",\n                   status AS \"Lifecycle\", operational_status AS \"Operational health\",\n                   ROUND(progress_percent::numeric, 1) AS \"Progress %\",\n                   last_ingested_seconds AS \"Ingested seconds\",\n                   last_seen_duration_seconds AS \"Observed seconds\",\n                   last_ingest_update AS \"Last cursor update\", cursor_age_seconds AS \"Cursor age seconds\"\n            FROM grafana_vod_inventory\n            WHERE streamer IN (${streamer:sqlstring}) AND status LIKE ${vod_status:sqlstring}\n              AND (streamed_at IS NULL OR $__timeFilter(streamed_at))\n            ORDER BY streamed_at DESC NULLS LAST, video_id DESC LIMIT 500",
+          "refId": "A",
+          "sql": {
+            "columns": [],
+            "groupBy": []
+          }
+        }
+      ],
+      "title": "VOD inventory",
+      "type": "table"
     }
   ],
-  "refresh": "30s",
-  "schemaVersion": 39,
+  "refresh": "1m",
+  "schemaVersion": 42,
   "tags": [
     "vodhunter",
     "content",
@@ -458,12 +542,7 @@
   "templating": {
     "list": [
       {
-        "allValue": ".*",
-        "current": {
-          "selected": true,
-          "text": "All",
-          "value": "$__all"
-        },
+        "allValue": "",
         "datasource": {
           "type": "grafana-postgresql-datasource",
           "uid": "${DS_POSTGRES}"
@@ -480,15 +559,14 @@
         "regex": "",
         "skipUrlSync": false,
         "sort": 1,
-        "type": "query"
-      },
-      {
-        "allValue": "%",
+        "type": "query",
         "current": {
-          "selected": true,
           "text": "All",
           "value": "$__all"
-        },
+        }
+      },
+      {
+        "allValue": "'%'",
         "hide": 0,
         "includeAll": true,
         "label": "VOD status",
@@ -497,7 +575,11 @@
         "options": [],
         "query": "searchable,indexing,reindex_requested,deleted",
         "skipUrlSync": false,
-        "type": "custom"
+        "type": "custom",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
       }
     ]
   },
@@ -508,6 +590,6 @@
   "timepicker": {},
   "timezone": "browser",
   "title": "20 - Streamers & VODs",
-  "uid": "vodhunter-streamers-vods",
-  "version": 1
+  "weekStart": "",
+  "uid": "vodhunter-streamers-vods"
 }

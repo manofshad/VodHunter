@@ -13,10 +13,30 @@
       "type": "datasource",
       "pluginId": "loki",
       "pluginName": "Loki"
+    },
+    {
+      "name": "DS_POSTGRES",
+      "label": "PostgreSQL datasource",
+      "type": "datasource",
+      "pluginId": "grafana-postgresql-datasource",
+      "pluginName": "PostgreSQL"
     }
   ],
   "annotations": {
-    "list": []
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
   },
   "editable": true,
   "fiscalYearStartMonth": 0,
@@ -37,11 +57,21 @@
   ],
   "panels": [
     {
-      "type": "stat",
-      "title": "Searches",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_METRICS}"
+      },
+      "description": "Prometheus estimates from scraped process counters. Resets and the first observed series can affect counts. Overview and Search Reliability show exact durable accepted-job counts.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
+          "noValue": "No observations",
+          "unit": "short"
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 5,
@@ -49,22 +79,10 @@
         "x": 0,
         "y": 0
       },
-      "targets": [
-        {
-          "expr": "sum(increase(vodhunter_searches_total[$__range]))",
-          "legendFormat": "",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
+      "id": 1,
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -76,14 +94,32 @@
         },
         "textMode": "auto"
       },
-      "id": 1
+      "targets": [
+        {
+          "expr": "sum(increase(vodhunter_searches_total[$__range]))",
+          "instant": true,
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "title": "Observed terminal searches",
+      "type": "stat"
     },
     {
-      "type": "stat",
-      "title": "Application errors",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_METRICS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
+          "noValue": "No observations",
+          "unit": "short"
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 5,
@@ -91,22 +127,10 @@
         "x": 6,
         "y": 0
       },
-      "targets": [
-        {
-          "expr": "sum(increase(vodhunter_searches_total{outcome=\"error\"}[$__range]))",
-          "legendFormat": "",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
+      "id": 2,
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -118,14 +142,33 @@
         },
         "textMode": "auto"
       },
-      "id": 2
+      "targets": [
+        {
+          "expr": "sum(increase(vodhunter_searches_total{outcome=\"error\"}[$__range]))",
+          "instant": true,
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "title": "Application errors",
+      "type": "stat",
+      "description": "Prometheus estimates from scraped process counters. Resets and the first observed series can affect counts. Overview and Search Reliability show exact durable accepted-job counts."
     },
     {
-      "type": "stat",
-      "title": "Latency p50",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_METRICS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
+          "noValue": "No observations",
+          "unit": "s"
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 5,
@@ -133,22 +176,10 @@
         "x": 12,
         "y": 0
       },
-      "targets": [
-        {
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(vodhunter_search_duration_seconds_bucket[$__rate_interval])))",
-          "legendFormat": "",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s"
-        },
-        "overrides": []
-      },
+      "id": 3,
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -160,14 +191,33 @@
         },
         "textMode": "auto"
       },
-      "id": 3
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (increase(vodhunter_search_duration_seconds_bucket[$__range])))",
+          "instant": true,
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "title": "Latency p50",
+      "type": "stat",
+      "description": "Estimated percentile from the scraped search-duration histogram. Overview shows accepted-to-finish elapsed time computed from durable job timestamps."
     },
     {
-      "type": "stat",
-      "title": "Latency p95",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_METRICS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
+          "noValue": "No observations",
+          "unit": "s"
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 5,
@@ -175,22 +225,10 @@
         "x": 18,
         "y": 0
       },
-      "targets": [
-        {
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(vodhunter_search_duration_seconds_bucket[$__rate_interval])))",
-          "legendFormat": "",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s"
-        },
-        "overrides": []
-      },
+      "id": 4,
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -202,14 +240,39 @@
         },
         "textMode": "auto"
       },
-      "id": 4
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (increase(vodhunter_search_duration_seconds_bucket[$__range])))",
+          "instant": true,
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "title": "Latency p95",
+      "type": "stat",
+      "description": "Estimated percentile from the scraped search-duration histogram. Overview shows accepted-to-finish elapsed time computed from durable job timestamps."
     },
     {
-      "type": "timeseries",
-      "title": "Search throughput by outcome",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_METRICS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 12,
+            "lineInterpolation": "linear",
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "noValue": "No observations",
+          "unit": "reqps"
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 8,
@@ -217,26 +280,7 @@
         "x": 0,
         "y": 5
       },
-      "targets": [
-        {
-          "expr": "sum by (outcome) (rate(vodhunter_searches_total[$__rate_interval]))",
-          "legendFormat": "{{outcome}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "reqps",
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 12,
-            "lineInterpolation": "linear",
-            "showPoints": "never",
-            "spanNulls": false
-          }
-        },
-        "overrides": []
-      },
+      "id": 5,
       "options": {
         "legend": {
           "displayMode": "list",
@@ -246,20 +290,53 @@
           "mode": "multi"
         }
       },
-      "id": 5
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(vodhunter_searches_total[$__rate_interval]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Search throughput by outcome",
+      "type": "timeseries"
     },
     {
-      "type": "timeseries",
-      "title": "Total latency p50 / p95",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_METRICS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 12,
+            "lineInterpolation": "linear",
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "noValue": "No observations",
+          "unit": "s"
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 12,
         "y": 5
+      },
+      "id": 6,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
       },
       "targets": [
         {
@@ -273,19 +350,38 @@
           "refId": "B"
         }
       ],
+      "title": "Total latency p50 / p95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_METRICS}"
+      },
       "fieldConfig": {
         "defaults": {
-          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
             "drawStyle": "line",
             "fillOpacity": 12,
             "lineInterpolation": "linear",
             "showPoints": "never",
             "spanNulls": false
-          }
+          },
+          "noValue": "No observations",
+          "unit": "s"
         },
         "overrides": []
       },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 13
+      },
+      "id": 7,
       "options": {
         "legend": {
           "displayMode": "list",
@@ -294,21 +390,6 @@
         "tooltip": {
           "mode": "multi"
         }
-      },
-      "id": 6
-    },
-    {
-      "type": "timeseries",
-      "title": "Pipeline stage latency p95",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_METRICS}"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 13
       },
       "targets": [
         {
@@ -317,36 +398,23 @@
           "refId": "A"
         }
       ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 12,
-            "lineInterpolation": "linear",
-            "showPoints": "never",
-            "spanNulls": false
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "id": 7
+      "title": "Pipeline stage latency p95",
+      "type": "timeseries"
     },
     {
-      "type": "bargauge",
-      "title": "Failures by code",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_METRICS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "noValue": "No observations",
+          "unit": "short"
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 8,
@@ -354,19 +422,7 @@
         "x": 12,
         "y": 13
       },
-      "targets": [
-        {
-          "expr": "sum by (error_code) (increase(vodhunter_search_failures_total[$__range]))",
-          "legendFormat": "{{error_code}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
+      "id": 8,
       "options": {
         "displayMode": "gradient",
         "minVizHeight": 10,
@@ -381,14 +437,32 @@
         },
         "showUnfilled": true
       },
-      "id": 8
+      "targets": [
+        {
+          "expr": "sum by (error_code) (increase(vodhunter_search_failures_total[$__range]))",
+          "legendFormat": "{{error_code}}",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "title": "Failures by code",
+      "type": "bargauge",
+      "description": "Estimated application failures by error code from scraped process counters. Search Reliability shows exact persisted failures."
     },
     {
-      "type": "logs",
-      "title": "Recent completed searches",
       "datasource": {
         "type": "loki",
         "uid": "${DS_LOGS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "noValue": "No observations",
+          "unit": "short"
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 10,
@@ -396,19 +470,7 @@
         "x": 0,
         "y": 21
       },
-      "targets": [
-        {
-          "expr": "{service_name=\"vodhunter-api\", event=\"search_finished\"} | json",
-          "refId": "A",
-          "queryType": "range"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
+      "id": 9,
       "options": {
         "enableLogDetails": true,
         "prettifyLogMessage": true,
@@ -416,16 +478,32 @@
         "showLabels": false,
         "showTime": true,
         "sortOrder": "Descending",
-        "wrapLines": false
+        "wrapLines": true
       },
-      "id": 9
+      "targets": [
+        {
+          "expr": "{service_name=\"vodhunter-api\", event=\"search_finished\", environment=\"production\"} | json | __error__=\"\"",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Recent completed searches",
+      "type": "logs"
     },
     {
-      "type": "logs",
-      "title": "HTTP and application errors",
       "datasource": {
         "type": "loki",
         "uid": "${DS_LOGS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "noValue": "No observations",
+          "unit": "short"
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 10,
@@ -433,19 +511,7 @@
         "x": 16,
         "y": 21
       },
-      "targets": [
-        {
-          "expr": "{service_name=\"vodhunter-api\"} |~ \"\\\"status_code\\\":[45][0-9][0-9]|\\\"level\\\":\\\"error\\\"\"",
-          "refId": "A",
-          "queryType": "range"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
+      "id": 10,
       "options": {
         "enableLogDetails": true,
         "prettifyLogMessage": true,
@@ -453,13 +519,179 @@
         "showLabels": false,
         "showTime": true,
         "sortOrder": "Descending",
-        "wrapLines": false
+        "wrapLines": true
       },
-      "id": 10
+      "targets": [
+        {
+          "expr": "{service_name=\"vodhunter-api\", environment=\"production\"} | json | __error__=\"\" | level=\"error\" or status_code>=400",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "HTTP and application errors",
+      "type": "logs",
+      "description": "Parsed API logs with an error level or an HTTP status of at least 400. Monitoring Health verifies log collection separately."
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOGS}"
+      },
+      "description": "HTTP responses per second for POST /api/search/clip, grouped by status code. This includes rejected submissions observed by the API. A 202 response accepts a background job; it does not mean the search is complete.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 12,
+            "lineInterpolation": "linear",
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "noValue": "No observations",
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 31
+      },
+      "id": 11,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (status_code) (rate({service_name=\"vodhunter-api\", event=\"http_request\", environment=\"production\"} | json | __error__=\"\" | http_method=\"POST\" | url_path=~\"/api/search/clip([?].*)?\" [$__auto]))",
+          "legendFormat": "{{status_code}}",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Search submission HTTP responses",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOGS}"
+      },
+      "description": "All recorded API HTTP responses per second, grouped by status code. Includes polling and unmatched requests. Monitoring Health verifies log collection separately.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 12,
+            "lineInterpolation": "linear",
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "noValue": "No observations",
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 31
+      },
+      "id": 13,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (status_code) (rate({service_name=\"vodhunter-api\", event=\"http_request\", environment=\"production\"} | json | __error__=\"\" [$__auto]))",
+          "legendFormat": "{{status_code}}",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "HTTP responses by status code",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${DS_POSTGRES}"
+      },
+      "description": "Exact percentile of durable creation-to-start durations for jobs created in each interval. Includes persistence before executor start. Jobs without a recorded start are excluded.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 12,
+            "lineInterpolation": "linear",
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "noValue": "No observations",
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 39
+      },
+      "id": 14,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(created_at, $__interval), percentile_cont(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM started_at-created_at)) AS value FROM grafana_search_quality WHERE $__timeFilter(created_at) AND started_at IS NOT NULL GROUP BY 1 ORDER BY 1",
+          "refId": "A",
+          "sql": {
+            "columns": [],
+            "groupBy": []
+          }
+        }
+      ],
+      "title": "Queue wait p95",
+      "type": "timeseries"
     }
   ],
-  "refresh": "30s",
-  "schemaVersion": 39,
+  "refresh": "1m",
+  "schemaVersion": 42,
   "tags": [
     "vodhunter",
     "search",
@@ -469,12 +701,12 @@
     "list": []
   },
   "time": {
-    "from": "now-24h",
+    "from": "now-7d",
     "to": "now"
   },
   "timepicker": {},
   "timezone": "browser",
   "title": "10 - Search Performance",
-  "uid": "vodhunter-search-performance",
-  "version": 1
+  "weekStart": "",
+  "uid": "vodhunter-search-performance"
 }
