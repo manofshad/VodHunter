@@ -13,13 +13,12 @@ SELECT v.id, v.creator_id
 FROM videos AS v
 WHERE v.streamed_at IS NOT NULL
   AND v.streamed_at < NOW() - make_interval(days => %s)
-  -- The status and cursor are the ingest worker's active-claim markers.
   AND v.status IS DISTINCT FROM 'indexing'
-  AND NOT EXISTS (
+  AND (v.status = 'unavailable' OR NOT EXISTS (
       SELECT 1
       FROM vod_ingest_state AS ingest_state
       WHERE ingest_state.video_id = v.id
-  )
+  ))
 ORDER BY v.streamed_at ASC, v.id ASC
 FOR UPDATE OF v SKIP LOCKED
 """

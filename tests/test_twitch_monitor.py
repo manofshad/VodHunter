@@ -1,8 +1,56 @@
 from unittest.mock import patch
 from datetime import datetime, timezone
+import pytest
 from services.twitch_monitor import CachedMultiStreamerTwitchMonitor, TwitchMonitor
 
 class TestTwitchMonitor:
+
+    def test_direct_archive_lookup_distinguishes_valid_archive_from_confirmed_absence(self) -> None:
+        monitor = TwitchMonitor(client_id='x', client_secret='y')
+        row = {
+            'id': '2878694994', 'user_id': 'user-1', 'type': 'archive', 'viewable': 'public',
+            'duration': '6h19m28s', 'title': 'Saved archive', 'created_at': '2026-09-20T00:00:00Z',
+        }
+        with patch.object(monitor, '_helix_get', side_effect=[{'data': [row]}, {'data': []}]) as helix:
+            vod = monitor.get_archive_vod_by_id('2878694994', expected_user_id='user-1')
+            absent = monitor.get_archive_vod_by_id('2878694994', expected_user_id='user-1')
+        assert vod['id'] == '2878694994'
+        assert vod['url'] == 'https://www.twitch.tv/videos/2878694994'
+        assert vod['duration_seconds'] == 22768
+        assert absent is None
+        assert helix.call_args.args == ('videos', {'id': '2878694994'})
+
+    @pytest.mark.parametrize('payload', [
+        None, {}, {'data': None}, {'data': {}}, {'error': 'Unauthorized', 'data': []},
+        {'data': [None]}, {'data': [{}, {}]},
+    ])
+    def test_direct_archive_lookup_rejects_malformed_or_error_response(self, payload) -> None:
+        monitor = TwitchMonitor(client_id='x', client_secret='y')
+        with patch.object(monitor, '_helix_get', return_value=payload):
+            with pytest.raises(RuntimeError, match='Invalid Twitch video'):
+                monitor.get_archive_vod_by_id('2878694994', expected_user_id='user-1')
+
+    @pytest.mark.parametrize(('field', 'value'), [
+        ('id', 'other'), ('user_id', 'other-owner'), ('type', 'highlight'),
+        ('viewable', 'private'), ('duration', None), ('duration', ''),
+        ('duration', '0s'), ('duration', '120'), ('duration', '1mgarbage'),
+    ])
+    def test_direct_archive_lookup_rejects_wrong_identity_or_invalid_archive(self, field, value) -> None:
+        monitor = TwitchMonitor(client_id='x', client_secret='y')
+        row = {
+            'id': '2878694994', 'user_id': 'user-1', 'type': 'archive',
+            'viewable': 'public', 'duration': '6h19m28s',
+        }
+        row[field] = value
+        with patch.object(monitor, '_helix_get', return_value={'data': [row]}):
+            with pytest.raises(RuntimeError, match='Invalid Twitch archive'):
+                monitor.get_archive_vod_by_id('2878694994', expected_user_id='user-1')
+
+    def test_direct_archive_lookup_propagates_transport_failure(self) -> None:
+        monitor = TwitchMonitor(client_id='x', client_secret='y')
+        with patch.object(monitor, '_helix_get', side_effect=RuntimeError('HTTP 503')):
+            with pytest.raises(RuntimeError, match='HTTP 503'):
+                monitor.get_archive_vod_by_id('2878694994', expected_user_id='user-1')
 
     def test_parse_duration_to_seconds(self) -> None:
         assert TwitchMonitor.parse_duration_to_seconds('1h2m3s') == 3723

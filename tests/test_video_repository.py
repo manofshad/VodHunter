@@ -153,7 +153,6 @@ class TestVideoRepository:
         assert 'SELECT c.name, c.profile_image_url' in cursor.executed[0][0]
         assert 'EXISTS' in cursor.executed[0][0]
         assert 'WHERE fe.creator_id = c.id' in cursor.executed[0][0]
-        assert 'JOIN fingerprints' not in cursor.executed[0][0]
 
     def test_create_or_get_creator_upserts_profile_image_url(self) -> None:
         cursor = FakeCursor()

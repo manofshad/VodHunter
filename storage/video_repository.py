@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from storage.database import PostgresDatabase
@@ -10,7 +11,8 @@ from storage.errors import (
     VideoNotFoundError,
     VideoOwnerMismatchError,
 )
-from storage.records import SearchableStreamer, VideoRecord, VideoStatus
+from storage.ingest_state_repository import IngestStateRepository
+from storage.records import SearchableStreamer, VodIngestStateRecord, VideoRecord, VideoStatus
 
 
 class VideoRepository:
@@ -310,6 +312,51 @@ class VideoRepository:
             raise VideoNotFoundError()
         return int(row[0]), self._normalize_video_status(str(row[1]))
 
+    def mark_source_unavailable(
+        self, expected: VodIngestStateRecord, *, stale_before: datetime
+    ) -> bool:
+        with self.database.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT video.status, video.url, LOWER(BTRIM(creator.name))
+                    FROM videos AS video
+                    JOIN creators AS creator ON creator.id = video.creator_id
+                    WHERE video.id = %s
+                    FOR UPDATE OF video
+                    """,
+                    (expected.video_id,),
+                )
+                video = cur.fetchone()
+                if (
+                    video is None
+                    or video[0] != VideoStatus.INDEXING.value
+                    or video[1] != f"https://www.twitch.tv/videos/{expected.vod_platform_id}"
+                    or video[2] != expected.streamer.strip().lower()
+                ):
+                    return False
+                cur.execute(
+                    """
+                    SELECT vod_platform_id, video_id, streamer, last_ingested_seconds,
+                           last_seen_duration_seconds, updated_at
+                    FROM vod_ingest_state
+                    WHERE vod_platform_id = %s
+                    FOR UPDATE
+                    """,
+                    (expected.vod_platform_id,),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return False
+                current = IngestStateRepository._from_row(row)
+                if current != expected or current.updated_at >= stale_before:
+                    return False
+                cur.execute(
+                    "UPDATE videos SET status = %s, processed = TRUE WHERE id = %s",
+                    (VideoStatus.UNAVAILABLE.value, expected.video_id),
+                )
+        return True
+
     def delete_video_index(self, video_id: int, actor_creator_id: int) -> VideoStatus:
         with self.database.connect() as conn:
             with conn.cursor() as cur:
@@ -318,7 +365,7 @@ class VideoRepository:
                     raise VideoOwnerMismatchError()
                 if current_status is VideoStatus.DELETED:
                     return VideoStatus.DELETED
-                if current_status is not VideoStatus.SEARCHABLE:
+                if current_status not in {VideoStatus.SEARCHABLE, VideoStatus.UNAVAILABLE}:
                     raise InvalidVideoStateTransitionError(current_status.value)
 
                 cur.execute(
@@ -416,7 +463,10 @@ class VideoRepository:
                       AND EXISTS (
                           SELECT 1
                           FROM fingerprint_embeddings fe
+                          JOIN fingerprints f ON f.id = fe.fingerprint_id
+                          JOIN videos v ON v.id = f.video_id AND v.creator_id = fe.creator_id
                           WHERE fe.creator_id = c.id
+                            AND v.status IN ('indexing', 'searchable')
                       )
                     ORDER BY LOWER(c.name), c.name
                     """
