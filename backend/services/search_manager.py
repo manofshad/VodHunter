@@ -6,7 +6,7 @@ from typing import Callable
 from urllib.parse import urlparse
 
 from backend.services.media_duration import MediaDurationError, probe_media_duration_seconds
-from backend.services.remote_clip_downloader import RemoteClipDownloader
+from backend.services.remote_clip_downloader import RemoteClipDownloader, parse_clip_url
 from search.models import SearchDateRange, SearchRequestOutcome
 from search.search_service import SearchService
 
@@ -42,7 +42,7 @@ class SearchManager:
         self.max_duration_seconds = max_duration_seconds
         self.duration_probe = duration_probe
 
-    def search_tiktok_url(
+    def search_clip_url(
         self,
         url: str,
         streamer: str,
@@ -54,13 +54,14 @@ class SearchManager:
         request_started_at = time.perf_counter()
         input_duration_seconds: float | None = None
         stage_durations_ms: dict[str, int] = {}
-        parsed_url = urlparse((url or "").strip())
+        clip = parse_clip_url(url)
+        parsed_url = urlparse(clip.url)
         try:
             if on_stage_change is not None:
                 on_stage_change("downloading")
             started_at = time.perf_counter()
             try:
-                result = self.remote_downloader.download_tiktok(url)
+                result = self.remote_downloader.download_clip(clip.url)
             finally:
                 self._record_stage_timing(
                     "download",
@@ -89,7 +90,7 @@ class SearchManager:
                 elif stage == "probe":
                     execution_result.metadata.probe_duration_ms = duration_ms
             logger.info(
-                "timing event=search_tiktok_url seconds=%.2f streamer=%s",
+                "timing event=search_clip_url seconds=%.2f streamer=%s",
                 time.perf_counter() - request_started_at,
                 streamer.strip().lower(),
             )
@@ -97,7 +98,7 @@ class SearchManager:
                 result=execution_result.result,
                 execution_metadata=execution_result.metadata,
                 input_type="tiktok_url",
-                download_source="tiktok",
+                download_source=clip.platform,
                 download_host=(parsed_url.hostname or "").lower() or None,
                 input_duration_seconds=input_duration_seconds,
                 total_duration_ms=_duration_ms(time.perf_counter() - request_started_at),

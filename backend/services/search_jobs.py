@@ -5,7 +5,7 @@ import logging
 import time
 
 from backend.observability import observe_terminal_search
-from backend.services.remote_clip_downloader import DownloadError, InvalidTikTokUrlError, validate_tiktok_url
+from backend.services.remote_clip_downloader import DownloadError, InvalidClipUrlError, validate_clip_url
 from backend.services.search_manager import InputDurationExceededError, SearchInputError
 from search.access import create_search_token
 from search.models import SearchDateRange, SearchJobRecord
@@ -34,7 +34,7 @@ class SearchJobService:
         date_range: SearchDateRange | None = None,
     ) -> str:
         accepted_started_at = time.perf_counter()
-        normalized_tiktok_url = validate_tiktok_url(tiktok_url)
+        normalized_tiktok_url = validate_clip_url(tiktok_url)
         search_token = create_search_token()
         search_id = self.jobs.create_public_search_job(
             search_token=search_token,
@@ -98,7 +98,7 @@ class SearchJobService:
                 stage="validating",
                 started=True,
             )
-            outcome = self.search_manager.search_tiktok_url(
+            outcome = self.search_manager.search_clip_url(
                 tiktok_url,
                 streamer,
                 date_range=date_range,
@@ -140,7 +140,7 @@ class SearchJobService:
                 error_message=str(exc),
                 http_status=400,
             )
-        except InvalidTikTokUrlError as exc:
+        except InvalidClipUrlError as exc:
             self._fail_and_observe(
                 search_id,
                 streamer,

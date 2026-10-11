@@ -41,7 +41,7 @@ class FakeDownloader:
         self.download_calls: list[str] = []
         self.cleaned_paths: list[str] = []
 
-    def download_tiktok(self, url: str) -> DownloadResult:
+    def download_clip(self, url: str) -> DownloadResult:
         self.download_calls.append(url)
         return DownloadResult(path=self.downloaded_path)
 
@@ -50,7 +50,15 @@ class FakeDownloader:
 
 
 class TestSearchManager:
-    def test_search_tiktok_url_downloads_then_searches(self) -> None:
+    @pytest.mark.parametrize(
+        "url, platform, host",
+        [
+            ("https://www.tiktok.com/@user/video/1", "tiktok", "www.tiktok.com"),
+            ("https://www.instagram.com/reel/Cx123/", "instagram", "www.instagram.com"),
+            ("https://www.youtube.com/shorts/BaW_jenozKc", "youtube", "www.youtube.com"),
+        ],
+    )
+    def test_search_clip_url_downloads_then_searches(self, url, platform, host) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             clip_path = os.path.join(tmp, "clip.mp4")
             with open(clip_path, "wb") as f:
@@ -63,24 +71,24 @@ class TestSearchManager:
                 duration_probe=lambda _: 1.0,
             )
             stage_timings: list[tuple[str, int]] = []
-            outcome = manager.search_tiktok_url(
-                "https://www.tiktok.com/@user/video/1",
+            outcome = manager.search_clip_url(
+                url,
                 "xqc",
                 on_stage_timing=lambda stage, duration_ms: stage_timings.append(
                     (stage, duration_ms)
                 ),
             )
-            assert downloader.download_calls == ["https://www.tiktok.com/@user/video/1"]
+            assert downloader.download_calls == [url]
             assert service.searched_paths == [(clip_path, "xqc")]
             assert downloader.cleaned_paths == [clip_path]
-            assert outcome.download_source == "tiktok"
-            assert outcome.download_host == "www.tiktok.com"
+            assert outcome.download_source == platform
+            assert outcome.download_host == host
             assert {stage for stage, _ in stage_timings} >= {"download", "probe"}
             assert outcome.execution_metadata.download_duration_ms is not None
             assert outcome.execution_metadata.probe_duration_ms is not None
             assert outcome.total_duration_ms is not None
 
-    def test_search_tiktok_url_forwards_date_range(self) -> None:
+    def test_search_clip_url_forwards_date_range(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             clip_path = os.path.join(tmp, "clip.mp4")
             with open(clip_path, "wb") as f:
@@ -96,11 +104,11 @@ class TestSearchManager:
                 remote_downloader=downloader,
                 duration_probe=lambda _: 1.0,
             )
-            outcome = manager.search_tiktok_url("https://www.tiktok.com/@user/video/1", "xqc", date_range=date_range)
+            outcome = manager.search_clip_url("https://www.tiktok.com/@user/video/1", "xqc", date_range=date_range)
             assert service.date_ranges == [date_range]
             assert outcome.date_range == date_range
 
-    def test_search_tiktok_url_cleans_up_on_search_failure(self) -> None:
+    def test_search_clip_url_cleans_up_on_search_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             clip_path = os.path.join(tmp, "clip.mp4")
             with open(clip_path, "wb") as f:
@@ -114,7 +122,7 @@ class TestSearchManager:
                 duration_probe=lambda _: 1.0,
             )
             with pytest.raises(RuntimeError):
-                manager.search_tiktok_url("https://www.tiktok.com/@user/video/1", "xqc")
+                manager.search_clip_url("https://www.tiktok.com/@user/video/1", "xqc")
             assert downloader.cleaned_paths == [clip_path]
 
     def test_tiktok_rejects_when_duration_exceeds_limit_and_cleans(self) -> None:
@@ -131,7 +139,7 @@ class TestSearchManager:
                 duration_probe=lambda _: 214.2,
             )
             with pytest.raises(InputDurationExceededError):
-                manager.search_tiktok_url("https://www.tiktok.com/@user/video/1", "xqc")
+                manager.search_clip_url("https://www.tiktok.com/@user/video/1", "xqc")
             assert service.searched_paths == []
             assert downloader.cleaned_paths == [clip_path]
 
@@ -153,7 +161,7 @@ class TestSearchManager:
                 duration_probe=bad_probe,
             )
             with pytest.raises(SearchInputError):
-                manager.search_tiktok_url("https://www.tiktok.com/@user/video/1", "xqc")
+                manager.search_clip_url("https://www.tiktok.com/@user/video/1", "xqc")
             assert service.searched_paths == []
 
     def test_search_requires_streamer(self) -> None:
@@ -169,4 +177,4 @@ class TestSearchManager:
                 duration_probe=lambda _: 1.0,
             )
             with pytest.raises(SearchInputError):
-                manager.search_tiktok_url("https://www.tiktok.com/@user/video/1", "   ")
+                manager.search_clip_url("https://www.tiktok.com/@user/video/1", "   ")
