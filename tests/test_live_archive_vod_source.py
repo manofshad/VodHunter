@@ -1,6 +1,7 @@
 import os
 import tempfile
 import numpy as np
+import pytest
 from dataclasses import replace
 from datetime import datetime, timezone
 from pipeline.nmfp_inference import segment_audio_windows
@@ -322,7 +323,8 @@ class TestLiveArchiveVODSource:
             assert source.videos.get_video_status(video_id) == 'deleted'
             assert source.videos.metadata_updates == []
 
-    def test_searchable_existing_video_is_not_reclaimed_for_live_ingest(self) -> None:
+    @pytest.mark.parametrize('status', ['searchable', 'unavailable'])
+    def test_terminal_existing_video_is_not_reclaimed_for_live_ingest(self, status) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             source = self._make_source(tmp, live_sequence=[True, False, False])
             existing_creator_id = source.videos.create_or_get_creator('alice', 'https://twitch.tv/alice')
@@ -332,22 +334,23 @@ class TestLiveArchiveVODSource:
                 title='Searchable title',
                 thumbnail_url=None,
                 processed=True,
-                status='searchable',
+                status=status,
             )
             source.start()
 
             assert source.video_id is None
             assert source.is_finished
-            assert source.videos.get_video_status(video_id) == 'searchable'
+            assert source.videos.get_video_status(video_id) == status
             assert source.videos.metadata_updates == []
 
-    def test_inflight_searchable_status_stops_live_ingest_without_finalize(self) -> None:
+    @pytest.mark.parametrize('status', ['searchable', 'unavailable'])
+    def test_inflight_terminal_status_stops_live_ingest_without_finalize(self, status) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             source = self._make_source(tmp, live_sequence=[True, True])
             source.start()
 
             assert source.video_id is not None
-            source.videos.update_video_status(source.video_id, 'searchable')
+            source.videos.update_video_status(source.video_id, status)
 
             chunk = source.next_chunk()
 

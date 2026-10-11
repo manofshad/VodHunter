@@ -39,6 +39,7 @@ MONITOR_RETRY_SECONDS = 5.0
 LIVE_ARCHIVE_LAG_SECONDS = 120
 LIVE_ARCHIVE_POLL_SECONDS = 15.0
 LIVE_ARCHIVE_FINALIZE_CHECKS = 3
+SAVED_CURSOR_STALE_SECONDS = 10 * 60
 LIVE_TEMP_DIR = str(ROOT_DIR / "data" / "temp_live_chunks")
 BACKFILL_TEMP_DIR = str(ROOT_DIR / "data" / "temp_backfill_chunks")
 DEFAULT_STREAMERS = ("jasontheween", "stableronaldo")
@@ -248,6 +249,7 @@ def run_hybrid_ingest(
             twitch_monitor=twitch_monitor,
             videos=videos,
             ingest_states=ingest_states,
+            streamer=normalized_streamer,
             user_id=user_id,
             days=days,
             skipped_vods_logged=logged_skipped_vods,
@@ -328,16 +330,38 @@ def _build_backlog(
     twitch_monitor: TwitchMonitor,
     videos: object,
     ingest_states: object,
+    streamer: str,
     user_id: str,
     days: int,
     skipped_vods_logged: set[str],
     out: Callable[[str], None],
 ) -> list[BacklogCandidate]:
-    cutoff = datetime.now(timezone.utc) - timedelta(days=int(days))
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=int(days))
     vods = twitch_monitor.list_archive_vods_since(user_id=user_id, created_after=cutoff)
+    by_id = {str(vod["id"]): vod for vod in vods}
+    stale_before = now - timedelta(seconds=SAVED_CURSOR_STALE_SECONDS)
+    for saved in ingest_states.list_pending(streamer):
+        vod_id = saved.vod_platform_id
+        if vod_id in by_id:
+            continue
+        try:
+            vod = twitch_monitor.get_archive_vod_by_id(vod_id, expected_user_id=user_id)
+            if vod is not None:
+                if int(vod["duration_seconds"]) < saved.last_ingested_seconds:
+                    raise RuntimeError("Twitch duration is smaller than the saved cursor")
+                by_id[vod_id] = vod
+            elif videos.mark_source_unavailable(saved, stale_before=stale_before):
+                out(
+                    f"event=source_unavailable streamer={streamer} vod={vod_id} "
+                    f"cursor={saved.last_ingested_seconds} "
+                    f"observed_seconds={saved.last_seen_duration_seconds}"
+                )
+        except Exception as exc:
+            out(f"mode=backlog streamer={streamer} vod={vod_id} error=source_lookup_failed detail={exc}")
     backlog: list[BacklogCandidate] = []
 
-    for vod in vods:
+    for vod in by_id.values():
         vod_id = str(vod["id"])
         existing_video = videos.get_video_by_url(str(vod["url"]))
         existing_status = _get_existing_video_status(existing_video)
@@ -358,7 +382,7 @@ def _build_backlog(
                 out(f"skip {existing_status} vod={vod_id} url={vod['url']}")
             continue
 
-        if existing_status in {VideoStatus.DELETED, VideoStatus.SEARCHABLE}:
+        if existing_status in {VideoStatus.DELETED, VideoStatus.SEARCHABLE, VideoStatus.UNAVAILABLE}:
             if vod_id not in skipped_vods_logged:
                 skipped_vods_logged.add(vod_id)
                 out(f"skip {existing_status} vod={vod_id} url={vod['url']}")

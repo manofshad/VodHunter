@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -251,6 +252,36 @@ class TwitchMonitor:
             reverse=True,
         )
         return vods
+
+    def get_archive_vod_by_id(
+        self, vod_platform_id: str, *, expected_user_id: str
+    ) -> dict[str, Any] | None:
+        vod_id = vod_platform_id.strip()
+        if not vod_id or not expected_user_id.strip():
+            raise ValueError("vod_platform_id and expected_user_id are required")
+        payload = self._helix_get("videos", {"id": vod_id})
+        if not isinstance(payload, dict) or payload.get("error") or not isinstance(payload.get("data"), list):
+            raise RuntimeError(f"Invalid Twitch video response for {vod_id}")
+        rows = payload["data"]
+        if not rows:
+            return None
+        if len(rows) != 1 or not isinstance(rows[0], dict):
+            raise RuntimeError(f"Invalid Twitch video rows for {vod_id}")
+        raw_vod = rows[0]
+        duration = raw_vod.get("duration")
+        if (
+            str(raw_vod.get("id") or "") != vod_id
+            or str(raw_vod.get("user_id") or "") != expected_user_id.strip()
+            or raw_vod.get("type") != "archive"
+            or raw_vod.get("viewable") != "public"
+            or not isinstance(duration, str)
+            or re.fullmatch(r"(?:\d+h)?(?:\d+m)?(?:\d+s)?", duration) is None
+        ):
+            raise RuntimeError(f"Invalid Twitch archive metadata for {vod_id}")
+        normalized = self.normalize_vod_metadata(raw_vod)
+        if normalized is None or normalized["duration_seconds"] <= 0:
+            raise RuntimeError(f"Invalid Twitch archive duration for {vod_id}")
+        return normalized
 
     @classmethod
     def normalize_vod_metadata(cls, raw_vod: dict[str, Any]) -> dict[str, Any] | None:

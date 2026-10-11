@@ -63,7 +63,7 @@ def _classify_backfill_candidate(
         if existing_state is not None:
             return True, existing_status, False
         return False, existing_status, False
-    if existing_status in {VideoStatus.SEARCHABLE, VideoStatus.DELETED}:
+    if existing_status in {VideoStatus.SEARCHABLE, VideoStatus.DELETED, VideoStatus.UNAVAILABLE}:
         return False, existing_status, False
 
     if existing_video.processed:
@@ -98,7 +98,7 @@ def _validate_fresh_nmfp_reindex(
             continue
 
         existing_status = _get_existing_video_status(existing_video)
-        if existing_status in {VideoStatus.REINDEX_REQUESTED, VideoStatus.DELETED}:
+        if existing_status in {VideoStatus.REINDEX_REQUESTED, VideoStatus.DELETED, VideoStatus.UNAVAILABLE}:
             continue
 
         fallback_status = existing_status.value if existing_status is not None else None

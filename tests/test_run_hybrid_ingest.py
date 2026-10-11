@@ -1,6 +1,10 @@
 import threading
 import time
-from datetime import datetime, timezone
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
+
+import pytest
 
 from pipeline.scheduled_embedder import BACKLOG_PRIORITY, LIVE_PRIORITY
 from runners.run_hybrid_ingest import (
@@ -43,7 +47,8 @@ class FakeMonitor:
     def list_archive_vods_since(self, user_id: str, created_after):
         return [dict(vod) for vod in self.vods]
 
-    def get_archive_vod_by_id(self, vod_platform_id: str):
+    def get_archive_vod_by_id(self, vod_platform_id: str, *, expected_user_id: str):
+        assert expected_user_id == "user-1"
         vod = self.vods_by_id.get(vod_platform_id)
         return dict(vod) if vod is not None else None
 
@@ -116,6 +121,17 @@ class FakeStore:
             if state.streamer == streamer
             and self.get_video_status(state.video_id) == "indexing"
         ]
+
+    def mark_source_unavailable(self, expected: VodIngestStateRecord, *, stale_before):
+        if self.vod_state.get(expected.vod_platform_id) != expected or expected.updated_at >= stale_before:
+            return False
+        url = f"https://www.twitch.tv/videos/{expected.vod_platform_id}"
+        video = self.videos_by_url.get(url)
+        if video is None or video.status is not VideoStatus.INDEXING or video.id != expected.video_id:
+            return False
+        self.videos_by_url[url] = replace(video, status=VideoStatus.UNAVAILABLE, processed=True)
+        self.video_status_by_id[video.id] = "unavailable"
+        return True
 
     def delete_vod_ingest_state(self, vod_platform_id: str) -> None:
         self.deleted_vod_state_ids.append(vod_platform_id)
@@ -294,6 +310,94 @@ class TestRunHybridIngest:
             "starting mode=backlog vod=2878694994 "
             "url=https://www.twitch.tv/videos/2878694994 cursor=22648 backlog=1"
         ) in logs
+
+    @pytest.mark.parametrize("lookup_outcome", ["absent", "recent", "error", "short_duration", "advanced"])
+    def test_omitted_cursor_closes_only_on_confirmed_stale_unchanged_absence(self, lookup_outcome) -> None:
+        vod_id = "2878694994"
+        url = f"https://www.twitch.tv/videos/{vod_id}"
+        store = FakeStore()
+        store.set_video(video_id=50, creator_id=1, url=url, title="Partial", processed=False, status="indexing")
+        store.set_state(
+            vod_platform_id=vod_id, video_id=50, streamer="alice",
+            last_ingested_seconds=22648, last_seen_duration_seconds=22768,
+        )
+        if lookup_outcome != "recent":
+            store.vod_state[vod_id] = replace(
+                store.vod_state[vod_id], updated_at=datetime.now(timezone.utc) - timedelta(hours=1),
+            )
+        expected = store.vod_state[vod_id]
+        monitor = FakeMonitor()
+
+        def lookup(*args, **kwargs):
+            if lookup_outcome == "error":
+                raise RuntimeError("Twitch request failed")
+            if lookup_outcome == "short_duration":
+                return {"id": vod_id, "url": url, "duration_seconds": 22647}
+            if lookup_outcome == "advanced":
+                store.vod_state[vod_id] = replace(expected, last_ingested_seconds=22708)
+            return None
+
+        logs = []
+        with patch.object(monitor, "get_archive_vod_by_id", side_effect=lookup):
+            backlog = _build_backlog(
+                twitch_monitor=monitor, videos=store, ingest_states=store, streamer="alice",
+                user_id="user-1", days=1, skipped_vods_logged=set(), out=logs.append,
+            )
+
+        assert backlog == []
+        assert store.get_video_by_url(url).status is (
+            VideoStatus.UNAVAILABLE if lookup_outcome == "absent" else VideoStatus.INDEXING
+        )
+        assert store.vod_state[vod_id] == (
+            replace(expected, last_ingested_seconds=22708) if lookup_outcome == "advanced" else expected
+        )
+        assert any("event=source_unavailable" in line for line in logs) is (lookup_outcome == "absent")
+        assert any("error=source_lookup_failed" in line for line in logs) is (
+            lookup_outcome in {"error", "short_duration"}
+        )
+
+    def test_lookup_failure_does_not_block_other_saved_cursor_recovery(self) -> None:
+        store = FakeStore()
+        monitor = FakeMonitor()
+        for video_id, vod_id in enumerate(["failed", "available"], start=1):
+            url = f"https://www.twitch.tv/videos/{vod_id}"
+            store.set_video(video_id=video_id, creator_id=1, url=url, title=vod_id, processed=False, status="indexing")
+            store.set_state(
+                vod_platform_id=vod_id, video_id=video_id, streamer="alice",
+                last_ingested_seconds=60, last_seen_duration_seconds=120,
+            )
+
+        def lookup(vod_id, **kwargs):
+            if vod_id == "failed":
+                raise RuntimeError("Twitch request failed")
+            return {"id": vod_id, "url": f"https://www.twitch.tv/videos/{vod_id}", "duration_seconds": 120}
+
+        with patch.object(monitor, "get_archive_vod_by_id", side_effect=lookup):
+            backlog = _build_backlog(
+                twitch_monitor=monitor, videos=store, ingest_states=store, streamer="alice",
+                user_id="user-1", days=1, skipped_vods_logged=set(), out=lambda _: None,
+            )
+
+        assert [(item.vod["id"], item.existing_state.last_ingested_seconds) for item in backlog] == [("available", 60)]
+        assert store.get_video_status(1) == "indexing"
+
+    def test_unavailable_vod_is_skipped_even_when_discovered_again(self) -> None:
+        store = FakeStore()
+        url = "https://www.twitch.tv/videos/2878694994"
+        store.set_video(video_id=50, creator_id=1, url=url, title="Partial", processed=True, status="unavailable")
+        store.set_state(
+            vod_platform_id="2878694994", video_id=50, streamer="alice",
+            last_ingested_seconds=22648, last_seen_duration_seconds=22768,
+        )
+        expected = store.vod_state["2878694994"]
+        backlog = _build_backlog(
+            twitch_monitor=FakeMonitor(vods=[{"id": "2878694994", "url": url}]),
+            videos=store, ingest_states=store, streamer="alice", user_id="user-1",
+            days=1, skipped_vods_logged=set(), out=lambda _: None,
+        )
+        assert backlog == []
+        assert store.get_video_status(50) == "unavailable"
+        assert store.vod_state["2878694994"] == expected
 
     def test_watch_mode_when_no_backlog_and_offline(self) -> None:
         monitor = FakeMonitor(live_sequence=[False, False, False], vods=[])
@@ -504,6 +608,7 @@ class TestRunHybridIngest:
             twitch_monitor=monitor,
             videos=store,
             ingest_states=store,
+            streamer="alice",
             user_id="user-1",
             days=30,
             skipped_vods_logged=set(),
@@ -562,6 +667,7 @@ class TestRunHybridIngest:
             twitch_monitor=monitor,
             videos=store,
             ingest_states=store,
+            streamer="alice",
             user_id="user-1",
             days=30,
             skipped_vods_logged=set(),
@@ -657,6 +763,7 @@ class TestRunHybridIngest:
             twitch_monitor=monitor,
             videos=store,
             ingest_states=store,
+            streamer="alice",
             user_id="user-1",
             days=30,
             skipped_vods_logged=set(),
@@ -697,6 +804,7 @@ class TestRunHybridIngest:
             twitch_monitor=monitor,
             videos=store,
             ingest_states=store,
+            streamer="alice",
             user_id="user-1",
             days=30,
             skipped_vods_logged=set(),

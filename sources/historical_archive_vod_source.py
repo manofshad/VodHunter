@@ -235,6 +235,10 @@ class HistoricalArchiveVODSource(AudioSource):
         if self._duration_seconds <= 0:
             raise ValueError("vod duration_seconds must be positive")
 
+        existing_video = self.videos.get_video_by_url(self.current_vod_url)
+        if existing_video is not None and existing_video.status is VideoStatus.UNAVAILABLE:
+            raise RuntimeError(f"VOD source is unavailable: {self._vod_platform_id}")
+
         os.makedirs(self.temp_dir, exist_ok=True)
         self._started = True
 
@@ -245,7 +249,6 @@ class HistoricalArchiveVODSource(AudioSource):
             profile_image_url=self._creator_profile_image_url,
         )
 
-        existing_video = self.videos.get_video_by_url(self.current_vod_url)
         if existing_video is None:
             self.video_id = self.videos.create_video(
                 creator_id=self._creator_id,

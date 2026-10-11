@@ -14,6 +14,7 @@ class VideoStatus(StrEnum):
 
     INDEXING = "indexing"
     SEARCHABLE = "searchable"
+    UNAVAILABLE = "unavailable"
     DELETED = "deleted"
     REINDEX_REQUESTED = "reindex_requested"
 

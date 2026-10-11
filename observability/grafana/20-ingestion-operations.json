@@ -401,7 +401,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT streamer AS \"Streamer\", title AS \"VOD\", vod_url AS \"VOD URL\",\n                   operational_status AS \"Health\", ROUND(progress_percent::numeric, 1) AS \"Progress %\",\n                   last_ingested_seconds AS \"Ingested seconds\",\n                   last_seen_duration_seconds AS \"Observed seconds\",\n                   last_ingest_update AS \"Last update\", cursor_age_seconds AS \"Cursor age seconds\"\n            FROM grafana_vod_inventory\n            WHERE streamer IN (${streamer:sqlstring}) AND status = 'indexing'\n            ORDER BY operational_status DESC, last_ingest_update DESC NULLS LAST",
+          "rawSql": "SELECT streamer AS \"Streamer\", title AS \"VOD\", vod_url AS \"VOD URL\",\n                   operational_status AS \"Health\", ROUND(progress_percent::numeric, 1) AS \"Progress %\",\n                   last_ingested_seconds AS \"Ingested seconds\",\n                   last_seen_duration_seconds AS \"Observed seconds\",\n                   last_ingest_update AS \"Last update\", cursor_age_seconds AS \"Cursor age seconds\"\n            FROM grafana_vod_inventory\n            WHERE streamer IN (${streamer:sqlstring}) AND status IN ('indexing', 'unavailable')\n            ORDER BY operational_status DESC, last_ingest_update DESC NULLS LAST",
           "refId": "A",
           "sql": {
             "columns": [],
@@ -409,9 +409,9 @@
           }
         }
       ],
-      "title": "Current ingest cursors",
+      "title": "Ingest coverage and source health",
       "type": "table",
-      "description": "The reporting view calls an indexing VOD active when its cursor was updated within 10 minutes. An older or missing update is a stale cursor. This does not prove that processing is advancing or that the worker failed."
+      "description": "An indexing VOD is active when its cursor was updated within 10 minutes. An older or missing update is a stale cursor. Source unavailable means Twitch confirmed absence after the cursor became stale. Its saved cursor and coverage remain unchanged. Cursor age does not prove that processing is advancing or that the worker failed."
     },
     {
       "datasource": {

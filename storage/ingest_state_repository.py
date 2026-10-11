@@ -72,6 +72,30 @@ class IngestStateRepository:
                     ),
                 )
 
+    def list_pending(self, streamer: str) -> list[VodIngestStateRecord]:
+        normalized_streamer = streamer.strip().lower()
+        if not normalized_streamer:
+            raise ValueError("streamer is required")
+        with self.database.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT state.vod_platform_id, state.video_id, state.streamer,
+                           state.last_ingested_seconds, state.last_seen_duration_seconds,
+                           state.updated_at
+                    FROM vod_ingest_state AS state
+                    JOIN videos AS video ON video.id = state.video_id
+                    JOIN creators AS creator ON creator.id = video.creator_id
+                    WHERE video.status = 'indexing'
+                      AND LOWER(BTRIM(state.streamer)) = %s
+                      AND LOWER(BTRIM(creator.name)) = %s
+                    ORDER BY state.updated_at, state.vod_platform_id
+                    """,
+                    (normalized_streamer, normalized_streamer),
+                )
+                rows = cur.fetchall()
+        return [self._from_row(row) for row in rows]
+
     def delete(self, vod_platform_id: str) -> None:
         with self.database.connect() as conn:
             with conn.cursor() as cur:

@@ -573,7 +573,7 @@
         "multi": false,
         "name": "vod_status",
         "options": [],
-        "query": "searchable,indexing,reindex_requested,deleted",
+        "query": "searchable,indexing,reindex_requested,deleted,unavailable",
         "skipUrlSync": false,
         "type": "custom",
         "current": {

@@ -4,6 +4,7 @@ import tempfile
 from dataclasses import replace
 from datetime import datetime, timezone
 from unittest.mock import patch
+import pytest
 
 from sources.historical_archive_vod_source import (
     HistoricalArchiveVODSource,
@@ -225,6 +226,34 @@ segment-2.ts
 
     def _make_vod(self) -> dict[str, object]:
         return {'id': 'vod-1', 'url': 'https://www.twitch.tv/videos/vod-1', 'title': 'Historical stream', 'thumbnail_url': 'https://static-cdn.jtvnw.net/thumb.jpg', 'duration_seconds': 180}
+
+    def test_unavailable_source_refuses_start_before_mutating_storage_or_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = FakeStore()
+            creator_id = store.create_or_get_creator('alice', 'https://twitch.tv/alice')
+            video_id = store.create_video(
+                creator_id=creator_id, url='https://www.twitch.tv/videos/vod-1',
+                title='Preserved title', processed=True, status='unavailable',
+            )
+            store.upsert_vod_ingest_state('vod-1', video_id, 'alice', 120, 180)
+            expected_video = store.get_video_by_url('https://www.twitch.tv/videos/vod-1')
+            expected_state = store.vod_state['vod-1']
+            expected_creators = dict(store.creators)
+            source = HistoricalArchiveVODSource(
+                streamer='alice', vod_metadata=self._make_vod(), videos=store,
+                ingest_states=FakeIngestStates(store),
+                creator_metadata={'profile_image_url': 'https://cdn/new-profile.png'},
+                temp_dir=f'{tmp}/chunks',
+            )
+
+            with pytest.raises(RuntimeError, match='VOD source is unavailable: vod-1'):
+                source.start()
+
+            assert store.get_video_by_url('https://www.twitch.tv/videos/vod-1') == expected_video
+            assert store.vod_state['vod-1'] == expected_state
+            assert store.creators == expected_creators
+            assert not os.path.exists(source.temp_dir)
+            assert source.video_id is None
 
     def test_resumes_from_saved_cursor(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

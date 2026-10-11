@@ -152,6 +152,7 @@ class LiveArchiveVODSource(AudioSource):
             if existing_status in {
                 VideoStatus.DELETED.value,
                 VideoStatus.SEARCHABLE.value,
+                VideoStatus.UNAVAILABLE.value,
             }:
                 self._clear_active_vod(mark_finished=True)
                 return
@@ -233,6 +234,7 @@ class LiveArchiveVODSource(AudioSource):
             if existing_status in {
                 VideoStatus.DELETED.value,
                 VideoStatus.SEARCHABLE.value,
+                VideoStatus.UNAVAILABLE.value,
             }:
                 self._vod_title = existing_video.title
                 self._vod_thumbnail_url = existing_video.thumbnail_url
