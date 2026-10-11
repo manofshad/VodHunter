@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { SearchResponse } from "../api/types";
 import { StreamerPicker } from "./search/StreamerPicker";
 import { SearchFeedback } from "./search/SearchFeedback";
-import { DateRangePicker, SearchResultCard, formatTimelineTime, isSupportedTikTokUrl } from "./SearchPage";
+import { DateRangePicker, SearchResultCard, formatTimelineTime, isSupportedClipUrl } from "./SearchPage";
 
 function multiSegmentResult(): SearchResponse {
   return {
@@ -220,7 +220,7 @@ describe("formatTimelineTime", () => {
   });
 });
 
-describe("isSupportedTikTokUrl", () => {
+describe("isSupportedClipUrl", () => {
   it.each([
     "https://www.tiktok.com/@demo/video/1234567890",
     "https://www.tiktok.com/share/video/1234567890",
@@ -228,8 +228,13 @@ describe("isSupportedTikTokUrl", () => {
     "https://www.tiktok.com/t/ZP8ctwC2V/",
     "https://vm.tiktok.com/ZTR45GpSF/",
     "https://vt.tiktok.com/ZSe4FqkKd",
+    "https://www.instagram.com/reel/Cx_123-abc/?igsh=share",
+    "https://instagram.com/reels/Cx_123-abc",
+    "https://www.youtube.com/shorts/BaW_jenozKc?si=share",
+    "https://youtube.com/shorts/BaW_jenozKc/",
+    "https://m.youtube.com/shorts/BaW_jenozKc",
   ])("accepts supported video link %s", (url) => {
-    expect(isSupportedTikTokUrl(url)).toBe(true);
+    expect(isSupportedClipUrl(url)).toBe(true);
   });
 
   it.each([
@@ -238,8 +243,21 @@ describe("isSupportedTikTokUrl", () => {
     "https://www.tiktok.com/music/song-123",
     "https://www.tiktok.com/@demo/photo/1234567890",
     "https://example.com/@demo/video/1234567890",
+    "https://www.instagram.com/demo/",
+    "https://www.instagram.com/p/Cx123/",
+    "https://www.instagram.com/stories/demo/123/",
+    "https://www.instagram.com/reels/audio/123/",
+    "https://www.youtube.com/watch?v=BaW_jenozKc",
+    "https://www.youtube.com/playlist?list=123",
+    "https://www.youtube.com/@demo/shorts",
+    "https://www.youtube.com/shorts/too-short",
+    "https://youtu.be/BaW_jenozKc",
+    "https://www.youtube.com.evil.test/shorts/BaW_jenozKc",
+    "https://user@www.instagram.com/reel/Cx123/",
+    "https://www.instagram.com:444/reel/Cx123/",
+    "file://www.youtube.com/shorts/BaW_jenozKc",
   ])("rejects non-video link %s", (url) => {
-    expect(isSupportedTikTokUrl(url)).toBe(false);
+    expect(isSupportedClipUrl(url)).toBe(false);
   });
 });
 

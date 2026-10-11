@@ -22,7 +22,7 @@ export function formatTimelineTime(value: number): string {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${seconds}`;
 }
 
-export function isSupportedTikTokUrl(rawUrl: string): boolean {
+export function isSupportedClipUrl(rawUrl: string): boolean {
   const url = rawUrl.trim();
   if (!url) {
     return false;
@@ -36,6 +36,13 @@ export function isSupportedTikTokUrl(rawUrl: string): boolean {
     }
     if (parsed.username || parsed.password || parsed.port) {
       return false;
+    }
+
+    if (host === "instagram.com" || host === "www.instagram.com") {
+      return /^\/reels?\/[A-Za-z0-9_-]+\/?$/.test(parsed.pathname);
+    }
+    if (host === "youtube.com" || host === "www.youtube.com" || host === "m.youtube.com") {
+      return /^\/shorts\/[A-Za-z0-9_-]{11}\/?$/.test(parsed.pathname);
     }
 
     const isDirectVideo = DIRECT_TIKTOK_HOSTS.has(host) && DIRECT_VIDEO_PATHS.some((pattern) => pattern.test(parsed.pathname));

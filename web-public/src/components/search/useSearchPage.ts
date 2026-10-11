@@ -3,7 +3,7 @@ import { FormEvent, RefObject, useEffect, useMemo, useRef, useState } from "reac
 import { createSearchJob, getSearchJob, listSearchableStreamers } from "../../api/client";
 import { SearchJobResponse, SearchResponse, StreamerListItem } from "../../api/types";
 import { createSearchHistoryEntry, SearchHistoryEntry } from "./searchHistory";
-import { isSupportedTikTokUrl } from "./searchUtils";
+import { isSupportedClipUrl } from "./searchUtils";
 import { isSearchToken, parseSharedSearchLocation, sharedSearchPath } from "./sharedSearch";
 import { useSearchHistory } from "./useSearchHistory";
 
@@ -248,7 +248,7 @@ export function useSearchPage(): SearchPageState {
     }
 
     const submittedUrl = tiktokUrl.trim();
-    if (!isSupportedTikTokUrl(submittedUrl)) {
+    if (!isSupportedClipUrl(submittedUrl)) {
       setRequestError("Paste a TikTok video link, not a profile or other TikTok page.");
       return;
     }

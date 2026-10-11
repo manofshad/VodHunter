@@ -13,7 +13,7 @@ from urllib.parse import urljoin, urlparse, urlunparse
 logger = logging.getLogger("uvicorn.error")
 
 
-class InvalidTikTokUrlError(Exception):
+class InvalidClipUrlError(Exception):
     pass
 
 
@@ -31,8 +31,9 @@ class DownloadResult:
 
 
 @dataclass(frozen=True)
-class TikTokUrl:
+class ClipUrl:
     url: str
+    platform: Literal["tiktok", "instagram", "youtube"]
     kind: Literal["direct", "short"]
 
 
@@ -75,34 +76,66 @@ _TRANSIENT_RESOLVE_EXCEPTIONS = (
     OSError,
     TimeoutError,
 )
+_DIRECT_CLIP_RULES = (
+    ("instagram", {"instagram.com", "www.instagram.com"}, re.compile(r"/reels?/[A-Za-z0-9_-]+/?")),
+    ("youtube", {"youtube.com", "www.youtube.com", "m.youtube.com"}, re.compile(r"/shorts/[A-Za-z0-9_-]{11}/?")),
+)
 
 
-def _invalid_path_error() -> InvalidTikTokUrlError:
-    return InvalidTikTokUrlError(
+def _invalid_path_error() -> InvalidClipUrlError:
+    return InvalidClipUrlError(
         "TikTok URL must point to a single video; profile, live, music, photo, "
         "effect, hashtag, and collection links are not supported"
     )
 
 
-def parse_tiktok_url(raw_url: str) -> TikTokUrl:
+def parse_clip_url(raw_url: str) -> ClipUrl:
+    url = (raw_url or "").strip()
+    try:
+        parsed = urlparse(url)
+        port = parsed.port
+    except ValueError as exc:
+        raise InvalidClipUrlError("Clip URL is malformed") from exc
+
+    if not url:
+        raise InvalidClipUrlError("Clip URL is required")
+    if parsed.scheme.lower() not in {"http", "https"}:
+        raise InvalidClipUrlError("Clip URL must use http or https")
+    if parsed.username or parsed.password or "@" in parsed.netloc or port is not None or parsed.params:
+        raise InvalidClipUrlError("Clip URL is malformed")
+
+    host = (parsed.hostname or "").lower()
+    if host in _DIRECT_TIKTOK_HOSTS or host in _SHORT_TIKTOK_HOSTS:
+        return _parse_tiktok_url(url)
+    for platform, hosts, path in _DIRECT_CLIP_RULES:
+        if host in hosts:
+            if not path.fullmatch(parsed.path):
+                raise InvalidClipUrlError("URL must point to a single Instagram Reel or YouTube Short")
+            normalized_host = "www.instagram.com" if platform == "instagram" else "www.youtube.com"
+            normalized_url = urlunparse(("https", normalized_host, parsed.path, "", "", ""))
+            return ClipUrl(url=normalized_url, platform=platform, kind="direct")
+    raise InvalidClipUrlError("Only TikTok videos, Instagram Reels, and YouTube Shorts are supported")
+
+
+def _parse_tiktok_url(raw_url: str) -> ClipUrl:
     url = (raw_url or "").strip()
     if not url:
-        raise InvalidTikTokUrlError("TikTok URL is required")
+        raise InvalidClipUrlError("TikTok URL is required")
 
     try:
         parsed = urlparse(url)
         port = parsed.port
     except ValueError as exc:
-        raise InvalidTikTokUrlError("TikTok URL is malformed") from exc
+        raise InvalidClipUrlError("TikTok URL is malformed") from exc
 
     if parsed.scheme.lower() not in {"http", "https"}:
-        raise InvalidTikTokUrlError("TikTok URL must use http or https")
+        raise InvalidClipUrlError("TikTok URL must use http or https")
 
     host = (parsed.hostname or "").lower()
     if host not in _DIRECT_TIKTOK_HOSTS and host not in _SHORT_TIKTOK_HOSTS:
-        raise InvalidTikTokUrlError("Only TikTok URLs are supported")
+        raise InvalidClipUrlError("Only TikTok URLs are supported")
     if parsed.username or parsed.password or "@" in parsed.netloc or port is not None or parsed.params:
-        raise InvalidTikTokUrlError("TikTok URL is malformed")
+        raise InvalidClipUrlError("TikTok URL is malformed")
 
     is_direct_video = host in _DIRECT_TIKTOK_HOSTS and any(
         pattern.fullmatch(parsed.path) for pattern in _DIRECT_VIDEO_PATHS
@@ -129,11 +162,11 @@ def parse_tiktok_url(raw_url: str) -> TikTokUrl:
             parsed.fragment,
         )
     )
-    return TikTokUrl(url=normalized_url, kind="direct" if is_direct_video else "short")
+    return ClipUrl(url=normalized_url, platform="tiktok", kind="direct" if is_direct_video else "short")
 
 
-def validate_tiktok_url(raw_url: str) -> str:
-    return parse_tiktok_url(raw_url).url
+def validate_clip_url(raw_url: str) -> str:
+    return parse_clip_url(raw_url).url
 
 
 class RemoteClipDownloader:
@@ -156,9 +189,6 @@ class RemoteClipDownloader:
         self.max_resolve_redirects = max(1, int(max_resolve_redirects))
         self.resolve_retry_delay_seconds = max(0.0, float(resolve_retry_delay_seconds))
         os.makedirs(self.temp_dir, exist_ok=True)
-
-    def validate_tiktok_url(self, raw_url: str) -> str:
-        return validate_tiktok_url(raw_url)
 
     def _request_tiktok_redirect(self, url: str) -> tuple[int, str | None]:
         parsed = urlparse(url)
@@ -204,17 +234,17 @@ class RemoteClipDownloader:
                     f"TikTok short-link resolver returned HTTP {status}"
                 )
             if status not in _TIKTOK_REDIRECT_STATUSES:
-                raise InvalidTikTokUrlError(_SHORT_LINK_TARGET_ERROR)
+                raise InvalidClipUrlError(_SHORT_LINK_TARGET_ERROR)
             if not location:
-                raise InvalidTikTokUrlError(
+                raise InvalidClipUrlError(
                     "TikTok short link returned a redirect without a destination"
                 )
 
             candidate_url = urljoin(current_url, location)
             try:
-                candidate = parse_tiktok_url(candidate_url)
-            except InvalidTikTokUrlError as exc:
-                raise InvalidTikTokUrlError(_SHORT_LINK_TARGET_ERROR) from exc
+                candidate = _parse_tiktok_url(candidate_url)
+            except InvalidClipUrlError as exc:
+                raise InvalidClipUrlError(_SHORT_LINK_TARGET_ERROR) from exc
 
             candidate_parts = urlparse(candidate.url)
             canonical_match = _CANONICAL_VIDEO_PATH.fullmatch(candidate_parts.path)
@@ -226,16 +256,16 @@ class RemoteClipDownloader:
                 return candidate.url, redirect_count
 
             if candidate.kind != "short":
-                raise InvalidTikTokUrlError(_SHORT_LINK_TARGET_ERROR)
+                raise InvalidClipUrlError(_SHORT_LINK_TARGET_ERROR)
             if candidate_parts.scheme.lower() != "https":
-                raise InvalidTikTokUrlError(_SHORT_LINK_TARGET_ERROR)
+                raise InvalidClipUrlError(_SHORT_LINK_TARGET_ERROR)
             if candidate.url in visited_urls:
-                raise InvalidTikTokUrlError("TikTok short link redirect loop detected")
+                raise InvalidClipUrlError("TikTok short link redirect loop detected")
 
             visited_urls.add(candidate.url)
             current_url = candidate.url
 
-        raise InvalidTikTokUrlError("TikTok short link redirected too many times")
+        raise InvalidClipUrlError("TikTok short link redirected too many times")
 
     def _resolve_short_tiktok_url(self, url: str) -> str:
         started_at = time.perf_counter()
@@ -274,14 +304,15 @@ class RemoteClipDownloader:
 
         raise AssertionError("TikTok short-link resolver completed without a result")
 
-    def download_tiktok(self, raw_url: str) -> DownloadResult:
-        parsed_url = parse_tiktok_url(raw_url)
+    def download_clip(self, raw_url: str) -> DownloadResult:
+        parsed_url = parse_clip_url(raw_url)
         url = parsed_url.url
         if parsed_url.kind == "short":
             url = self._resolve_short_tiktok_url(url)
 
         token = uuid.uuid4().hex
-        output_template = os.path.join(self.temp_dir, f"tiktok_{token}.%(ext)s")
+        output_prefix = os.path.join(self.temp_dir, f"{parsed_url.platform}_{token}")
+        output_template = f"{output_prefix}.%(ext)s"
         download_started_at = time.perf_counter()
 
         cmd = [
@@ -291,9 +322,10 @@ class RemoteClipDownloader:
             "--no-progress",
             "-o",
             output_template,
-            "--",
-            url,
         ]
+        if parsed_url.platform == "youtube":
+            cmd.extend(["--js-runtimes", "node", "--format", "bestaudio/best"])
+        cmd.extend(["--", url])
 
         try:
             result = subprocess.run(
@@ -303,9 +335,11 @@ class RemoteClipDownloader:
                 timeout=self.timeout_seconds,
             )
         except subprocess.TimeoutExpired as exc:
-            raise DownloadError("yt-dlp timed out while downloading TikTok clip") from exc
+            self._cleanup_download(output_prefix)
+            raise DownloadError(f"yt-dlp timed out while downloading {parsed_url.platform} clip") from exc
 
         if result.returncode != 0:
+            self._cleanup_download(output_prefix)
             message = (result.stderr or result.stdout or "yt-dlp failed").strip()
             if _TIKTOK_LOGIN_REQUIRED_ERROR.search(result.stderr or ""):
                 logger.warning("tiktok_download_login_required error=%s", message)
@@ -315,8 +349,10 @@ class RemoteClipDownloader:
                 )
             raise DownloadError(message)
 
-        pattern = os.path.join(self.temp_dir, f"tiktok_{token}.*")
-        matches = [path for path in glob.glob(pattern) if os.path.isfile(path)]
+        matches = [
+            path for path in glob.glob(f"{output_prefix}.*")
+            if os.path.isfile(path) and not path.endswith((".part", ".ytdl", ".json"))
+        ]
         if not matches:
             raise DownloadError("Downloaded file was not created")
 
@@ -324,21 +360,26 @@ class RemoteClipDownloader:
         downloaded_path = max(matches, key=lambda path: os.path.getsize(path))
         size_bytes = os.path.getsize(downloaded_path)
         if size_bytes <= 0:
-            self.cleanup(downloaded_path)
+            self._cleanup_download(output_prefix)
             raise DownloadError("Downloaded file is empty")
 
         if self.max_file_mb is not None:
             max_bytes = int(self.max_file_mb) * 1024 * 1024
             if size_bytes > max_bytes:
-                self.cleanup(downloaded_path)
+                self._cleanup_download(output_prefix)
                 raise DownloadError(f"Downloaded file exceeds {self.max_file_mb}MB limit")
 
         logger.info(
-            "timing event=tiktok_download seconds=%.2f size_bytes=%d",
+            "timing event=clip_download platform=%s seconds=%.2f size_bytes=%d",
+            parsed_url.platform,
             time.perf_counter() - download_started_at,
             size_bytes,
         )
         return DownloadResult(path=downloaded_path)
+
+    def _cleanup_download(self, output_prefix: str) -> None:
+        for path in glob.glob(f"{output_prefix}.*"):
+            self.cleanup(path)
 
     def cleanup(self, path: str) -> None:
         if os.path.exists(path):
