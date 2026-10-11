@@ -9,7 +9,7 @@ import { useSearchPage } from "./search/useSearchPage";
 
 export { DateRangePicker } from "./search/DateRangePicker";
 export { SearchResultCard } from "./search/SearchResults";
-export { formatTimelineTime, isSupportedTikTokUrl } from "./search/searchUtils";
+export { formatTimelineTime, isSupportedClipUrl } from "./search/searchUtils";
 
 type OpenPanel = "history" | "shortcut" | null;
 

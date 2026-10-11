@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import pytest
 
 from backend.services.search_jobs import SearchJobService
-from backend.services.remote_clip_downloader import DownloadError, InvalidTikTokUrlError
+from backend.services.remote_clip_downloader import DownloadError, InvalidClipUrlError
 from backend.services.search_manager import SearchInputError
 from search.access import is_search_token
 from search.models import SearchDateRange, SearchExecutionMetadata, SearchRequestOutcome, SearchResult
@@ -76,7 +76,7 @@ class StubSearchManager:
         self.raise_error = None
         self.date_ranges: list[SearchDateRange | None] = []
 
-    def search_tiktok_url(
+    def search_clip_url(
         self,
         url: str,
         streamer: str,
@@ -102,19 +102,24 @@ class StubSearchManager:
         )
 
 
-def test_search_job_service_completes_job() -> None:
+@pytest.mark.parametrize("url", [
+    "https://www.tiktok.com/@u/video/1",
+    "https://www.instagram.com/reel/Cx123/",
+    "https://www.youtube.com/shorts/BaW_jenozKc",
+])
+def test_search_job_service_completes_job(url: str) -> None:
     store = StubStore()
     service = SearchJobService(jobs=store, search_manager=StubSearchManager(), executor=InlineExecutor())
 
     search_token = service.create_public_search_job(
-        tiktok_url="https://www.tiktok.com/@u/video/1",
+        tiktok_url=url,
         streamer="jason",
         creator_id=2,
     )
 
     assert is_search_token(search_token)
     assert store.search_tokens == [search_token]
-    assert store.created_jobs == [("https://www.tiktok.com/@u/video/1", "jason", 2, None)]
+    assert store.created_jobs == [(url, "jason", 2, None)]
     assert store.status_updates[0] == (7, "running", "validating", True)
     assert (7, None, "downloading", False) in store.status_updates
     assert (7, None, "embedding", False) in store.status_updates
@@ -173,7 +178,7 @@ def test_search_job_service_rejects_invalid_url_before_persisting_job() -> None:
     store = StubStore()
     service = SearchJobService(jobs=store, search_manager=StubSearchManager(), executor=InlineExecutor())
 
-    with pytest.raises(InvalidTikTokUrlError):
+    with pytest.raises(InvalidClipUrlError):
         service.create_public_search_job(
             tiktok_url="https://www.tiktok.com/@jasontheween",
             streamer="jason",

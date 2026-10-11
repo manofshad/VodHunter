@@ -81,7 +81,11 @@ describe("useSearchPage shared jobs", () => {
     expect(window.localStorage.getItem("vodhunter-public-active-search")).toBeNull();
   });
 
-  it("restores a completed result and its original TikTok URL", async () => {
+  it.each([
+    tiktokUrl,
+    "https://www.instagram.com/reel/Cx123/",
+    "https://www.youtube.com/shorts/BaW_jenozKc",
+  ])("restores a completed result and its original clip URL %s", async (clipUrl) => {
     window.history.replaceState(null, "", `/share#${searchToken}`);
     vi.mocked(getSearchJob).mockResolvedValue(
       job({
@@ -89,6 +93,7 @@ describe("useSearchPage shared jobs", () => {
         stage: null,
         finished_at: "2026-09-14T12:00:10Z",
         result: result(),
+        tiktok_url: clipUrl,
       }),
     );
 
@@ -96,7 +101,7 @@ describe("useSearchPage shared jobs", () => {
 
     await waitFor(() => expect(hook.current.result?.video_id).toBe(7));
     expect(hook.current.submitting).toBe(false);
-    expect(hook.current.lastSubmittedUrl).toBe(tiktokUrl);
+    expect(hook.current.lastSubmittedUrl).toBe(clipUrl);
     expect(hook.current.historyEntries).toHaveLength(1);
   });
 
@@ -142,24 +147,33 @@ describe("useSearchPage shared jobs", () => {
     expect(window.localStorage.getItem("vodhunter-public-active-search")).toBeNull();
   });
 
-  it("moves a new browser search onto its canonical share URL", async () => {
+  it.each([
+    tiktokUrl,
+    "https://www.instagram.com/reel/Cx123/",
+    "https://www.youtube.com/shorts/BaW_jenozKc",
+  ])("submits clip %s and moves to its canonical share URL", async (clipUrl) => {
     vi.mocked(createSearchJob).mockResolvedValue({
       search_token: otherToken,
       status: "queued",
       stage: "validating",
     });
-    vi.mocked(getSearchJob).mockResolvedValue(job({ search_token: otherToken }));
+    vi.mocked(getSearchJob).mockResolvedValue(job({ search_token: otherToken, tiktok_url: clipUrl }));
     const { result: hook } = renderHook(() => useSearchPage());
 
     act(() => {
-      hook.current.onUrlChange(tiktokUrl);
+      hook.current.onUrlChange(clipUrl);
       hook.current.onSelectStreamer("jason");
     });
     await act(async () => {
       hook.current.onSubmit({ preventDefault: vi.fn() } as never);
     });
 
-    await waitFor(() => expect(createSearchJob).toHaveBeenCalled());
+    await waitFor(() => expect(createSearchJob).toHaveBeenCalledWith({
+      tiktokUrl: clipUrl,
+      streamer: "jason",
+      streamedFrom: undefined,
+      streamedTo: undefined,
+    }));
     expect(window.location.pathname).toBe("/share");
     expect(window.location.search).toBe("");
     expect(window.location.hash).toBe(`#${otherToken}`);

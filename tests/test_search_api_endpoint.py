@@ -25,7 +25,7 @@ class StubSearchManager:
         self.last_date_range: SearchDateRange | None = None
         self.raise_url: Exception | None = None
 
-    def search_tiktok_url(
+    def search_clip_url(
         self,
         url: str,
         streamer: str,
@@ -119,13 +119,18 @@ def test_searchable_streamers_are_browser_cacheable() -> None:
     ]
 
 
-def test_public_search_endpoint_accepts_tiktok_url_only() -> None:
+@pytest.mark.parametrize("url", [
+    "https://www.tiktok.com/@u/video/1",
+    "https://www.instagram.com/reel/Cx123/",
+    "https://www.youtube.com/shorts/BaW_jenozKc",
+])
+def test_public_search_endpoint_accepts_supported_clip_url(url: str) -> None:
     app, client = build_client(create_public_app)
 
     with client:
         response = client.post(
             "/api/search/clip",
-            data={"tiktok_url": "https://www.tiktok.com/@u/video/1", "streamer": "jason"},
+            data={"tiktok_url": url, "streamer": "jason"},
         )
 
     assert response.status_code == 202
@@ -135,7 +140,7 @@ def test_public_search_endpoint_accepts_tiktok_url_only() -> None:
     assert app.state.search_manager.url_calls == 0
     assert app.state.search_job_service.created_jobs == [
         {
-            "tiktok_url": "https://www.tiktok.com/@u/video/1",
+            "tiktok_url": url,
             "streamer": "jason",
             "creator_id": 2,
             "date_range": None,
@@ -166,13 +171,19 @@ def test_public_search_endpoint_accepts_tiktok_short_share_url() -> None:
     assert app.state.search_job_service.created_jobs[0]["tiktok_url"] == "https://www.tiktok.com/t/ZP8ctwC2V/"
 
 
-def test_public_search_endpoint_rejects_profile_url_before_queueing() -> None:
+@pytest.mark.parametrize("url", [
+    "https://www.tiktok.com/@jasontheween",
+    "https://www.instagram.com/profile/",
+    "https://www.youtube.com/watch?v=BaW_jenozKc",
+    "https://www.youtube.com.evil.test/shorts/BaW_jenozKc",
+])
+def test_public_search_endpoint_rejects_non_clip_url_before_queueing(url: str) -> None:
     app, client = build_client(create_public_app)
 
     with client:
         response = client.post(
             "/api/search/clip",
-            data={"tiktok_url": "https://www.tiktok.com/@jasontheween", "streamer": "jason"},
+            data={"tiktok_url": url, "streamer": "jason"},
         )
 
     assert response.status_code == 400
