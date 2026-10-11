@@ -20,9 +20,11 @@ class FakeMonitor:
         *,
         live_sequence: list[bool] | None = None,
         vods: list[dict[str, object]] | None = None,
+        vods_by_id: dict[str, dict[str, object]] | None = None,
     ):
         self.live_sequence = list(live_sequence or [False])
         self.vods = list(vods or [])
+        self.vods_by_id = dict(vods_by_id or {})
         self.user_profile = {
             "id": "user-1",
             "login": "alice",
@@ -40,6 +42,10 @@ class FakeMonitor:
 
     def list_archive_vods_since(self, user_id: str, created_after):
         return [dict(vod) for vod in self.vods]
+
+    def get_archive_vod_by_id(self, vod_platform_id: str):
+        vod = self.vods_by_id.get(vod_platform_id)
+        return dict(vod) if vod is not None else None
 
 
 class FakeStore:
@@ -102,6 +108,14 @@ class FakeStore:
 
     def get(self, vod_platform_id: str):
         return self.get_vod_ingest_state(vod_platform_id)
+
+    def list_pending(self, streamer: str):
+        return [
+            state
+            for state in self.vod_state.values()
+            if state.streamer == streamer
+            and self.get_video_status(state.video_id) == "indexing"
+        ]
 
     def delete_vod_ingest_state(self, vod_platform_id: str) -> None:
         self.deleted_vod_state_ids.append(vod_platform_id)
@@ -217,6 +231,69 @@ class TestRunHybridIngest:
         FakeBacklogSession.run_started_event = None
         FakeLiveSession.runs = 0
         FakeLiveSession.stop_calls = 0
+
+    def test_saved_cursor_omitted_from_discovery_resumes_outside_lookback(self) -> None:
+        vod_id = "2878694994"
+        url = f"https://www.twitch.tv/videos/{vod_id}"
+        monitor = FakeMonitor(
+            vods=[],
+            vods_by_id={
+                vod_id: {
+                    "id": vod_id,
+                    "url": url,
+                    "user_id": "user-1",
+                    "created_at": "2000-01-01T00:00:00Z",
+                    "duration_seconds": 22768,
+                },
+            },
+        )
+        store = FakeStore()
+        store.set_video(
+            video_id=50,
+            creator_id=1,
+            url=url,
+            title="Saved partial VOD",
+            processed=False,
+            status="indexing",
+        )
+        store.set_state(
+            vod_platform_id=vod_id,
+            video_id=50,
+            streamer="alice",
+            last_ingested_seconds=22648,
+            last_seen_duration_seconds=22768,
+        )
+        logs: list[str] = []
+        stop_flag = {"done": False}
+
+        def out(line: str) -> None:
+            logs.append(line)
+            if line.startswith("mode=watch") or line.startswith("completed mode=backlog"):
+                stop_flag["done"] = True
+
+        result = run_hybrid_ingest(
+            "alice",
+            days=1,
+            monitor=monitor,
+            build_storage=lambda: FakeRepositories(store),
+            build_ingest=lambda: {"embedder": object()},
+            historical_source_factory=FakeSource,
+            live_source_factory=FakeSource,
+            session_factory=HybridSessionFactory(),
+            out=out,
+            should_stop=lambda: stop_flag["done"],
+            watch_poll_seconds=0.0,
+            backlog_live_poll_seconds=0.0,
+            session_wait_seconds=0.0,
+            retry_seconds=0.0,
+        )
+
+        assert FakeBacklogSession.runs == ["2878694994"]
+        assert result.resumed == 1
+        assert (
+            "starting mode=backlog vod=2878694994 "
+            "url=https://www.twitch.tv/videos/2878694994 cursor=22648 backlog=1"
+        ) in logs
 
     def test_watch_mode_when_no_backlog_and_offline(self) -> None:
         monitor = FakeMonitor(live_sequence=[False, False, False], vods=[])
