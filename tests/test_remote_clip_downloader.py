@@ -15,6 +15,84 @@ from backend.services.remote_clip_downloader import (
 
 class TestRemoteClipDownloader:
 
+    @pytest.mark.parametrize("apostrophe", ["'", "’"])
+    def test_youtube_bot_challenge_has_safe_user_message(self, apostrophe, tmp_path, caplog) -> None:
+        diagnostic = (
+            "WARNING: [youtube] No title found in player responses\n"
+            f"ERROR: [youtube] stUeIqtnRYs: Sign in to confirm you{apostrophe}re not a bot. "
+            "Use --cookies-from-browser or --cookies for authentication.\n"
+            "Proxy http://operator:secret@proxy.test:8080"
+        )
+        downloader = RemoteClipDownloader(temp_dir=str(tmp_path))
+        failure = subprocess.CompletedProcess([], 1, stdout="", stderr=diagnostic)
+        with patch("backend.services.remote_clip_downloader.subprocess.run", return_value=failure):
+            with pytest.raises(DownloadError) as error:
+                downloader.download_clip("https://www.youtube.com/shorts/stUeIqtnRYs")
+        assert str(error.value) == (
+            "YouTube blocked VodHunter from downloading this Short. Please try again later."
+        )
+        assert "secret" not in caplog.text
+        assert "cookies" not in caplog.text
+
+    @pytest.mark.parametrize("failure_kind", ["stderr", "stdout", "timeout", "process"])
+    def test_youtube_failures_hide_proxy_credentials_and_cleanup(self, failure_kind, tmp_path, caplog) -> None:
+        import traceback
+
+        secret = "proxy-password-sentinel"
+        proxy = f"http://operator:{secret}@proxy.test:8080"
+        downloader = RemoteClipDownloader(temp_dir=str(tmp_path), youtube_proxy_url=proxy)
+
+        def fake_run(cmd, **kwargs):
+            template = cmd[cmd.index("-o") + 1]
+            with open(template.replace("%(ext)s", "webm.part"), "wb") as file:
+                file.write(b"partial")
+            if failure_kind == "timeout":
+                raise subprocess.TimeoutExpired(cmd, 90, stderr=proxy)
+            if failure_kind == "process":
+                raise OSError(f"Cannot execute command {cmd}")
+            return subprocess.CompletedProcess(
+                cmd, 1, stdout=proxy if failure_kind == "stdout" else "",
+                stderr=proxy if failure_kind == "stderr" else "",
+            )
+
+        with patch("backend.services.remote_clip_downloader.subprocess.run", side_effect=fake_run):
+            with pytest.raises(DownloadError) as error:
+                downloader.download_clip("https://www.youtube.com/shorts/stUeIqtnRYs")
+        assert str(error.value) == (
+            "VodHunter could not download this YouTube Short. Please try again later."
+        )
+        assert secret not in "".join(traceback.format_exception(error.value))
+        assert secret not in caplog.text
+        assert list(tmp_path.iterdir()) == []
+
+    @pytest.mark.parametrize("platform, url", [
+        ("youtube", "https://www.youtube.com/shorts/stUeIqtnRYs"),
+        ("instagram", "https://www.instagram.com/reel/Cx123/"),
+        ("tiktok", "https://www.tiktok.com/@demo/video/1"),
+    ])
+    def test_operator_proxy_applies_only_to_youtube(self, platform, url, tmp_path) -> None:
+        proxy = "http://operator:secret@proxy.test:8080"
+        downloader = RemoteClipDownloader(temp_dir=str(tmp_path), youtube_proxy_url=proxy)
+
+        def fake_run(cmd, **kwargs):
+            template = cmd[cmd.index("-o") + 1]
+            with open(template.replace("%(ext)s", "webm"), "wb") as file:
+                file.write(b"audio-bytes")
+            return subprocess.CompletedProcess(cmd, 0)
+
+        with patch("backend.services.remote_clip_downloader.subprocess.run", side_effect=fake_run) as run:
+            result = downloader.download_clip(url)
+        cmd = run.call_args.args[0]
+        if platform == "youtube":
+            assert cmd[cmd.index("--proxy") + 1] == proxy
+        else:
+            assert "--proxy" not in cmd
+            assert proxy not in cmd
+        assert cmd[-2:] == ["--", url]
+        with open(result.path, "rb") as file:
+            assert file.read() == b"audio-bytes"
+        downloader.cleanup(result.path)
+
     @pytest.mark.parametrize(
         "url, platform, normalized",
         [
@@ -84,6 +162,7 @@ class TestRemoteClipDownloader:
             if platform == "youtube":
                 assert cmd[cmd.index("--format") + 1] == "bestaudio/best"
                 assert cmd[cmd.index("--js-runtimes") + 1] == "node"
+                assert "--proxy" not in cmd
             with open(result.path, "rb") as file:
                 assert file.read() == b"audio-bytes"
             downloader.cleanup(result.path)
