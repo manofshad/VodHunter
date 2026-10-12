@@ -10,6 +10,22 @@ from search.local_query_embedder import LocalQueryEmbedder
 
 class TestSearchEmbedderBootstrap:
 
+    @pytest.mark.parametrize("configured_proxy, expected_proxy", [
+        (None, None), ("   ", None), ("  http://proxy.test:8080  ", "http://proxy.test:8080"),
+    ])
+    def test_search_stack_reads_youtube_proxy(self, configured_proxy, expected_proxy, monkeypatch, tmp_path) -> None:
+        if configured_proxy is None:
+            monkeypatch.delenv("YOUTUBE_PROXY_URL", raising=False)
+        else:
+            monkeypatch.setenv("YOUTUBE_PROXY_URL", configured_proxy)
+        with patch("backend.bootstrap_shared.build_local_query_embedder", return_value=Mock()):
+            stack = bootstrap_shared.build_search_stack(
+                repositories=Mock(), max_duration_seconds=180,
+                download_temp_dir=str(tmp_path / "downloads"),
+                preprocess_temp_dir=str(tmp_path / "preprocess"),
+            )
+        assert stack.search_manager.remote_downloader.youtube_proxy_url == expected_proxy
+
     def test_build_repositories_delegates_to_storage_composition(self) -> None:
         repositories = object()
         with patch('backend.bootstrap_shared._build_repositories', return_value=repositories) as build_repositories:
