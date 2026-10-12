@@ -89,6 +89,7 @@ def build_search_stack(
         search_service=search_service,
         remote_downloader=RemoteClipDownloader(
             temp_dir=download_temp_dir,
+            youtube_proxy_url=os.getenv("YOUTUBE_PROXY_URL", "").strip() or None,
         ),
         max_duration_seconds=max_duration_seconds,
     )

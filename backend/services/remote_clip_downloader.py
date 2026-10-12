@@ -70,6 +70,8 @@ _TIKTOK_LOGIN_REQUIRED_ERROR = re.compile(
     r"^ERROR: \[TikTok\] [0-9]+: [^\r\n]*\bLog in for access\.",
     re.MULTILINE,
 )
+_YOUTUBE_BOT_ERROR = re.compile(r"sign in to confirm you['’]re not a bot", re.IGNORECASE)
+_YOUTUBE_DOWNLOAD_ERROR = "VodHunter could not download this YouTube Short. Please try again later."
 _TRANSIENT_RESOLVE_EXCEPTIONS = (
     _TransientTikTokResolveError,
     http.client.HTTPException,
@@ -180,10 +182,12 @@ class RemoteClipDownloader:
         resolve_attempts: int = 3,
         max_resolve_redirects: int = 3,
         resolve_retry_delay_seconds: float = 0.25,
+        youtube_proxy_url: str | None = None,
     ):
         self.temp_dir = temp_dir
         self.timeout_seconds = int(timeout_seconds)
         self.max_file_mb = max_file_mb
+        self.youtube_proxy_url = youtube_proxy_url
         self.resolve_timeout_seconds = float(resolve_timeout_seconds)
         self.resolve_attempts = max(1, int(resolve_attempts))
         self.max_resolve_redirects = max(1, int(max_resolve_redirects))
@@ -325,6 +329,8 @@ class RemoteClipDownloader:
         ]
         if parsed_url.platform == "youtube":
             cmd.extend(["--js-runtimes", "node", "--format", "bestaudio/best"])
+            if self.youtube_proxy_url:
+                cmd.extend(["--proxy", self.youtube_proxy_url])
         cmd.extend(["--", url])
 
         try:
@@ -336,10 +342,32 @@ class RemoteClipDownloader:
             )
         except subprocess.TimeoutExpired as exc:
             self._cleanup_download(output_prefix)
+            if parsed_url.platform == "youtube":
+                logger.warning("youtube_download_failed reason=timeout proxy_configured=%s", bool(self.youtube_proxy_url))
+                raise DownloadError(_YOUTUBE_DOWNLOAD_ERROR) from None
             raise DownloadError(f"yt-dlp timed out while downloading {parsed_url.platform} clip") from exc
+        except OSError:
+            if parsed_url.platform != "youtube":
+                raise
+            self._cleanup_download(output_prefix)
+            logger.warning("youtube_download_failed reason=process_error proxy_configured=%s", bool(self.youtube_proxy_url))
+            raise DownloadError(_YOUTUBE_DOWNLOAD_ERROR) from None
 
         if result.returncode != 0:
             self._cleanup_download(output_prefix)
+            if parsed_url.platform == "youtube":
+                bot_challenge = bool(_YOUTUBE_BOT_ERROR.search(result.stderr or "") or _YOUTUBE_BOT_ERROR.search(result.stdout or ""))
+                logger.warning(
+                    "youtube_download_failed reason=%s returncode=%s proxy_configured=%s",
+                    "bot_challenge" if bot_challenge else "provider_error",
+                    result.returncode,
+                    bool(self.youtube_proxy_url),
+                )
+                if bot_challenge:
+                    raise DownloadError(
+                        "YouTube blocked VodHunter from downloading this Short. Please try again later."
+                    ) from None
+                raise DownloadError(_YOUTUBE_DOWNLOAD_ERROR) from None
             message = (result.stderr or result.stdout or "yt-dlp failed").strip()
             if _TIKTOK_LOGIN_REQUIRED_ERROR.search(result.stderr or ""):
                 logger.warning("tiktok_download_login_required error=%s", message)
