@@ -1,31 +1,26 @@
 # VodHunter
 
-Find the original Twitch moment behind a TikTok clip.
+## [vodhunter.com](https://vodhunter.com/)
 
-[Try VodHunter at vodhunter.com](https://vodhunter.com/)
+Find the original Twitch moments from a TikTok clip. VodHunter matches the clip's
+audio to a streamer's VODs and links you to the timestamps. It also works with
+edited clips that combine moments from multiple VODs.
 
-VodHunter matches a clip's audio to a streamer's Twitch VODs and gives you links
-to the matching timestamps. An edited clip can contain several moments, even
-from different VODs. VodHunter groups the matches by source so you can open each
-one.
+![VodHunter search result matching a TikTok clip to 07:32:17 in a jasontheween Twitch VOD](docs/images/matched-search.png)
 
 ## Find a moment
 
-1. Paste a TikTok link and choose a streamer.
-2. Narrow the search by date if you know when the stream happened.
-3. Open a match to jump to that moment in the original Twitch VOD.
+1. Paste a TikTok link, choose a streamer, and click **Search**.
+2. Open a match to jump to that moment in the Twitch VOD.
 
-Your search history lets you revisit previous results. You can also share a
-result link or reopen a search while it is still running.
-
-On iPhone, the site's **iPhone shortcut** button lets you add **Search with
-VodHunter** to your share sheet. Then you can start a search directly from TikTok.
+On iPhone, use the site's **iPhone shortcut** button to add VodHunter to your
+share sheet and search directly from TikTok.
 
 ## How it works
 
-VodHunter turns audio from Twitch VODs into neural fingerprints, each tied to a
-timestamp. It fingerprints the TikTok audio, finds similar fingerprints, and
-checks that they line up into consistent stretches of audio.
+VodHunter saves audio fingerprints from Twitch VODs along with their timestamps.
+It compares your TikTok clip's audio fingerprints against them, then checks the
+matches to find where each part of the clip appears in the VODs.
 
 ```mermaid
 flowchart LR
@@ -33,11 +28,19 @@ flowchart LR
     VODs["Indexed Twitch VODs"] --> Audio
     Audio --> Moments["Matched moments"]
     Moments --> Watch["Open Twitch at the timestamp"]
+
+    classDef source fill:#1e2939,stroke:#64748b,color:#ffffff
+    classDef match fill:#ff2446,stroke:#ff2446,color:#101827
+    classDef result fill:#101827,stroke:#ff2446,color:#ffffff
+    class Clip,VODs source
+    class Audio match
+    class Moments,Watch result
+    linkStyle default stroke:#ff2446
 ```
 
-Search covers the VODs VodHunter has indexed for the selected streamer. Very
+*Search covers the VODs VodHunter has indexed for the selected streamer. Very
 short clips, heavy music overlays, or heavily altered audio can leave some or
-all of a clip unmatched.
+all of a clip unmatched.*
 
 ## License
 
