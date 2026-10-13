@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from backend.apps.public import create_public_app
 from search.models import (
     SearchDateRange,
+    SearchFeedbackRecord,
     SearchExecutionMetadata,
     SearchJobRecord,
     SearchRequestOutcome,
@@ -94,6 +95,13 @@ class StubSearchJobService:
     def get_public_search_job(self, search_token: str) -> SearchJobRecord | None:
         return self.jobs.get(search_token)
 
+    def save_public_search_feedback(self, search_token, rating):
+        job = self.jobs.get(search_token)
+        if job is None or job.status != "completed" or not job.result or not job.result.found:
+            return None
+        job.feedback = SearchFeedbackRecord(rating, "2026-10-12T12:00:00Z")
+        return job.feedback
+
 
 def build_client(app_factory):
     app = app_factory(enable_lifespan=False)
@@ -101,6 +109,59 @@ def build_client(app_factory):
     app.state.search_manager = StubSearchManager()
     app.state.search_job_service = StubSearchJobService()
     return app, TestClient(app)
+
+
+def feedback_job(*, status="completed", found=True):
+    return SearchJobRecord(
+        id=101, status=status, stage=None, created_at="2026-10-12T11:00:00Z",
+        started_at=None, finished_at=None, result=SearchResult(found=found),
+        error_code=None, error_message=None,
+    )
+
+
+def test_feedback_save_and_authenticated_reload_returns_confirmed_rating():
+    app, client = build_client(create_public_app)
+    app.state.search_job_service.jobs[SEARCH_TOKEN] = feedback_job()
+    with client:
+        response = client.put("/api/search/clip/feedback", headers=AUTH_HEADERS, json={"rating": "up"})
+        assert response.status_code == 200
+        assert response.headers["cache-control"] == "no-store"
+        assert response.headers["referrer-policy"] == "no-referrer"
+        assert response.json() == {"rating": "up", "updated_at": "2026-10-12T12:00:00Z"}
+        changed = client.put("/api/search/clip/feedback", headers=AUTH_HEADERS, json={"rating": "down"})
+        assert changed.json()["rating"] == "down"
+        assert client.get("/api/search/clip", headers=AUTH_HEADERS).json()["feedback"] == changed.json()
+
+
+@pytest.mark.parametrize("authorization", [None, "Basic token", "Bearer short", "Bearer " + "B" * 43])
+def test_feedback_rejects_missing_malformed_or_unissued_bearer(authorization):
+    app, client = build_client(create_public_app)
+    app.state.search_job_service.jobs[SEARCH_TOKEN] = feedback_job()
+    with client:
+        response = client.put("/api/search/clip/feedback", json={"rating": "up"},
+            headers={"Authorization": authorization} if authorization else {})
+    assert response.status_code == 404
+    assert response.json() == {"detail": {"code": "SEARCH_NOT_FOUND", "message": "Search job was not found"}}
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["referrer-policy"] == "no-referrer"
+    assert app.state.search_job_service.jobs[SEARCH_TOKEN].feedback is None
+
+
+@pytest.mark.parametrize("status,found", [("queued", False), ("running", True), ("failed", True), ("completed", False)])
+def test_feedback_rejects_ineligible_jobs(status, found):
+    app, client = build_client(create_public_app)
+    app.state.search_job_service.jobs[SEARCH_TOKEN] = feedback_job(status=status, found=found)
+    with client:
+        response = client.put("/api/search/clip/feedback", headers=AUTH_HEADERS, json={"rating": "down"})
+    assert response.status_code == 404
+    assert app.state.search_job_service.jobs[SEARCH_TOKEN].feedback is None
+
+
+@pytest.mark.parametrize("payload", [{}, {"rating": "neutral"}, {"rating": True}, {"rating": None}])
+def test_feedback_validates_rating_body(payload):
+    _, client = build_client(create_public_app)
+    with client:
+        assert client.put("/api/search/clip/feedback", headers=AUTH_HEADERS, json=payload).status_code == 422
 
 
 def test_searchable_streamers_are_browser_cacheable() -> None:
@@ -321,6 +382,7 @@ def test_public_search_job_endpoint_returns_queued_job_context() -> None:
         "finished_at": None,
         "result": None,
         "error": None,
+        "feedback": None,
     }
 
 

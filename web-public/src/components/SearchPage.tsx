@@ -159,6 +159,7 @@ export default function SearchPage() {
                   submitting={page.submitting}
                   activeSearchStage={page.activeSearchStage}
                   result={page.result}
+                  completedSearchFeedback={page.completedSearchFeedback}
                   lastSubmittedUrl={page.lastSubmittedUrl}
                 />
               </SearchForm>

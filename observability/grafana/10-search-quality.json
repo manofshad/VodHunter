@@ -523,6 +523,192 @@
       ],
       "title": "Recent match decisions",
       "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${DS_POSTGRES}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
+          "noValue": "No observations",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 12,
+        "x": 0,
+        "y": 31
+      },
+      "id": 10,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_search_feedback WHERE $__timeFilter(feedback_updated_at) AND streamer IN (${streamer:sqlstring}) AND feedback_rating = 'up'",
+          "refId": "A",
+          "sql": {
+            "columns": [],
+            "groupBy": []
+          }
+        }
+      ],
+      "title": "Thumbs up",
+      "type": "stat",
+      "description": "Current ratings last updated during the selected interval. Each rated search counts once; changing a rating replaces its previous value."
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${DS_POSTGRES}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
+          "noValue": "No observations",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 12,
+        "x": 12,
+        "y": 31
+      },
+      "id": 11,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*)::double precision AS value FROM grafana_search_feedback WHERE $__timeFilter(feedback_updated_at) AND streamer IN (${streamer:sqlstring}) AND feedback_rating = 'down'",
+          "refId": "A",
+          "sql": {
+            "columns": [],
+            "groupBy": []
+          }
+        }
+      ],
+      "title": "Thumbs down",
+      "type": "stat",
+      "description": "Current ratings last updated during the selected interval. Each rated search counts once; changing a rating replaces its previous value."
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${DS_POSTGRES}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "noValue": "No rows",
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^(.*[ _]ID|search_id|Twitch VOD)$"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Result payload"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "json-view"
+                }
+              },
+              {
+                "id": "custom.inspect",
+                "value": true
+              },
+              {
+                "id": "custom.width",
+                "value": 240
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 36
+      },
+      "id": 12,
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT feedback_updated_at AS \"Rating updated\", feedback_rating AS \"Rating\", search_id AS \"Search ID\", streamer AS \"Streamer\", tiktok_url AS \"Original clip URL\", matched_timestamp_seconds AS \"Matched timestamp seconds\", result_payload::text AS \"Result payload\", created_at, started_at, finished_at, job_status, job_stage, outcome, found_match, result_reason, score, error_code, error_message, source_app, route, input_type, download_source, download_host, input_duration_seconds, success, http_status, total_duration_ms, preprocess_duration_ms, embed_duration_ms, vector_query_duration_ms, alignment_duration_ms, model_startup_duration_ms, model_cold_start, fingerprint_preprocessing_duration_ms, fingerprint_inference_duration_ms, fingerprint_duration_ms, query_fingerprint_count, candidate_count, segment_count, model_version, preprocessing_version, streamed_from, streamed_to, matched_video_id, matched_video_title, matched_video_url, matched_video_streamed_at FROM grafana_search_feedback WHERE $__timeFilter(feedback_updated_at) AND streamer IN (${streamer:sqlstring}) ORDER BY feedback_updated_at DESC LIMIT 500",
+          "refId": "A",
+          "sql": {
+            "columns": [],
+            "groupBy": []
+          }
+        }
+      ],
+      "title": "Rated search details",
+      "type": "table",
+      "description": "Current ratings last updated during the selected interval, with original clip, complete result payload and diagnostic fields. Expand Result payload cells to inspect every source VOD and segment."
     }
   ],
   "refresh": "1m",

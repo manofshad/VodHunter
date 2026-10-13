@@ -6,6 +6,8 @@ from backend.schemas import (
     SearchJobCreatedResponse,
     SearchJobError,
     SearchJobResponse,
+    SearchFeedbackRequest,
+    SearchFeedbackResponse,
     SearchResponse,
     StreamerListItem,
 )
@@ -131,11 +133,38 @@ def get_search_clip_job(
         created_at=job.created_at,
         started_at=job.started_at,
         finished_at=job.finished_at,
+        feedback=SearchFeedbackResponse(rating=job.feedback.rating, updated_at=job.feedback.updated_at)
+        if job.feedback is not None else None,
         result=SearchResponse.from_result(job.result) if job.result is not None else None,
         error=SearchJobError(code=job.error_code, message=job.error_message)
         if job.error_code and job.error_message
         else None,
     )
+
+
+@router.put(
+    "/search/clip/feedback",
+    response_model=SearchFeedbackResponse,
+    responses={404: {"model": ErrorResponse}},
+)
+def save_search_clip_feedback(
+    feedback: SearchFeedbackRequest,
+    request: Request,
+    response: Response,
+    authorization: str | None = Header(default=None),
+) -> SearchFeedbackResponse:
+    scheme, _, search_token = (authorization or "").partition(" ")
+    saved = None
+    if scheme.lower() == "bearer" and is_search_token(search_token):
+        saved = request.app.state.search_job_service.save_public_search_feedback(search_token, feedback.rating)
+    if saved is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "SEARCH_NOT_FOUND", "message": "Search job was not found"},
+            headers=SEARCH_ACCESS_HEADERS,
+        )
+    response.headers.update(SEARCH_ACCESS_HEADERS)
+    return SearchFeedbackResponse(rating=saved.rating, updated_at=saved.updated_at)
 
 
 @router.get("/search/streamers", response_model=list[StreamerListItem])

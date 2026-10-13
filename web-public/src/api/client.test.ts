@@ -1,11 +1,23 @@
 import { afterEach, expect, it, vi } from "vitest";
 
-import { getSearchJob } from "./client";
+import { getSearchJob, saveSearchFeedback } from "./client";
 
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
   vi.resetModules();
+});
+
+it("saves a rating with the bearer header and returns the confirmed rating", async () => {
+  const feedback = { rating: "down", updated_at: "2026-10-12T12:00:00Z" };
+  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(feedback)));
+  vi.stubGlobal("fetch", fetchMock);
+  expect(await saveSearchFeedback("B".repeat(43), "down")).toEqual(feedback);
+  const [url, options] = fetchMock.mock.calls[0];
+  expect(url).toContain("/api/search/clip/feedback");
+  expect(url).not.toContain("B".repeat(43));
+  expect(options).toMatchObject({ method: "PUT", cache: "no-store", body: JSON.stringify({ rating: "down" }) });
+  expect(new Headers(options.headers).get("Authorization")).toBe(`Bearer ${"B".repeat(43)}`);
 });
 
 it.each([

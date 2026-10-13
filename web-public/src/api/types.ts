@@ -64,6 +64,19 @@ export interface SearchJobResponse {
   finished_at: string | null;
   result: SearchResponse | null;
   error: SearchJobError | null;
+  feedback: SearchFeedbackResponse | null;
+}
+
+export type MatchRatingValue = "up" | "down";
+
+export interface SearchFeedbackResponse {
+  rating: MatchRatingValue;
+  updated_at: string;
+}
+
+export interface CompletedSearchFeedback {
+  searchToken: string;
+  feedback: SearchFeedbackResponse | null;
 }
 
 export interface StreamerListItem {

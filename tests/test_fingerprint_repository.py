@@ -402,6 +402,8 @@ def test_get_public_search_job_restores_nested_multi_segment_payload() -> None:
             None,
             payload,
             "https://www.tiktok.com/@alice/video/123",
+            None,
+            None,
         )
     )
     store = build_search_job_repository(cursor)
@@ -422,6 +424,7 @@ def test_get_public_search_job_restores_nested_multi_segment_payload() -> None:
     assert job.result.unmatched_ranges[0].query_start == 5.0
     assert job.tiktok_url == "https://www.tiktok.com/@alice/video/123"
     assert job.streamer == "alice"
+    assert job.feedback is None
 
 
 @pytest.mark.parametrize("token", [55, "55", "", None, "A" * 42, "A" * 44])

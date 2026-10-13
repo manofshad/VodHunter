@@ -132,6 +132,14 @@ class SearchJobCreatedResponse(BaseModel):
     stage: str | None = None
 
 
+class SearchFeedbackRequest(BaseModel):
+    rating: Literal["up", "down"]
+
+
+class SearchFeedbackResponse(SearchFeedbackRequest):
+    updated_at: str
+
+
 class SearchJobResponse(BaseModel):
     search_token: str
     status: SearchJobStatus
@@ -143,6 +151,7 @@ class SearchJobResponse(BaseModel):
     finished_at: str | None = None
     result: SearchResponse | None = None
     error: SearchJobError | None = None
+    feedback: SearchFeedbackResponse | None = None
 
 
 class InternalVideoMutationRequest(BaseModel):

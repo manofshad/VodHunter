@@ -180,6 +180,22 @@ describe("SearchResultCard", () => {
     expect(screen.queryByRole("heading", { name: "Matched clip segments" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Unmatched clip ranges" })).toBeNull();
     expect(screen.queryByText("00:00:00–00:01:10")).toBeNull();
+    expect(screen.queryByRole("group", { name: "Rate this match" })).toBeNull();
+  });
+
+  it("offers one rating for a successful multi-source search", () => {
+    render(<SearchFeedback requestError={null} submitting={false} activeSearchStage={null}
+      result={multiSegmentResult()} lastSubmittedUrl="https://tiktok.test/clip"
+      completedSearchFeedback={{ searchToken: "A".repeat(43), feedback: null }} />);
+    expect(screen.getAllByRole("group", { name: "Rate this match" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Thumbs up, correct match" })).toHaveLength(1);
+    expect(screen.getAllByRole("heading", { name: "Matched clip segments" })).toHaveLength(2);
+  });
+
+  it.each([true, false])("hides rating while searching or without an authenticated completed token", (submitting) => {
+    render(<SearchFeedback requestError={null} submitting={submitting} activeSearchStage="validating"
+      result={multiSegmentResult()} lastSubmittedUrl="https://tiktok.test/clip" completedSearchFeedback={null} />);
+    expect(screen.queryByRole("group", { name: "Rate this match" })).toBeNull();
   });
 });
 
@@ -205,6 +221,7 @@ describe("SearchFeedback", () => {
         activeSearchStage={null}
         result={result}
         lastSubmittedUrl="https://tiktok.test/clip"
+        completedSearchFeedback={null}
       />,
     );
 

@@ -1,4 +1,4 @@
-import { SearchJobCreatedResponse, SearchJobResponse, StreamerListItem } from "./types";
+import { MatchRatingValue, SearchFeedbackResponse, SearchJobCreatedResponse, SearchJobResponse, StreamerListItem } from "./types";
 
 const ENV_API_BASE = import.meta.env.VITE_API_BASE?.trim();
 const DEV_API_BASE = `http://${window.location.hostname}:8001/api`;
@@ -54,4 +54,14 @@ export async function getSearchJob(searchToken: string): Promise<SearchJobRespon
     cache: "no-store",
   });
   return parseJson<SearchJobResponse>(resp);
+}
+
+export async function saveSearchFeedback(searchToken: string, rating: MatchRatingValue): Promise<SearchFeedbackResponse> {
+  const resp = await fetch(`${getApiBase()}/search/clip/feedback`, {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${searchToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ rating }),
+    cache: "no-store",
+  });
+  return parseJson<SearchFeedbackResponse>(resp);
 }
