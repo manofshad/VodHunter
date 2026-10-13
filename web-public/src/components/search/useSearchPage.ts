@@ -74,6 +74,7 @@ export interface SearchPageState {
   onSelectStreamer: (value: string) => void;
   onDateRangeChange: (streamedFrom: string, streamedTo: string) => void;
   onClearHistory: () => void;
+  onGoHome: () => void;
 }
 
 export function useSearchPage(): SearchPageState {
@@ -346,5 +347,6 @@ export function useSearchPage(): SearchPageState {
     onSelectStreamer,
     onDateRangeChange,
     onClearHistory,
+    onGoHome: clearActiveSearch,
   };
 }
