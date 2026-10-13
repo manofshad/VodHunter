@@ -19,18 +19,24 @@ interface HeaderProps {
   shortcutButtonRef: RefObject<HTMLButtonElement>;
   onOpenHistory: () => void;
   onOpenShortcut: () => void;
+  onGoHome: () => void;
 }
 
-function Header({ openPanel, historyButtonRef, shortcutButtonRef, onOpenHistory, onOpenShortcut }: HeaderProps) {
+function Header({ openPanel, historyButtonRef, shortcutButtonRef, onOpenHistory, onOpenShortcut, onGoHome }: HeaderProps) {
   return (
     <header className="border-b border-gray-700 bg-gray-900 px-3 py-4 sm:px-6">
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-2">
-        <div className="flex items-center gap-2" aria-label="VodHunter">
+        <a
+          href="/"
+          onClick={onGoHome}
+          className="flex min-h-11 items-center gap-2 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#fb2844]"
+          aria-label="VodHunter"
+        >
           <span className="text-lg font-bold text-white sm:text-xl">
             <span className="font-bold">Vod</span>
             <span className="font-bold text-[#fb2844]">Hunter</span>
           </span>
-        </div>
+        </a>
         <nav aria-label="Search tools" className="flex shrink-0 items-center gap-1 sm:gap-2">
           <button
             ref={shortcutButtonRef}
@@ -110,6 +116,7 @@ export default function SearchPage() {
         shortcutButtonRef={shortcutButtonRef}
         onOpenHistory={() => setOpenPanel("history")}
         onOpenShortcut={() => setOpenPanel("shortcut")}
+        onGoHome={page.onGoHome}
       />
 
       <HistoryDrawer
