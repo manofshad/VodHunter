@@ -4,7 +4,7 @@ import { ExternalLink } from "lucide-react";
 import { CompletedSearchFeedback, SearchResponse, SearchSegment, SearchSource } from "../../api/types";
 import { MatchRating } from "./MatchRating";
 import { AvatarImage } from "./AvatarImage";
-import { formatTimelineTime } from "./searchUtils";
+import { MatchedAreaTimeline } from "./MatchedAreaTimeline";
 
 interface SearchResultCardProps {
   result: SearchResponse;
@@ -134,42 +134,7 @@ function SearchSourceBlock({ source, fallbackStreamer, fallbackProfileImageUrl }
       </div>
 
       {source.segments.length > 0 ? (
-        <div className="mt-5 border-t border-gray-700 pt-5">
-          <h4 className="text-sm font-semibold uppercase tracking-[0.16em] text-gray-300">Matched clip segments</h4>
-          <ol className="mt-3 grid gap-3">
-            {source.segments.map((segment, index) => {
-              const clipRange = `${formatTimelineTime(segment.query_start)}–${formatTimelineTime(segment.query_end)}`;
-              const vodRange = `${formatTimelineTime(segment.vod_start)}–${formatTimelineTime(segment.vod_end)}`;
-              return (
-                <li
-                  key={`${source.video_id}-${segment.query_start}-${segment.vod_start}`}
-                  className="grid gap-2 rounded-lg border border-gray-700 bg-gray-800/70 p-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
-                >
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-gray-500">Clip {clipRange}</p>
-                    {segment.video_url_at_timestamp ? (
-                      <a
-                        href={segment.video_url_at_timestamp}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="mt-1 inline-flex items-center gap-2 break-all font-semibold text-white transition hover:text-[#fb2844]"
-                        aria-label={`Open matched segment ${index + 1} in ${sourceTitle} at ${formatTimelineTime(segment.vod_start)}`}
-                      >
-                        {vodRange}
-                        <ExternalLink className="size-4 shrink-0" />
-                      </a>
-                    ) : (
-                      <p className="mt-1 font-semibold text-white">
-                        {vodRange} <span className="font-normal text-gray-400">· Link unavailable</span>
-                      </p>
-                    )}
-                  </div>
-                  <span className="text-xs font-medium text-gray-400">Score {segment.score.toFixed(3)}</span>
-                </li>
-              );
-            })}
-          </ol>
-        </div>
+        <MatchedAreaTimeline segments={source.segments} sourceHref={sourceHref} sourceTitle={sourceTitle} />
       ) : null}
     </article>
   );
