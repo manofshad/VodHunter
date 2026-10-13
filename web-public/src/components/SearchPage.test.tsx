@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { SearchResponse } from "../api/types";
 import { StreamerPicker } from "./search/StreamerPicker";
 import { SearchFeedback } from "./search/SearchFeedback";
+import { MatchedAreaTimeline } from "./search/MatchedAreaTimeline";
 import { DateRangePicker, SearchResultCard, formatTimelineTime, isSupportedClipUrl } from "./SearchPage";
 
 function multiSegmentResult(): SearchResponse {
@@ -114,6 +115,33 @@ function multipleSegmentsInOneSourceResult(): SearchResponse {
   };
 }
 
+function threeSegmentsInOneSourceResult(): SearchResponse {
+  const result = multipleSegmentsInOneSourceResult();
+  const source = result.sources[0];
+  const first = source.segments[0];
+  const middle = {
+    ...first,
+    query_start: 12,
+    query_end: 16,
+    vod_start: 22838,
+    vod_end: 22842,
+    video_url_at_timestamp: "https://www.twitch.tv/videos/2848966623?t=6h20m38s",
+    score: 0.5,
+  };
+  const last = {
+    ...source.segments[1],
+    vod_start: 100,
+    vod_end: 136,
+    video_url_at_timestamp: "https://www.twitch.tv/videos/2848966623?t=1m40s",
+  };
+  const segments = [last, first, middle];
+  return {
+    ...result,
+    sources: [{ ...source, segments, video_url_at_timestamp: middle.video_url_at_timestamp }],
+    segments,
+  };
+}
+
 describe("SearchResultCard", () => {
   it("groups matched segments by source VOD and links each source to its strongest match", () => {
     render(<SearchResultCard result={multiSegmentResult()} lastSubmittedUrl="https://tiktok.test/clip" />);
@@ -134,7 +162,8 @@ describe("SearchResultCard", () => {
     expect(screen.queryByText(/VOD 284896662[34]/)).toBeNull();
     expect(screen.queryByText("Match reason")).toBeNull();
     expect(screen.queryByText("Score 0.91")).toBeNull();
-    expect(screen.getAllByRole("heading", { name: "Matched clip segments" })).toHaveLength(2);
+    expect(screen.getAllByText("Match 1 of 1")).toHaveLength(2);
+    expect(screen.queryByRole("heading", { name: "Matched area" })).toBeNull();
     expect(screen.getByRole("link", { name: "Open original TikTok clip" }).getAttribute("href")).toBe(
       "https://tiktok.test/clip",
     );
@@ -149,8 +178,190 @@ describe("SearchResultCard", () => {
     );
 
     expect(screen.getByRole("link", { name: "Matched stream" }).getAttribute("href")).toContain("t=5h54m35s");
-    expect(screen.getAllByRole("heading", { name: "Matched clip segments" })).toHaveLength(1);
-    expect(screen.getAllByRole("link", { name: /Open matched segment/ })).toHaveLength(2);
+    expect(screen.getByText("Match 2 of 2")).toBeTruthy();
+    expect(screen.getByRole("listitem", { name: /Match 2, clip/ }).getAttribute("aria-current")).toBe("true");
+    expect(screen.getByRole("link", { name: /Open matched segment 2/ }).getAttribute("href")).toContain("t=5h54m35s");
+  });
+
+  it("uses the source URL for the default and keeps title and thumbnail links stable during bounded navigation", () => {
+    const result = threeSegmentsInOneSourceResult();
+    render(<SearchResultCard result={result} lastSubmittedUrl="https://tiktok.test/clip" />);
+
+    const title = screen.getByRole("link", { name: "Matched stream" });
+    const thumbnail = screen.getByRole("link", { name: "Open Matched stream at its strongest match" });
+    const previous = screen.getByRole("button", { name: "Previous match" });
+    const next = screen.getByRole("button", { name: "Next match" });
+    const sourceHref = "https://www.twitch.tv/videos/2848966623?t=6h20m38s";
+    expect(screen.getByText("Match 2 of 3")).toBeTruthy();
+    expect(screen.getByRole("listitem", { name: /Match 2, clip/ }).getAttribute("aria-current")).toBe("true");
+    expect(screen.getByRole("link", { name: /Open matched segment 2/ }).getAttribute("href")).toBe(sourceHref);
+    expect(screen.getByText("Score 0.500")).toBeTruthy();
+    expect(previous.hasAttribute("disabled")).toBe(false);
+    expect(next.hasAttribute("disabled")).toBe(false);
+
+    fireEvent.click(previous);
+    expect(screen.getByText("Match 1 of 3")).toBeTruthy();
+    expect(screen.getByRole("listitem", { name: /Match 1, clip/ }).getAttribute("aria-current")).toBe("true");
+    expect(screen.getByRole("listitem", { name: /Match 2, clip/ }).hasAttribute("aria-current")).toBe(false);
+    expect(screen.getByText("Clip 00:00:07.5–00:00:11.5")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Open matched segment 1/ }).getAttribute("href")).toBe(
+      "https://www.twitch.tv/videos/2848966623?t=5h49m30s",
+    );
+    expect(previous.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(previous);
+    expect(screen.getByText("Match 1 of 3")).toBeTruthy();
+    fireEvent.click(next);
+    expect(screen.getByText("Match 2 of 3")).toBeTruthy();
+    fireEvent.click(next);
+    expect(screen.getByText("Match 3 of 3")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Open matched segment 3/ }).getAttribute("href")).toBe(
+      "https://www.twitch.tv/videos/2848966623?t=1m40s",
+    );
+    expect(next.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(next);
+    expect(screen.getByText("Match 3 of 3")).toBeTruthy();
+    expect(title.getAttribute("href")).toBe(sourceHref);
+    expect(thumbnail.getAttribute("href")).toBe(sourceHref);
+    expect(previous.closest("[aria-live]")).toBeNull();
+    expect(next.closest("[aria-live]")).toBeNull();
+    const announcement = screen.getByText("Match 3 of 3").closest("[aria-live]");
+    expect(announcement?.getAttribute("aria-live")).toBe("polite");
+    expect(announcement?.textContent).toContain("Clip 00:00:30–00:01:06");
+  });
+
+  it("keeps timeline markers static on hover, click, and focus", () => {
+    render(<SearchResultCard result={multipleSegmentsInOneSourceResult()} lastSubmittedUrl="" />);
+    const first = screen.getByRole("listitem", { name: /Match 1, clip/ });
+    const second = screen.getByRole("listitem", { name: /Match 2, clip/ });
+    fireEvent.mouseEnter(first);
+    fireEvent.focus(first);
+    fireEvent.click(first);
+    fireEvent.blur(first);
+    fireEvent.mouseLeave(first);
+    expect(screen.getByText("Match 2 of 2")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Open matched segment 2/ }).getAttribute("href")).toBe(
+      "https://www.twitch.tv/videos/2848966623?t=5h54m35s",
+    );
+    expect(second.getAttribute("aria-current")).toBe("true");
+    expect(first.hasAttribute("tabindex")).toBe(false);
+    expect(first.hasAttribute("aria-pressed")).toBe(false);
+    expect(screen.queryByRole("button", { name: /Match \d, clip/ })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Matched area" })).toBeNull();
+    expect(screen.queryByText(/hover|click.*match|select.*match/i)).toBeNull();
+  });
+
+  it("numbers and traverses in clip order while projecting markers into VOD chronology", () => {
+    const result = threeSegmentsInOneSourceResult();
+    render(<SearchResultCard result={result} lastSubmittedUrl="" />);
+    const markers = screen.getAllByRole("listitem");
+    expect(markers.map((marker) => marker.getAttribute("aria-label"))).toEqual([
+      "Match 1, clip 00:00:07.5–00:00:11.5, VOD 05:49:30–05:49:34",
+      "Match 2, clip 00:00:12–00:00:16, VOD 06:20:38–06:20:42",
+      "Match 3, clip 00:00:30–00:01:06, VOD 00:01:40–00:02:16",
+    ]);
+    const positions = markers.map((marker) => parseFloat(marker.querySelector<HTMLElement>(".matched-area-marker")?.style.left ?? ""));
+    expect(positions[2]).toBeLessThan(positions[0]);
+    expect(positions[0]).toBeLessThan(positions[1]);
+    fireEvent.click(screen.getByRole("button", { name: "Next match" }));
+    expect(screen.getByText("Match 3 of 3")).toBeTruthy();
+    expect(screen.getByText("00:01:40–00:02:16")).toBeTruthy();
+  });
+
+  it("disables both arrows for a single match", () => {
+    render(<SearchResultCard result={multiSegmentResult()} lastSubmittedUrl="" />);
+    for (const source of screen.getAllByRole("article")) {
+      const previous = within(source).getByRole("button", { name: "Previous match" });
+      const next = within(source).getByRole("button", { name: "Next match" });
+      expect(previous.hasAttribute("disabled")).toBe(true);
+      expect(next.hasAttribute("disabled")).toBe(true);
+      const detailHref = within(source).getByRole("link", { name: /Open matched segment/ }).getAttribute("href");
+      fireEvent.click(previous);
+      fireEvent.click(next);
+      expect(within(source).getByText("Match 1 of 1")).toBeTruthy();
+      expect(within(source).getByRole("link", { name: /Open matched segment/ }).getAttribute("href")).toBe(detailHref);
+    }
+  });
+
+  it("resets to the URL default when the same VOD returns fresh result segments", () => {
+    const { rerender } = render(<SearchResultCard result={threeSegmentsInOneSourceResult()} lastSubmittedUrl="" />);
+    fireEvent.click(screen.getByRole("button", { name: "Previous match" }));
+    expect(screen.getByText("Match 1 of 3")).toBeTruthy();
+
+    rerender(<SearchResultCard result={threeSegmentsInOneSourceResult()} lastSubmittedUrl="" />);
+    expect(screen.getByText("Match 2 of 3")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Open matched segment 2/ }).getAttribute("href")).toBe(
+      "https://www.twitch.tv/videos/2848966623?t=6h20m38s",
+    );
+  });
+
+  it("resets a choice when the source URL changes even with retained segment objects", () => {
+    const source = threeSegmentsInOneSourceResult().sources[0];
+    const { rerender } = render(<MatchedAreaTimeline segments={source.segments} sourceHref={source.video_url_at_timestamp} sourceTitle="Matched stream" />);
+    fireEvent.click(screen.getByRole("button", { name: "Previous match" }));
+    expect(screen.getByText("Match 1 of 3")).toBeTruthy();
+
+    rerender(<MatchedAreaTimeline segments={source.segments} sourceHref="https://www.twitch.tv/videos/2848966623?t=1m40s" sourceTitle="Matched stream" />);
+    expect(screen.getByText("Match 3 of 3")).toBeTruthy();
+    expect(screen.getByRole("listitem", { name: /Match 3, clip/ }).getAttribute("aria-current")).toBe("true");
+    expect(screen.getByRole("link", { name: /Open matched segment 3/ }).getAttribute("href")).toBe(
+      "https://www.twitch.tv/videos/2848966623?t=1m40s",
+    );
+  });
+
+  it("preserves a choice when legacy source fallback arrays are rebuilt on rerender", () => {
+    const result = { ...threeSegmentsInOneSourceResult(), sources: [], video_url_at_timestamp: "https://www.twitch.tv/videos/2848966623?t=6h20m38s" };
+    const { rerender } = render(<SearchResultCard result={result} lastSubmittedUrl="https://tiktok.test/first" />);
+    fireEvent.click(screen.getByRole("button", { name: "Previous match" }));
+    expect(screen.getByText("Match 1 of 3")).toBeTruthy();
+
+    rerender(<SearchResultCard result={result} lastSubmittedUrl="https://tiktok.test/updated" />);
+    expect(screen.getByText("Match 1 of 3")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Open matched segment 1/ }).getAttribute("href")).toBe(
+      "https://www.twitch.tv/videos/2848966623?t=5h49m30s",
+    );
+  });
+
+  it("keeps separate VOD carousels independent", () => {
+    const result = threeSegmentsInOneSourceResult();
+    const otherSource = multiSegmentResult().sources[1];
+    const earlierSegment = {
+      ...otherSource.segments[0],
+      query_start: 7.5,
+      query_end: 11.5,
+      vod_start: 200,
+      vod_end: 204,
+      video_url_at_timestamp: "https://www.twitch.tv/videos/2848966624?t=3m20s",
+    };
+    result.sources.push({ ...otherSource, segments: [earlierSegment, ...otherSource.segments] });
+    render(<SearchResultCard result={result} lastSubmittedUrl="" />);
+    const [firstSource, secondSource] = screen.getAllByRole("article");
+
+    fireEvent.click(within(firstSource).getByRole("button", { name: "Previous match" }));
+    expect(within(firstSource).getByText("Match 1 of 3")).toBeTruthy();
+    expect(within(secondSource).getByText("Match 2 of 2")).toBeTruthy();
+    expect(within(secondSource).getByRole("listitem", { name: /Match 2, clip/ }).getAttribute("aria-current")).toBe("true");
+    expect(within(secondSource).getByRole("link", { name: /Open matched segment 2/ }).getAttribute("href")).toBe(
+      "https://www.twitch.tv/videos/2848966624?t=5h54m35s",
+    );
+
+    fireEvent.click(within(secondSource).getByRole("button", { name: "Previous match" }));
+    expect(within(secondSource).getByText("Match 1 of 2")).toBeTruthy();
+    expect(within(firstSource).getByText("Match 1 of 3")).toBeTruthy();
+  });
+
+  it("renders no carousel for empty segments", () => {
+    const { container } = render(<MatchedAreaTimeline segments={[]} sourceHref={null} sourceTitle="Matched stream" />);
+    expect(container.childElementCount).toBe(0);
+    expect(screen.queryByRole("button", { name: "Next match" })).toBeNull();
+  });
+
+  it("falls back to clip order when the source URL is absent from the segments", () => {
+    const source = threeSegmentsInOneSourceResult().sources[0];
+    render(<MatchedAreaTimeline segments={source.segments} sourceHref="https://www.twitch.tv/videos/2848966623?t=unknown" sourceTitle="Matched stream" />);
+    expect(screen.getByText("Match 1 of 3")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Open matched segment 1/ }).getAttribute("href")).toBe(
+      "https://www.twitch.tv/videos/2848966623?t=5h49m30s",
+    );
   });
 
   it("does not render unmatched query ranges", () => {
@@ -177,7 +388,7 @@ describe("SearchResultCard", () => {
     };
     render(<SearchResultCard result={result} lastSubmittedUrl="https://tiktok.test/clip" />);
 
-    expect(screen.queryByRole("heading", { name: "Matched clip segments" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Matched area" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Unmatched clip ranges" })).toBeNull();
     expect(screen.queryByText("00:00:00–00:01:10")).toBeNull();
     expect(screen.queryByRole("group", { name: "Rate this match" })).toBeNull();
@@ -189,7 +400,7 @@ describe("SearchResultCard", () => {
       completedSearchFeedback={{ searchToken: "A".repeat(43), feedback: null }} />);
     expect(screen.getAllByRole("group", { name: "Rate this match" })).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: "Thumbs up, correct match" })).toHaveLength(1);
-    expect(screen.getAllByRole("heading", { name: "Matched clip segments" })).toHaveLength(2);
+    expect(screen.getAllByText("Match 1 of 1")).toHaveLength(2);
   });
 
   it.each([true, false])("hides rating while searching or without an authenticated completed token", (submitting) => {
@@ -200,6 +411,21 @@ describe("SearchResultCard", () => {
 });
 
 describe("SearchFeedback", () => {
+  it("resets carousel selection across a new search submission", () => {
+    const result = threeSegmentsInOneSourceResult();
+    const { rerender } = render(<SearchFeedback requestError={null} submitting={false} activeSearchStage={null}
+      result={result} lastSubmittedUrl="https://tiktok.test/first" completedSearchFeedback={null} />);
+    fireEvent.click(screen.getByRole("button", { name: "Previous match" }));
+    expect(screen.getByText("Match 1 of 3")).toBeTruthy();
+
+    rerender(<SearchFeedback requestError={null} submitting={true} activeSearchStage="validating"
+      result={null} lastSubmittedUrl="https://tiktok.test/second" completedSearchFeedback={null} />);
+    expect(screen.queryByText("Match 1 of 3")).toBeNull();
+    rerender(<SearchFeedback requestError={null} submitting={false} activeSearchStage={null}
+      result={result} lastSubmittedUrl="https://tiktok.test/second" completedSearchFeedback={null} />);
+    expect(screen.getByText("Match 2 of 3")).toBeTruthy();
+  });
+
   it("shows only the simple no-match card for an unsuccessful search", () => {
     const result = {
       ...multiSegmentResult(),
