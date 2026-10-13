@@ -176,6 +176,8 @@ class PostgresDatabase:
                     ("search_requests", "query_fingerprint_count"),
                     ("search_requests", "candidate_count"),
                     ("search_requests", "segment_count"),
+                    ("search_requests", "feedback_rating"),
+                    ("search_requests", "feedback_updated_at"),
                 )
                 missing_columns: list[str] = []
                 for table_name, column_name in required_columns:

@@ -5,11 +5,12 @@ from __future__ import annotations
 from dataclasses import asdict, fields, is_dataclass
 from datetime import datetime, timezone
 import json
-from typing import Any
+from typing import Any, Literal
 
 from search.access import hash_search_token, is_search_token
 from search.models import (
     SearchDateRange,
+    SearchFeedbackRecord,
     SearchJobRecord,
     SearchRequestOutcome,
     SearchResult,
@@ -254,7 +255,9 @@ class SearchJobRepository:
                         error_code,
                         error_message,
                         result_payload,
-                        tiktok_url
+                        tiktok_url,
+                        feedback_rating,
+                        feedback_updated_at
                     FROM search_requests
                     WHERE access_token_hash = %s
                       AND source_app = 'public'
@@ -283,6 +286,8 @@ class SearchJobRepository:
             error_message,
             result_payload,
             tiktok_url,
+            feedback_rating,
+            feedback_updated_at,
         ) = row
 
         result: SearchResult | None = None
@@ -336,7 +341,38 @@ class SearchJobRepository:
             error_message=str(error_message) if error_message else None,
             tiktok_url=str(tiktok_url) if tiktok_url else None,
             streamer=str(streamer) if streamer else None,
+            feedback=SearchFeedbackRecord(feedback_rating, self._isoformat(feedback_updated_at))
+            if feedback_rating is not None else None,
         )
+
+    def save_public_search_feedback(
+        self, search_token: str, rating: Literal["up", "down"],
+    ) -> SearchFeedbackRecord | None:
+        if not is_search_token(search_token):
+            return None
+        with self.database.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE search_requests
+                    SET feedback_rating = %s,
+                        feedback_updated_at = CASE
+                            WHEN feedback_rating IS DISTINCT FROM %s THEN NOW()
+                            ELSE feedback_updated_at
+                        END
+                    WHERE access_token_hash = %s
+                      AND source_app = 'public'
+                      AND job_status = 'completed'
+                      AND success IS TRUE
+                      AND found_match IS TRUE
+                    RETURNING feedback_rating, feedback_updated_at
+                    """,
+                    (rating, rating, hash_search_token(search_token)),
+                )
+                row = cur.fetchone()
+        if row is None:
+            return None
+        return SearchFeedbackRecord(row[0], self._isoformat(row[1]))
 
     def fail_incomplete_public_search_jobs(
         self,

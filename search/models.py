@@ -1,6 +1,6 @@
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 
 @dataclass(frozen=True)
@@ -202,6 +202,12 @@ class SearchRequestOutcome:
 
 
 @dataclass
+class SearchFeedbackRecord:
+    rating: Literal["up", "down"]
+    updated_at: str
+
+
+@dataclass
 class SearchJobRecord:
     id: int
     status: str
@@ -214,3 +220,4 @@ class SearchJobRecord:
     error_message: str | None
     tiktok_url: str | None = None
     streamer: str | None = None
+    feedback: SearchFeedbackRecord | None = None

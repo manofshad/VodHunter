@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react";
 import { ExternalLink } from "lucide-react";
 
-import { SearchResponse, SearchSegment, SearchSource } from "../../api/types";
+import { CompletedSearchFeedback, SearchResponse, SearchSegment, SearchSource } from "../../api/types";
+import { MatchRating } from "./MatchRating";
 import { AvatarImage } from "./AvatarImage";
 import { formatTimelineTime } from "./searchUtils";
 
 interface SearchResultCardProps {
   result: SearchResponse;
   lastSubmittedUrl: string;
+  completedSearchFeedback?: CompletedSearchFeedback | null;
 }
 
 function getSearchSources(result: SearchResponse): SearchSource[] {
@@ -173,7 +175,7 @@ function SearchSourceBlock({ source, fallbackStreamer, fallbackProfileImageUrl }
   );
 }
 
-export function SearchResultCard({ result, lastSubmittedUrl }: SearchResultCardProps) {
+export function SearchResultCard({ result, lastSubmittedUrl, completedSearchFeedback }: SearchResultCardProps) {
   const sources = getSearchSources(result);
 
   return (
@@ -217,6 +219,9 @@ export function SearchResultCard({ result, lastSubmittedUrl }: SearchResultCardP
             <ExternalLink className="mt-0.5 size-4 shrink-0" />
           </a>
         </div>
+      ) : null}
+      {result.found && completedSearchFeedback ? (
+        <MatchRating key={completedSearchFeedback.searchToken} search={completedSearchFeedback} />
       ) : null}
     </section>
   );

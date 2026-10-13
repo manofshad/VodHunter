@@ -1,7 +1,7 @@
 import { FormEvent, RefObject, useEffect, useMemo, useRef, useState } from "react";
 
 import { createSearchJob, getSearchJob, listSearchableStreamers } from "../../api/client";
-import { SearchJobResponse, SearchResponse, StreamerListItem } from "../../api/types";
+import { CompletedSearchFeedback, SearchJobResponse, SearchResponse, StreamerListItem } from "../../api/types";
 import { createSearchHistoryEntry, SearchHistoryEntry } from "./searchHistory";
 import { isSupportedClipUrl } from "./searchUtils";
 import { isSearchToken, parseSharedSearchLocation, sharedSearchPath } from "./sharedSearch";
@@ -58,6 +58,7 @@ export interface SearchPageState {
   loadingStreamers: boolean;
   streamerLoadError: string | null;
   result: SearchResponse | null;
+  completedSearchFeedback: CompletedSearchFeedback | null;
   requestError: string | null;
   streamerError: string | null;
   submitting: boolean;
@@ -84,6 +85,7 @@ export function useSearchPage(): SearchPageState {
   const [loadingStreamers, setLoadingStreamers] = useState(true);
   const [streamerLoadError, setStreamerLoadError] = useState<string | null>(null);
   const [result, setResult] = useState<SearchResponse | null>(null);
+  const [completedSearchFeedback, setCompletedSearchFeedback] = useState<CompletedSearchFeedback | null>(null);
   const [requestError, setRequestError] = useState<string | null>(null);
   const [streamerError, setStreamerError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -223,6 +225,7 @@ export function useSearchPage(): SearchPageState {
 
     if (job.status === "completed") {
       setResult(job.result);
+      setCompletedSearchFeedback(job.result?.found ? { searchToken: job.search_token, feedback: job.feedback } : null);
       setRequestError(null);
       if (job.result) {
         const historyEntry = createSearchHistoryEntry(
@@ -269,6 +272,7 @@ export function useSearchPage(): SearchPageState {
       setStreamerError(null);
       setRequestError(null);
       setResult(null);
+      setCompletedSearchFeedback(null);
       setLastSubmittedUrl(submittedUrl);
       const created = await createSearchJob({
         tiktokUrl: submittedUrl,
@@ -326,6 +330,7 @@ export function useSearchPage(): SearchPageState {
     loadingStreamers,
     streamerLoadError,
     result,
+    completedSearchFeedback,
     requestError,
     streamerError,
     submitting,

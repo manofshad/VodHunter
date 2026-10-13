@@ -3,12 +3,13 @@ from __future__ import annotations
 from concurrent.futures import Executor
 import logging
 import time
+from typing import Literal
 
 from backend.observability import observe_terminal_search
 from backend.services.remote_clip_downloader import DownloadError, InvalidClipUrlError, validate_clip_url
 from backend.services.search_manager import InputDurationExceededError, SearchInputError
 from search.access import create_search_token
-from search.models import SearchDateRange, SearchJobRecord
+from search.models import SearchDateRange, SearchFeedbackRecord, SearchJobRecord
 from storage.search_job_repository import SearchJobRepository
 
 
@@ -55,6 +56,11 @@ class SearchJobService:
 
     def get_public_search_job(self, search_token: str) -> SearchJobRecord | None:
         return self.jobs.get_public_search_job(search_token)
+
+    def save_public_search_feedback(
+        self, search_token: str, rating: Literal["up", "down"],
+    ) -> SearchFeedbackRecord | None:
+        return self.jobs.save_public_search_feedback(search_token, rating)
 
     def fail_incomplete_public_search_jobs(self) -> None:
         recovered = self.jobs.fail_incomplete_public_search_jobs(

@@ -48,6 +48,7 @@ function job(overrides: Partial<SearchJobResponse> = {}): SearchJobResponse {
     finished_at: null,
     result: null,
     error: null,
+    feedback: null,
     ...overrides,
   };
 }
@@ -103,6 +104,24 @@ describe("useSearchPage shared jobs", () => {
     expect(hook.current.submitting).toBe(false);
     expect(hook.current.lastSubmittedUrl).toBe(clipUrl);
     expect(hook.current.historyEntries).toHaveLength(1);
+    expect(hook.current.completedSearchFeedback).toEqual({ searchToken, feedback: null });
+  });
+
+  it("restores a saved rating through authenticated job reload", async () => {
+    window.history.replaceState(null, "", `/share#${searchToken}`);
+    const feedback = { rating: "down", updated_at: "2026-10-12T12:00:00Z" } satisfies NonNullable<SearchJobResponse["feedback"]>;
+    vi.mocked(getSearchJob).mockResolvedValue(job({ status: "completed", result: result(), feedback }));
+    const { result: hook } = renderHook(() => useSearchPage());
+    await waitFor(() => expect(hook.current.completedSearchFeedback).toEqual({ searchToken, feedback }));
+    expect(hook.current.submitting).toBe(false);
+  });
+
+  it("does not enable ratings for a completed no-match", async () => {
+    window.history.replaceState(null, "", `/share#${searchToken}`);
+    vi.mocked(getSearchJob).mockResolvedValue(job({ status: "completed", result: { ...result(), found: false } }));
+    const { result: hook } = renderHook(() => useSearchPage());
+    await waitFor(() => expect(hook.current.result?.found).toBe(false));
+    expect(hook.current.completedSearchFeedback).toBeNull();
   });
 
   it("shows a failed job error", async () => {
