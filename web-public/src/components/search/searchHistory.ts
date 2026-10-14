@@ -1,11 +1,13 @@
 import { SearchResponse } from "../../api/types";
 import { ClipSourceMetadata, parseClipSource } from "./clipSource";
+import { isSearchToken } from "./sharedSearch";
 
 export const SEARCH_HISTORY_STORAGE_KEY = "vodhunter-public-search-history-v1";
 export const MAX_SEARCH_HISTORY_ENTRIES = 25;
 
 export interface SearchHistoryEntry {
   id: string;
+  searchToken: string | null;
   searchedAt: string;
   source: ClipSourceMetadata;
   streamer: string;
@@ -56,6 +58,10 @@ function parseSearchHistoryEntry(value: unknown): SearchHistoryEntry | null {
   }
   return {
     id: value.id,
+    searchToken: "searchToken" in value
+      ? isSearchToken(value.searchToken) ? value.searchToken : null
+      : source.kind === "upload" && value.id.startsWith("upload::") && isSearchToken(value.id.slice("upload::".length))
+        ? value.id.slice("upload::".length) : null,
     searchedAt: value.searchedAt,
     source,
     streamer: value.streamer,
@@ -152,6 +158,7 @@ export function createSearchHistoryEntry(
   const timestampSeconds = result.timestamp_seconds;
 
   if (
+    !isSearchToken(searchToken) ||
     !result.found ||
     !twitchUrlAtTimestamp ||
     timestampSeconds === null ||
@@ -166,6 +173,7 @@ export function createSearchHistoryEntry(
 
   return {
     id: source.kind === "link" ? historyEntryId(source.url, streamer) : `upload::${searchToken}`,
+    searchToken,
     searchedAt: safeSearchedAt,
     source,
     streamer,

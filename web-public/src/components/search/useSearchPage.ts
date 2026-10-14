@@ -83,6 +83,7 @@ export interface SearchPageState {
   onSelectStreamer: (value: string) => void;
   onDateRangeChange: (streamedFrom: string, streamedTo: string) => void;
   onClearHistory: () => void;
+  onOpenHistory: (entry: SearchHistoryEntry) => void;
   onGoHome: () => void;
 }
 
@@ -104,6 +105,8 @@ export function useSearchPage(): SearchPageState {
   const [submittedSource, setSubmittedSource] = useState<ClipSourceMetadata | null>(null);
   const streamerTriggerRef = useRef<HTMLButtonElement>(null);
   const sourceRevisionRef = useRef(0);
+  const operationRevisionRef = useRef(0);
+  const [historyOpenRevision, setHistoryOpenRevision] = useState(0);
   const submittedUploadRef = useRef<{ searchToken: string; file: File } | null>(null);
   const { entries: historyEntries, addEntry, clearEntries: onClearHistory } = useSearchHistory();
 
@@ -215,16 +218,17 @@ export function useSearchPage(): SearchPageState {
     }
 
     let cancelled = false;
+    const operationRevision = operationRevisionRef.current;
 
     const poll = async () => {
       try {
         const job = await getSearchJob(activeSearchToken);
-        if (cancelled) {
+        if (cancelled || operationRevision !== operationRevisionRef.current) {
           return;
         }
         handlePolledJob(job);
       } catch (err) {
-        if (cancelled) {
+        if (cancelled || operationRevision !== operationRevisionRef.current) {
           return;
         }
         setSubmitting(false);
@@ -244,7 +248,7 @@ export function useSearchPage(): SearchPageState {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [activeSearchToken]);
+  }, [activeSearchToken, historyOpenRevision]);
 
   const handlePolledJob = (job: SearchJobResponse) => {
     setActiveSearchStage(job.stage);
@@ -351,6 +355,7 @@ export function useSearchPage(): SearchPageState {
 
     const submittedStreamedFrom = streamedFrom.trim();
     const submittedStreamedTo = streamedTo.trim();
+    const operationRevision = ++operationRevisionRef.current;
 
     try {
       sourceRevisionRef.current += 1;
@@ -363,6 +368,9 @@ export function useSearchPage(): SearchPageState {
       setCompletedSearchFeedback(null);
       setSubmittedSource(nextSubmittedSource);
       const created = await createSearchJob(input);
+      if (operationRevision !== operationRevisionRef.current) {
+        return;
+      }
       if (!isSearchToken(created.search_token)) {
         throw new Error("Could not open the search. Please refresh and try again.");
       }
@@ -372,10 +380,36 @@ export function useSearchPage(): SearchPageState {
       setActiveSearchToken(created.search_token);
       setActiveSearchStage(created.stage);
     } catch (err) {
+      if (operationRevision !== operationRevisionRef.current) {
+        return;
+      }
       setActiveSearchStage(null);
       setRequestError(err instanceof Error ? err.message : "Search failed");
       setSubmitting(false);
     }
+  };
+
+  const onOpenHistory = (entry: SearchHistoryEntry) => {
+    operationRevisionRef.current += 1;
+    sourceRevisionRef.current += 1;
+    submittedUploadRef.current = null;
+    clearActiveSearch();
+    setResult(null);
+    setCompletedSearchFeedback(null);
+    setStreamerError(null);
+    setSource(restoredDraft(entry.source));
+    setSubmittedSource(entry.source);
+    setStreamer(entry.streamer);
+    setStreamedFrom("");
+    setStreamedTo("");
+    setHistoryOpenRevision((revision) => revision + 1);
+    setActiveSearchToken(entry.searchToken);
+    setActiveSearchStage(entry.searchToken ? "validating" : null);
+    setSubmitting(entry.searchToken !== null);
+    setRequestError(entry.searchToken ? null : entry.source.kind === "upload"
+      ? "Choose the video file and search again to view results."
+      : "Search again to view results for this saved clip.");
+    window.history.replaceState(null, "", entry.searchToken ? sharedSearchPath(entry.searchToken) : "/");
   };
 
   const onSourceModeChange = (mode: "link" | "upload") => {
@@ -460,6 +494,7 @@ export function useSearchPage(): SearchPageState {
     onSelectStreamer,
     onDateRangeChange,
     onClearHistory,
+    onOpenHistory,
     onGoHome: clearActiveSearch,
   };
 }

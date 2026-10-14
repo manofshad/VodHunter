@@ -8,6 +8,7 @@ import { SearchHistoryEntry } from "./searchHistory";
 function historyEntry(overrides: Partial<SearchHistoryEntry> = {}): SearchHistoryEntry {
   return {
     id: "jasontheween::tiktok.com/t/abc",
+    searchToken: "A".repeat(43),
     searchedAt: new Date(2026, 8, 11, 18, 42, 0).toISOString(),
     source: { kind: "link", url: "https://www.tiktok.com/t/abc?utm_source=share" },
     streamer: "jasontheween",
@@ -21,14 +22,17 @@ function historyEntry(overrides: Partial<SearchHistoryEntry> = {}): SearchHistor
 }
 
 describe("HistoryDrawer", () => {
-  it("links only the title to Twitch and renders the history details outside the link", () => {
+  it("opens saved results through the title button while preserving the card details", () => {
+    const entry = historyEntry();
+    const onOpenEntry = vi.fn();
     render(
       <HistoryDrawer
         open
-        entries={[historyEntry()]}
+        entries={[entry]}
         returnFocusRef={createRef<HTMLButtonElement>()}
         onClose={vi.fn()}
         onClear={vi.fn()}
+        onOpenEntry={onOpenEntry}
       />,
     );
 
@@ -38,14 +42,17 @@ describe("HistoryDrawer", () => {
     expect(screen.getByText("01:02:03")).toBeTruthy();
     expect(screen.getByText("+3 more")).toBeTruthy();
 
-    const link = screen.getByRole("link", { name: "Late Night Stream" });
-    expect(link.getAttribute("href")).toBe("https://www.twitch.tv/videos/7?t=1h2m3s");
-    expect(link.getAttribute("target")).toBe("_blank");
-    expect(link.contains(screen.getByText("tiktok.com/t/abc"))).toBe(false);
-    expect(link.contains(screen.getByText("01:02:03"))).toBe(false);
+    const open = screen.getByRole("button", { name: "Open search results for Late Night Stream" });
+    expect(open.tagName).toBe("BUTTON");
+    expect(open.closest("h3")).toBeTruthy();
+    fireEvent.click(screen.getByText("Late Night Stream"));
+    expect(onOpenEntry).toHaveBeenCalledOnce();
+    expect(onOpenEntry).toHaveBeenCalledWith(entry);
+    expect(screen.queryByRole("link")).toBeNull();
   });
 
   it("copies the original TikTok URL", async () => {
+    const onOpenEntry = vi.fn();
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -59,6 +66,7 @@ describe("HistoryDrawer", () => {
         returnFocusRef={createRef<HTMLButtonElement>()}
         onClose={vi.fn()}
         onClear={vi.fn()}
+        onOpenEntry={onOpenEntry}
       />,
     );
 
@@ -66,6 +74,8 @@ describe("HistoryDrawer", () => {
 
     expect(writeText).toHaveBeenCalledWith("https://www.tiktok.com/t/abc?utm_source=share");
     expect(await screen.findByRole("button", { name: "Clip link copied" })).toBeTruthy();
+    expect(onOpenEntry).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Clip link copied" }).closest("button button")).toBeNull();
   });
 
   it("closes from the close button, overlay, and Escape", () => {
@@ -77,6 +87,7 @@ describe("HistoryDrawer", () => {
         returnFocusRef={createRef<HTMLButtonElement>()}
         onClose={onClose}
         onClear={vi.fn()}
+        onOpenEntry={vi.fn()}
       />,
     );
 
@@ -99,6 +110,7 @@ describe("HistoryDrawer", () => {
         returnFocusRef={createRef<HTMLButtonElement>()}
         onClose={vi.fn()}
         onClear={onClear}
+        onOpenEntry={vi.fn()}
       />,
     );
 
@@ -112,6 +124,7 @@ describe("HistoryDrawer", () => {
         returnFocusRef={createRef<HTMLButtonElement>()}
         onClose={vi.fn()}
         onClear={onClear}
+        onOpenEntry={vi.fn()}
       />,
     );
     expect(screen.getByRole("heading", { name: "No search history" })).toBeTruthy();
@@ -120,11 +133,20 @@ describe("HistoryDrawer", () => {
 });
 
 
-it("shows an uploaded filename and its Twitch match without a copy-link action", () => {
+it("opens an uploaded saved search without a copy-link action", () => {
+  const onOpenEntry = vi.fn();
   render(<HistoryDrawer open entries={[historyEntry({ source: { kind: "upload", filename: "downloaded-moment.mp4" } })]}
-    returnFocusRef={createRef<HTMLButtonElement>()} onClose={vi.fn()} onClear={vi.fn()} />);
+    returnFocusRef={createRef<HTMLButtonElement>()} onClose={vi.fn()} onClear={vi.fn()} onOpenEntry={onOpenEntry} />);
   expect(screen.getByText("downloaded-moment.mp4")).toBeTruthy();
-  expect(screen.getByRole("link", { name: "Late Night Stream" }).getAttribute("href")).toBe("https://www.twitch.tv/videos/7?t=1h2m3s");
-  expect(screen.getAllByRole("link")).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button", { name: "Open search results for Late Night Stream" }));
+  expect(onOpenEntry).toHaveBeenCalledOnce();
+  expect(screen.queryByRole("link")).toBeNull();
   expect(screen.queryByRole("button", { name: /Copy/ })).toBeNull();
+});
+
+it("labels legacy searches as requiring another search", () => {
+  render(<HistoryDrawer open entries={[historyEntry({ searchToken: null })]}
+    returnFocusRef={createRef<HTMLButtonElement>()} onClose={vi.fn()} onClear={vi.fn()} onOpenEntry={vi.fn()} />);
+  expect(screen.getByText("Search again to view results")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Search again for Late Night Stream" })).toBeTruthy();
 });
