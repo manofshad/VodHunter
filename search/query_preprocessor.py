@@ -29,6 +29,9 @@ class QueryPreprocessor:
         output_path = self.temp_dir / f"query_{uuid.uuid4().hex}.wav"
         cmd = [
             "ffmpeg",
+            "-nostdin",
+            "-protocol_whitelist",
+            "file,pipe",
             "-i",
             str(src),
         ]
@@ -48,10 +51,16 @@ class QueryPreprocessor:
             "error",
         ])
 
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0 or not output_path.exists():
-            message = result.stderr.strip() or "ffmpeg failed to preprocess query"
-            raise RuntimeError(message)
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            if result.returncode != 0 or not output_path.exists():
+                raise RuntimeError("Could not preprocess input audio")
+        except subprocess.TimeoutExpired as exc:
+            output_path.unlink(missing_ok=True)
+            raise RuntimeError("Input audio processing timed out") from exc
+        except BaseException:
+            output_path.unlink(missing_ok=True)
+            raise
 
         return str(output_path)
 

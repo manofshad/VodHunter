@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 from concurrent.futures import Executor
+import asyncio
 import logging
 import time
-from typing import Literal
+from typing import Callable, Literal
+
+from starlette.concurrency import run_in_threadpool
+from starlette.datastructures import UploadFile
 
 from backend.observability import observe_terminal_search
 from backend.services.remote_clip_downloader import DownloadError, InvalidClipUrlError, validate_clip_url
 from backend.services.search_manager import InputDurationExceededError, SearchInputError
+from backend.services.uploaded_clip_store import StagedUpload, UploadedClipStore
 from search.access import create_search_token
-from search.models import SearchDateRange, SearchFeedbackRecord, SearchJobRecord
+from search.models import SearchDateRange, SearchFeedbackRecord, SearchJobRecord, SearchRequestOutcome
 from storage.search_job_repository import SearchJobRepository
 
 
@@ -21,10 +26,11 @@ def _duration_ms(seconds: float) -> int:
 
 
 class SearchJobService:
-    def __init__(self, jobs: SearchJobRepository, search_manager, executor: Executor):
+    def __init__(self, jobs: SearchJobRepository, search_manager, executor: Executor, upload_store: UploadedClipStore | None = None):
         self.jobs = jobs
         self.search_manager = search_manager
         self.executor = executor
+        self.upload_store = upload_store
 
     def create_public_search_job(
         self,
@@ -47,12 +53,73 @@ class SearchJobService:
         self.executor.submit(
             self._run_public_search_job,
             search_id,
-            normalized_tiktok_url,
             streamer,
-            date_range,
+            lambda on_stage_change, on_stage_timing: self.search_manager.search_clip_url(
+                normalized_tiktok_url, streamer, date_range=date_range,
+                on_stage_change=on_stage_change, on_stage_timing=on_stage_timing,
+            ),
             accepted_started_at,
         )
         return search_token
+
+    async def create_uploaded_search_job(
+        self, *, clip_file: UploadFile, streamer: str, creator_id: int | None,
+        date_range: SearchDateRange | None = None,
+    ) -> str:
+        if self.upload_store is None:
+            raise RuntimeError("Upload storage is unavailable")
+        accepted_started_at = time.perf_counter()
+        upload = await self.upload_store.stage(clip_file)
+        submission = asyncio.create_task(run_in_threadpool(
+            self._submit_uploaded_search_job, upload, streamer, creator_id,
+            date_range, accepted_started_at,
+        ))
+        try:
+            return await asyncio.shield(submission)
+        except asyncio.CancelledError:
+            submission.add_done_callback(lambda done: done.exception() if not done.cancelled() else None)
+            raise
+
+    def _submit_uploaded_search_job(
+        self, upload: StagedUpload, streamer: str, creator_id: int | None,
+        date_range: SearchDateRange | None, accepted_started_at: float,
+    ) -> str:
+        search_token = create_search_token()
+        search_id = None
+        try:
+            search_id = self.jobs.create_uploaded_search_job(
+                search_token=search_token, clip_filename=upload.filename,
+                streamer=streamer, creator_id=creator_id, date_range=date_range,
+            )
+            future = self.executor.submit(
+                self._run_public_search_job, search_id, streamer,
+                lambda on_stage_change, on_stage_timing: self.search_manager.search_uploaded_file(
+                    str(upload.path), streamer, date_range=date_range,
+                    on_stage_change=on_stage_change, on_stage_timing=on_stage_timing,
+                ),
+                accepted_started_at, upload,
+            )
+        except BaseException:
+            if search_id is not None:
+                self._fail_upload_submission(search_id, "PROCESSING_ERROR", "Could not queue uploaded search.")
+            self.upload_store.cleanup(upload)
+            raise
+
+        def completed(done):
+            try:
+                if done.cancelled():
+                    self._fail_upload_submission(search_id, "SEARCH_CANCELLED", "Uploaded search was cancelled. Please try again.")
+            finally:
+                self.upload_store.cleanup(upload)
+
+        future.add_done_callback(completed)
+        return search_token
+
+    def _fail_upload_submission(self, search_id: int, code: str, message: str) -> None:
+        try:
+            self.jobs.fail_search_job(search_id, error_code=code, error_message=message, http_status=500)
+        except Exception:
+            logger.exception("Could not persist failed upload submission search_id=%s", search_id)
 
     def get_public_search_job(self, search_token: str) -> SearchJobRecord | None:
         return self.jobs.get_public_search_job(search_token)
@@ -82,10 +149,10 @@ class SearchJobService:
     def _run_public_search_job(
         self,
         search_id: int,
-        tiktok_url: str,
         streamer: str,
-        date_range: SearchDateRange | None,
+        runner: Callable[..., SearchRequestOutcome],
         accepted_started_at: float | None = None,
+        upload: StagedUpload | None = None,
     ) -> None:
         run_started_at = (
             accepted_started_at
@@ -104,12 +171,9 @@ class SearchJobService:
                 stage="validating",
                 started=True,
             )
-            outcome = self.search_manager.search_clip_url(
-                tiktok_url,
-                streamer,
-                date_range=date_range,
-                on_stage_change=lambda stage: self.jobs.update_search_job_status(search_id, stage=stage),
-                on_stage_timing=record_stage,
+            outcome = runner(
+                lambda stage: self.jobs.update_search_job_status(search_id, stage=stage),
+                record_stage,
             )
             self.jobs.update_search_job_status(search_id, stage="finalizing")
             persist_started_at = time.perf_counter()
@@ -173,7 +237,7 @@ class SearchJobService:
                 run_started_at,
                 stage_durations_ms,
                 error_code="PROCESSING_ERROR",
-                error_message=str(exc),
+                error_message="Could not process uploaded video." if upload is not None else str(exc),
                 http_status=400,
             )
         except Exception:
@@ -187,6 +251,9 @@ class SearchJobService:
                 error_message="Unexpected error while processing search",
                 http_status=500,
             )
+        finally:
+            if upload is not None:
+                self.upload_store.cleanup(upload)
 
     def _fail_and_observe(
         self,

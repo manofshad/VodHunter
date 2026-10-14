@@ -144,7 +144,7 @@ function threeSegmentsInOneSourceResult(): SearchResponse {
 
 describe("SearchResultCard", () => {
   it("groups matched segments by source VOD and links each source to its strongest match", () => {
-    render(<SearchResultCard result={multiSegmentResult()} lastSubmittedUrl="https://tiktok.test/clip" />);
+    render(<SearchResultCard result={multiSegmentResult()} submittedSource={{ kind: "link", url: "https://tiktok.test/clip" }} />);
 
     expect(screen.getByRole("link", { name: "Matched stream" }).getAttribute("href")).toBe(
       "https://www.twitch.tv/videos/2848966623?t=5h49m30s",
@@ -164,7 +164,7 @@ describe("SearchResultCard", () => {
     expect(screen.queryByText("Score 0.91")).toBeNull();
     expect(screen.getAllByText("Match 1 of 1")).toHaveLength(2);
     expect(screen.queryByRole("heading", { name: "Matched area" })).toBeNull();
-    expect(screen.getByRole("link", { name: "Open original TikTok clip" }).getAttribute("href")).toBe(
+    expect(screen.getByRole("link", { name: "Open original clip" }).getAttribute("href")).toBe(
       "https://tiktok.test/clip",
     );
   });
@@ -173,7 +173,7 @@ describe("SearchResultCard", () => {
     render(
       <SearchResultCard
         result={multipleSegmentsInOneSourceResult()}
-        lastSubmittedUrl="https://tiktok.test/clip"
+        submittedSource={{ kind: "link", url: "https://tiktok.test/clip" }}
       />,
     );
 
@@ -185,7 +185,7 @@ describe("SearchResultCard", () => {
 
   it("uses the source URL for the default and keeps title and thumbnail links stable during bounded navigation", () => {
     const result = threeSegmentsInOneSourceResult();
-    render(<SearchResultCard result={result} lastSubmittedUrl="https://tiktok.test/clip" />);
+    render(<SearchResultCard result={result} submittedSource={{ kind: "link", url: "https://tiktok.test/clip" }} />);
 
     const title = screen.getByRole("link", { name: "Matched stream" });
     const thumbnail = screen.getByRole("link", { name: "Open Matched stream at its strongest match" });
@@ -230,7 +230,7 @@ describe("SearchResultCard", () => {
   });
 
   it("keeps timeline markers static on hover, click, and focus", () => {
-    render(<SearchResultCard result={multipleSegmentsInOneSourceResult()} lastSubmittedUrl="" />);
+    render(<SearchResultCard result={multipleSegmentsInOneSourceResult()} submittedSource={null} />);
     const first = screen.getByRole("listitem", { name: /Match 1, clip/ });
     const second = screen.getByRole("listitem", { name: /Match 2, clip/ });
     fireEvent.mouseEnter(first);
@@ -252,7 +252,7 @@ describe("SearchResultCard", () => {
 
   it("numbers and traverses in clip order while projecting markers into VOD chronology", () => {
     const result = threeSegmentsInOneSourceResult();
-    render(<SearchResultCard result={result} lastSubmittedUrl="" />);
+    render(<SearchResultCard result={result} submittedSource={null} />);
     const markers = screen.getAllByRole("listitem");
     expect(markers.map((marker) => marker.getAttribute("aria-label"))).toEqual([
       "Match 1, clip 00:00:07.5–00:00:11.5, VOD 05:49:30–05:49:34",
@@ -268,7 +268,7 @@ describe("SearchResultCard", () => {
   });
 
   it("disables both arrows for a single match", () => {
-    render(<SearchResultCard result={multiSegmentResult()} lastSubmittedUrl="" />);
+    render(<SearchResultCard result={multiSegmentResult()} submittedSource={null} />);
     for (const source of screen.getAllByRole("article")) {
       const previous = within(source).getByRole("button", { name: "Previous match" });
       const next = within(source).getByRole("button", { name: "Next match" });
@@ -283,11 +283,11 @@ describe("SearchResultCard", () => {
   });
 
   it("resets to the URL default when the same VOD returns fresh result segments", () => {
-    const { rerender } = render(<SearchResultCard result={threeSegmentsInOneSourceResult()} lastSubmittedUrl="" />);
+    const { rerender } = render(<SearchResultCard result={threeSegmentsInOneSourceResult()} submittedSource={null} />);
     fireEvent.click(screen.getByRole("button", { name: "Previous match" }));
     expect(screen.getByText("Match 1 of 3")).toBeTruthy();
 
-    rerender(<SearchResultCard result={threeSegmentsInOneSourceResult()} lastSubmittedUrl="" />);
+    rerender(<SearchResultCard result={threeSegmentsInOneSourceResult()} submittedSource={null} />);
     expect(screen.getByText("Match 2 of 3")).toBeTruthy();
     expect(screen.getByRole("link", { name: /Open matched segment 2/ }).getAttribute("href")).toBe(
       "https://www.twitch.tv/videos/2848966623?t=6h20m38s",
@@ -310,11 +310,11 @@ describe("SearchResultCard", () => {
 
   it("preserves a choice when legacy source fallback arrays are rebuilt on rerender", () => {
     const result = { ...threeSegmentsInOneSourceResult(), sources: [], video_url_at_timestamp: "https://www.twitch.tv/videos/2848966623?t=6h20m38s" };
-    const { rerender } = render(<SearchResultCard result={result} lastSubmittedUrl="https://tiktok.test/first" />);
+    const { rerender } = render(<SearchResultCard result={result} submittedSource={{ kind: "link", url: "https://tiktok.test/first" }} />);
     fireEvent.click(screen.getByRole("button", { name: "Previous match" }));
     expect(screen.getByText("Match 1 of 3")).toBeTruthy();
 
-    rerender(<SearchResultCard result={result} lastSubmittedUrl="https://tiktok.test/updated" />);
+    rerender(<SearchResultCard result={result} submittedSource={{ kind: "link", url: "https://tiktok.test/updated" }} />);
     expect(screen.getByText("Match 1 of 3")).toBeTruthy();
     expect(screen.getByRole("link", { name: /Open matched segment 1/ }).getAttribute("href")).toBe(
       "https://www.twitch.tv/videos/2848966623?t=5h49m30s",
@@ -333,7 +333,7 @@ describe("SearchResultCard", () => {
       video_url_at_timestamp: "https://www.twitch.tv/videos/2848966624?t=3m20s",
     };
     result.sources.push({ ...otherSource, segments: [earlierSegment, ...otherSource.segments] });
-    render(<SearchResultCard result={result} lastSubmittedUrl="" />);
+    render(<SearchResultCard result={result} submittedSource={null} />);
     const [firstSource, secondSource] = screen.getAllByRole("article");
 
     fireEvent.click(within(firstSource).getByRole("button", { name: "Previous match" }));
@@ -365,7 +365,7 @@ describe("SearchResultCard", () => {
   });
 
   it("does not render unmatched query ranges", () => {
-    render(<SearchResultCard result={multiSegmentResult()} lastSubmittedUrl="https://tiktok.test/clip" />);
+    render(<SearchResultCard result={multiSegmentResult()} submittedSource={{ kind: "link", url: "https://tiktok.test/clip" }} />);
 
     expect(screen.queryByRole("heading", { name: "Unmatched clip ranges" })).toBeNull();
     expect(screen.queryByText("00:00:00–00:00:07.5")).toBeNull();
@@ -386,7 +386,7 @@ describe("SearchResultCard", () => {
       segments: [],
       unmatched_ranges: [{ query_start: 0, query_end: 70 }],
     };
-    render(<SearchResultCard result={result} lastSubmittedUrl="https://tiktok.test/clip" />);
+    render(<SearchResultCard result={result} submittedSource={{ kind: "link", url: "https://tiktok.test/clip" }} />);
 
     expect(screen.queryByRole("heading", { name: "Matched area" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Unmatched clip ranges" })).toBeNull();
@@ -396,7 +396,7 @@ describe("SearchResultCard", () => {
 
   it("offers one rating for a successful multi-source search", () => {
     render(<SearchFeedback requestError={null} submitting={false} activeSearchStage={null}
-      result={multiSegmentResult()} lastSubmittedUrl="https://tiktok.test/clip"
+      result={multiSegmentResult()} submittedSource={{ kind: "link", url: "https://tiktok.test/clip" }}
       completedSearchFeedback={{ searchToken: "A".repeat(43), feedback: null }} />);
     expect(screen.getAllByRole("group", { name: "Rate this match" })).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: "Thumbs up, correct match" })).toHaveLength(1);
@@ -405,7 +405,7 @@ describe("SearchResultCard", () => {
 
   it.each([true, false])("hides rating while searching or without an authenticated completed token", (submitting) => {
     render(<SearchFeedback requestError={null} submitting={submitting} activeSearchStage="validating"
-      result={multiSegmentResult()} lastSubmittedUrl="https://tiktok.test/clip" completedSearchFeedback={null} />);
+      result={multiSegmentResult()} submittedSource={{ kind: "link", url: "https://tiktok.test/clip" }} completedSearchFeedback={null} />);
     expect(screen.queryByRole("group", { name: "Rate this match" })).toBeNull();
   });
 });
@@ -414,15 +414,15 @@ describe("SearchFeedback", () => {
   it("resets carousel selection across a new search submission", () => {
     const result = threeSegmentsInOneSourceResult();
     const { rerender } = render(<SearchFeedback requestError={null} submitting={false} activeSearchStage={null}
-      result={result} lastSubmittedUrl="https://tiktok.test/first" completedSearchFeedback={null} />);
+      result={result} submittedSource={{ kind: "link", url: "https://tiktok.test/first" }} completedSearchFeedback={null} />);
     fireEvent.click(screen.getByRole("button", { name: "Previous match" }));
     expect(screen.getByText("Match 1 of 3")).toBeTruthy();
 
     rerender(<SearchFeedback requestError={null} submitting={true} activeSearchStage="validating"
-      result={null} lastSubmittedUrl="https://tiktok.test/second" completedSearchFeedback={null} />);
+      result={null} submittedSource={{ kind: "link", url: "https://tiktok.test/second" }} completedSearchFeedback={null} />);
     expect(screen.queryByText("Match 1 of 3")).toBeNull();
     rerender(<SearchFeedback requestError={null} submitting={false} activeSearchStage={null}
-      result={result} lastSubmittedUrl="https://tiktok.test/second" completedSearchFeedback={null} />);
+      result={result} submittedSource={{ kind: "link", url: "https://tiktok.test/second" }} completedSearchFeedback={null} />);
     expect(screen.getByText("Match 2 of 3")).toBeTruthy();
   });
 
@@ -446,7 +446,7 @@ describe("SearchFeedback", () => {
         submitting={false}
         activeSearchStage={null}
         result={result}
-        lastSubmittedUrl="https://tiktok.test/clip"
+        submittedSource={{ kind: "link", url: "https://tiktok.test/clip" }}
         completedSearchFeedback={null}
       />,
     );
@@ -697,4 +697,15 @@ describe("StreamerPicker", () => {
     expect(screen.queryByRole("listbox")).toBeNull();
     expect(document.activeElement).toBe(trigger);
   });
+});
+
+
+it("shows upload identity without an original-clip link and preserves match feedback", () => {
+  render(<SearchResultCard result={multiSegmentResult()} submittedSource={{ kind: "upload", filename: "downloaded-moment.mp4" }}
+    completedSearchFeedback={{ searchToken: "A".repeat(43), feedback: null }} />);
+  expect(screen.getByText("Uploaded file")).toBeTruthy();
+  expect(screen.getByText("downloaded-moment.mp4")).toBeTruthy();
+  expect(screen.queryByRole("link", { name: "Open original clip" })).toBeNull();
+  expect(screen.getByRole("link", { name: "Matched stream" })).toBeTruthy();
+  expect(screen.getByRole("group", { name: "Rate this match" })).toBeTruthy();
 });

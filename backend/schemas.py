@@ -145,6 +145,8 @@ class SearchJobResponse(BaseModel):
     status: SearchJobStatus
     stage: str | None = None
     tiktok_url: str | None = None
+    input_type: str = "tiktok_url"
+    clip_filename: str | None = None
     streamer: str | None = None
     created_at: str
     started_at: str | None = None

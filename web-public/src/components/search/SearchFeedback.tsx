@@ -3,13 +3,14 @@ import { AlertCircle, LoaderCircle, Search } from "lucide-react";
 import { CompletedSearchFeedback, SearchResponse } from "../../api/types";
 import { SearchResultCard } from "./SearchResults";
 import { getStageMessage } from "./searchUtils";
+import { ClipSourceMetadata } from "./clipSource";
 
 interface SearchFeedbackProps {
   requestError: string | null;
   submitting: boolean;
   activeSearchStage: string | null;
   result: SearchResponse | null;
-  lastSubmittedUrl: string;
+  submittedSource: ClipSourceMetadata | null;
   completedSearchFeedback: CompletedSearchFeedback | null;
 }
 
@@ -18,7 +19,7 @@ export function SearchFeedback({
   submitting,
   activeSearchStage,
   result,
-  lastSubmittedUrl,
+  submittedSource,
   completedSearchFeedback,
 }: SearchFeedbackProps) {
   if (!requestError && !submitting && !result) {
@@ -42,19 +43,19 @@ export function SearchFeedback({
       {submitting ? (
         <div className="mx-auto max-w-4xl rounded-xl border border-gray-700 bg-gray-900 p-6 text-center shadow-lg">
           <LoaderCircle className="mx-auto size-7 animate-spin text-[#fb2844]" />
-          <p className="mt-3 text-base font-semibold text-white">Searching Twitch VODs...</p>
+          <p className="mt-3 text-base font-semibold text-white">{activeSearchStage === "uploading" ? "Uploading your clip..." : "Searching Twitch VODs..."}</p>
           <p className="mt-2 text-sm text-gray-400">{getStageMessage(activeSearchStage)}</p>
         </div>
       ) : null}
 
-      {!submitting && result?.found ? <SearchResultCard result={result} lastSubmittedUrl={lastSubmittedUrl} completedSearchFeedback={completedSearchFeedback} /> : null}
+      {!submitting && result?.found ? <SearchResultCard result={result} submittedSource={submittedSource} completedSearchFeedback={completedSearchFeedback} /> : null}
 
       {!submitting && result && !result.found ? (
         <div className="mx-auto max-w-4xl rounded-xl border border-gray-700 bg-gray-900 p-6 text-center shadow-lg">
           <Search className="mx-auto size-7 text-gray-400" />
           <h2 className="mt-4 text-2xl font-bold text-white">No exact match yet</h2>
           <p className="mx-auto mt-3 max-w-2xl text-base leading-7 text-gray-300">
-            Try another TikTok URL or confirm that you selected the right streamer before searching again.
+            Try another clip or confirm that you selected the right streamer before searching again.
           </p>
         </div>
       ) : null}

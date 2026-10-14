@@ -2,6 +2,13 @@ import json
 import math
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
+
+
+UPLOAD_CONTAINER_NAMES = {
+    **dict.fromkeys((".mp4", ".mov", ".m4v"), frozenset({"mov", "mp4", "m4a", "3gp", "3g2", "mj2"})),
+    **dict.fromkeys((".webm", ".mkv"), frozenset({"matroska", "webm"})),
+}
 
 
 class MediaDurationError(Exception):
@@ -102,3 +109,50 @@ def probe_media_durations(path: str) -> MediaDurations:
 def probe_media_duration_seconds(path: str) -> float:
     """Return video duration, falling back to audio/container duration."""
     return probe_media_durations(path).presentation_seconds
+
+
+def probe_uploaded_video(path: str, *, timeout_seconds: float = 10) -> float:
+    message = "Uploaded clip must contain video and audio in a supported container with a valid duration."
+    cmd = [
+        "ffprobe", "-v", "error", "-protocol_whitelist", "file,pipe",
+        "-format_whitelist", "mov,matroska,webm", "-show_entries",
+        "stream=codec_type,duration:stream_disposition=attached_pic:format=format_name,duration",
+        "-of", "json", path,
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_seconds)
+        if result.returncode != 0:
+            raise MediaDurationError(message)
+        payload = json.loads(result.stdout)
+        streams = payload["streams"]
+        container = payload["format"]
+        names = set(container["format_name"].split(","))
+        suffix = Path(path).suffix.lower()
+        compatible = UPLOAD_CONTAINER_NAMES.get(suffix, frozenset())
+        if not names.intersection(compatible):
+            raise MediaDurationError(message)
+        has_video = any(
+            stream.get("codec_type") == "video" and not stream.get("disposition", {}).get("attached_pic")
+            for stream in streams
+        )
+        has_audio = any(stream.get("codec_type") == "audio" for stream in streams)
+        if not has_video or not has_audio:
+            raise MediaDurationError(message)
+        durations = []
+        presented_streams = [
+            stream for stream in streams
+            if stream.get("codec_type") in {"video", "audio"}
+            and not stream.get("disposition", {}).get("attached_pic")
+        ]
+        for raw in [container.get("duration"), *(stream.get("duration") for stream in presented_streams)]:
+            if raw is None or raw == "N/A":
+                continue
+            duration = float(raw)
+            if not math.isfinite(duration) or duration <= 0:
+                raise MediaDurationError(message)
+            durations.append(duration)
+        if not durations:
+            raise MediaDurationError(message)
+        return max(durations)
+    except (OSError, subprocess.TimeoutExpired, ValueError, TypeError, KeyError, AttributeError) as exc:
+        raise MediaDurationError(message) from exc

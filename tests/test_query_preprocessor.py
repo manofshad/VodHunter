@@ -11,7 +11,7 @@ def test_prepare_outputs_exact_nmfp_wav_contract(tmp_path: Path) -> None:
     preprocessor = QueryPreprocessor(str(tmp_path / "queries"))
     calls: list[list[str]] = []
 
-    def fake_run(cmd, capture_output, text):
+    def fake_run(cmd, capture_output, text, timeout):
         assert capture_output is True
         assert text is True
         calls.append(cmd)
@@ -34,7 +34,7 @@ def test_prepare_caps_audio_at_video_duration(tmp_path: Path) -> None:
     preprocessor = QueryPreprocessor(str(tmp_path / "queries"))
     calls: list[list[str]] = []
 
-    def fake_run(cmd, capture_output, text):
+    def fake_run(cmd, capture_output, text, timeout):
         calls.append(cmd)
         Path(cmd[-3]).write_bytes(b"wav")
         return SimpleNamespace(returncode=0, stderr="")

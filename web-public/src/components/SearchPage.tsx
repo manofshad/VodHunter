@@ -140,22 +140,22 @@ export default function SearchPage() {
         >
           <div className="mx-auto max-w-6xl text-center">
             <div className="mx-auto max-w-4xl">
-              <h1 className="mb-12 text-3xl font-bold text-white">Find That Exact Moment</h1>
-
               <SearchForm
-                tiktokUrl={page.tiktokUrl}
+                source={page.source}
                 streamer={page.streamer}
                 streamers={page.streamers}
                 loadingStreamers={page.loadingStreamers}
                 streamerLoadError={page.streamerLoadError}
                 streamerError={page.streamerError}
                 submitting={page.submitting}
-                hasUrl={page.hasUrl}
+                canSubmit={page.canSubmit}
                 searchButtonLabel={page.searchButtonLabel}
                 streamedFrom={page.streamedFrom}
                 streamedTo={page.streamedTo}
                 streamerTriggerRef={page.streamerTriggerRef}
                 onSubmit={page.onSubmit}
+                onSourceModeChange={page.onSourceModeChange}
+                onFileSelect={page.onFileSelect}
                 onUrlChange={page.onUrlChange}
                 onPaste={page.onPaste}
                 onSelectStreamer={page.onSelectStreamer}
@@ -167,7 +167,7 @@ export default function SearchPage() {
                   activeSearchStage={page.activeSearchStage}
                   result={page.result}
                   completedSearchFeedback={page.completedSearchFeedback}
-                  lastSubmittedUrl={page.lastSubmittedUrl}
+                  submittedSource={page.submittedSource}
                 />
               </SearchForm>
             </div>

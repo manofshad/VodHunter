@@ -20,6 +20,8 @@ from backend.routers.internal_videos import router as internal_videos_router
 from backend.routers.metrics import router as metrics_router
 from backend.routers.search import router as search_router
 from backend.services.search_jobs import SearchJobService
+from backend.services.uploaded_clip_store import UploadedClipStore
+from backend.upload_body_limit import UploadBodyLimitMiddleware
 
 
 PUBLIC_MAX_DURATION_SECONDS = 180
@@ -61,32 +63,36 @@ def create_public_app(
                 preprocess_temp_dir=str(data_dir / "temp_search"),
             )
             search_job_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="public-search")
-            search_job_service = SearchJobService(
-                jobs=repositories.search_jobs,
-                search_manager=search_stack.search_manager,
-                executor=search_job_executor,
-            )
-            search_job_service.fail_incomplete_public_search_jobs()
-
-            for key, value in {
-                "repositories": repositories,
-                "videos": repositories.videos,
-                "fingerprints": repositories.fingerprints,
-                "ingest_states": repositories.ingest_states,
-                "search_jobs": repositories.search_jobs,
-                "query_embedder": search_stack.query_embedder,
-                "search_service": search_stack.search_service,
-                "search_manager": search_stack.search_manager,
-                "search_job_executor": search_job_executor,
-                "search_job_service": search_job_service,
-            }.items():
-                setattr(app.state, key, value)
-
+            upload_store = UploadedClipStore()
             try:
+                search_job_service = SearchJobService(
+                    jobs=repositories.search_jobs,
+                    search_manager=search_stack.search_manager,
+                    executor=search_job_executor,
+                    upload_store=upload_store,
+                )
+                search_job_service.fail_incomplete_public_search_jobs()
+
+                for key, value in {
+                    "repositories": repositories,
+                    "videos": repositories.videos,
+                    "fingerprints": repositories.fingerprints,
+                    "ingest_states": repositories.ingest_states,
+                    "search_jobs": repositories.search_jobs,
+                    "query_embedder": search_stack.query_embedder,
+                    "search_service": search_stack.search_service,
+                    "search_manager": search_stack.search_manager,
+                    "search_job_executor": search_job_executor,
+                    "search_job_service": search_job_service,
+                }.items():
+                    setattr(app.state, key, value)
                 yield
             finally:
                 search_job_executor.shutdown(wait=True, cancel_futures=True)
-                search_stack.query_embedder.close()
+                try:
+                    upload_store.close()
+                finally:
+                    search_stack.query_embedder.close()
 
         app = FastAPI(title="VodHunter Public API", lifespan=lifespan)
     else:
@@ -94,6 +100,7 @@ def create_public_app(
 
     app.state.internal_api_key = configured_internal_api_key
     _configure_cors(app)
+    app.add_middleware(UploadBodyLimitMiddleware)
     app.include_router(health_router)
     app.include_router(metrics_router)
     app.include_router(search_router)

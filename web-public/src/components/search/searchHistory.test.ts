@@ -4,7 +4,7 @@ import { SearchResponse } from "../../api/types";
 import {
   addSearchHistoryEntry,
   createSearchHistoryEntry,
-  displayTikTokUrl,
+  displayClipUrl,
   groupSearchHistory,
   MAX_SEARCH_HISTORY_ENTRIES,
   readSearchHistory,
@@ -59,13 +59,14 @@ describe("createSearchHistoryEntry", () => {
   it("keeps the primary result and counts additional distinct timestamps", () => {
     const entry = createSearchHistoryEntry(
       matchedResult(),
-      "https://www.tiktok.com/t/ZP87/?utm_source=share",
+      { kind: "link", url: "https://www.tiktok.com/t/ZP87/?utm_source=share" },
       "2026-09-11T22:42:00.000Z",
+      "A".repeat(43),
     );
 
     expect(entry).toMatchObject({
       id: "jasontheween::tiktok.com/t/ZP87",
-      tiktokUrl: "https://www.tiktok.com/t/ZP87/?utm_source=share",
+      source: { kind: "link", url: "https://www.tiktok.com/t/ZP87/?utm_source=share" },
       streamTitle: "Late Night Stream",
       twitchUrlAtTimestamp: "https://www.twitch.tv/videos/7?t=1h2m3s",
       timestampSeconds: 3723,
@@ -74,12 +75,13 @@ describe("createSearchHistoryEntry", () => {
   });
 
   it("does not create entries for unsuccessful or unusable results", () => {
-    expect(createSearchHistoryEntry(matchedResult({ found: false }), "https://tiktok.com/t/abc", "now")).toBeNull();
+    expect(createSearchHistoryEntry(matchedResult({ found: false }), { kind: "link", url: "https://tiktok.com/t/abc" }, "now", "A".repeat(43))).toBeNull();
     expect(
       createSearchHistoryEntry(
         matchedResult({ video_url_at_timestamp: null }),
-        "https://tiktok.com/t/abc",
+        { kind: "link", url: "https://tiktok.com/t/abc" },
         "2026-09-11T22:42:00.000Z",
+        "A".repeat(43),
       ),
     ).toBeNull();
   });
@@ -89,13 +91,15 @@ describe("search history storage", () => {
   it("deduplicates an existing search and keeps the newest entry first", () => {
     const first = createSearchHistoryEntry(
       matchedResult(),
-      "https://tiktok.com/t/abc/",
+      { kind: "link", url: "https://tiktok.com/t/abc/" },
       "2026-09-10T22:42:00.000Z",
+      "A".repeat(43),
     )!;
     const replacement = createSearchHistoryEntry(
       matchedResult({ timestamp_seconds: 4000, video_url_at_timestamp: "https://www.twitch.tv/videos/7?t=1h6m40s" }),
-      "https://www.tiktok.com/t/abc?tracking=1",
+      { kind: "link", url: "https://www.tiktok.com/t/abc?tracking=1" },
       "2026-09-11T22:42:00.000Z",
+      "A".repeat(43),
     )!;
 
     addSearchHistoryEntry(first);
@@ -111,7 +115,7 @@ describe("search history storage", () => {
       addSearchHistoryEntry({
         id: `entry-${index}`,
         searchedAt: `2026-09-${String((index % 9) + 1).padStart(2, "0")}T12:00:00.000Z`,
-        tiktokUrl: `https://tiktok.com/t/${index}`,
+        source: { kind: "link", url: `https://tiktok.com/t/${index}` },
         streamer: "streamer",
         profileImageUrl: null,
         streamTitle: `Stream ${index}`,
@@ -145,7 +149,7 @@ describe("history display helpers", () => {
       },
     ].map((entry) => ({
       ...entry,
-      tiktokUrl: "https://tiktok.com/t/abc",
+      source: { kind: "link" as const, url: "https://tiktok.com/t/abc" },
       streamer: "streamer",
       profileImageUrl: null,
       streamTitle: "Stream",
@@ -158,6 +162,23 @@ describe("history display helpers", () => {
   });
 
   it("shows a readable TikTok host and path without protocol", () => {
-    expect(displayTikTokUrl("https://www.tiktok.com/t/ZP87/?utm_source=share")).toBe("tiktok.com/t/ZP87/");
+    expect(displayClipUrl("https://www.tiktok.com/t/ZP87/?utm_source=share")).toBe("tiktok.com/t/ZP87/");
   });
+});
+
+
+it("migrates old URL history under the existing key and keeps upload identities distinct by token", () => {
+  const legacy = { id: "legacy", searchedAt: "2026-10-01T12:00:00Z", tiktokUrl: "https://tiktok.com/t/abc", streamer: "jason", profileImageUrl: null,
+    streamTitle: "Stream", twitchUrlAtTimestamp: "https://twitch.tv/videos/1?t=1s", timestampSeconds: 1, additionalMatchCount: 0 };
+  window.localStorage.setItem(SEARCH_HISTORY_STORAGE_KEY, JSON.stringify([legacy]));
+  expect(readSearchHistory()[0]).toEqual({ id: "legacy", searchedAt: legacy.searchedAt, source: { kind: "link", url: legacy.tiktokUrl }, streamer: "jason", profileImageUrl: null,
+    streamTitle: "Stream", twitchUrlAtTimestamp: legacy.twitchUrlAtTimestamp, timestampSeconds: 1, additionalMatchCount: 0 });
+  for (const searchToken of ["A".repeat(43), "B".repeat(43)]) {
+    const entry = createSearchHistoryEntry(matchedResult(), { kind: "upload", filename: "same-name.mp4" }, "2026-10-12T12:00:00Z", searchToken);
+    if (!entry) { throw new Error("Expected a usable uploaded match"); }
+    addSearchHistoryEntry(entry);
+  }
+  const entries = readSearchHistory();
+  expect(entries.map((entry) => entry.id)).toEqual([`upload::${"B".repeat(43)}`, `upload::${"A".repeat(43)}`, "legacy"]);
+  expect(JSON.parse(window.localStorage.getItem(SEARCH_HISTORY_STORAGE_KEY) ?? "[]")).toEqual(entries);
 });

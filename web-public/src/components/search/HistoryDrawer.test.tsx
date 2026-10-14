@@ -9,7 +9,7 @@ function historyEntry(overrides: Partial<SearchHistoryEntry> = {}): SearchHistor
   return {
     id: "jasontheween::tiktok.com/t/abc",
     searchedAt: new Date(2026, 8, 11, 18, 42, 0).toISOString(),
-    tiktokUrl: "https://www.tiktok.com/t/abc?utm_source=share",
+    source: { kind: "link", url: "https://www.tiktok.com/t/abc?utm_source=share" },
     streamer: "jasontheween",
     profileImageUrl: null,
     streamTitle: "Late Night Stream",
@@ -62,10 +62,10 @@ describe("HistoryDrawer", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Copy TikTok URL" }));
+    fireEvent.click(screen.getByRole("button", { name: "Copy clip link" }));
 
     expect(writeText).toHaveBeenCalledWith("https://www.tiktok.com/t/abc?utm_source=share");
-    expect(await screen.findByRole("button", { name: "TikTok URL copied" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Clip link copied" })).toBeTruthy();
   });
 
   it("closes from the close button, overlay, and Escape", () => {
@@ -117,4 +117,14 @@ describe("HistoryDrawer", () => {
     expect(screen.getByRole("heading", { name: "No search history" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Clear all" })).toBeNull();
   });
+});
+
+
+it("shows an uploaded filename and its Twitch match without a copy-link action", () => {
+  render(<HistoryDrawer open entries={[historyEntry({ source: { kind: "upload", filename: "downloaded-moment.mp4" } })]}
+    returnFocusRef={createRef<HTMLButtonElement>()} onClose={vi.fn()} onClear={vi.fn()} />);
+  expect(screen.getByText("downloaded-moment.mp4")).toBeTruthy();
+  expect(screen.getByRole("link", { name: "Late Night Stream" }).getAttribute("href")).toBe("https://www.twitch.tv/videos/7?t=1h2m3s");
+  expect(screen.getAllByRole("link")).toHaveLength(1);
+  expect(screen.queryByRole("button", { name: /Copy/ })).toBeNull();
 });

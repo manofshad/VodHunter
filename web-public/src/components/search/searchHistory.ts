@@ -1,4 +1,5 @@
 import { SearchResponse } from "../../api/types";
+import { ClipSourceMetadata, parseClipSource } from "./clipSource";
 
 export const SEARCH_HISTORY_STORAGE_KEY = "vodhunter-public-search-history-v1";
 export const MAX_SEARCH_HISTORY_ENTRIES = 25;
@@ -6,7 +7,7 @@ export const MAX_SEARCH_HISTORY_ENTRIES = 25;
 export interface SearchHistoryEntry {
   id: string;
   searchedAt: string;
-  tiktokUrl: string;
+  source: ClipSourceMetadata;
   streamer: string;
   profileImageUrl: string | null;
   streamTitle: string;
@@ -33,37 +34,41 @@ function getStorage(): Storage | null {
   }
 }
 
-function isSearchHistoryEntry(value: unknown): value is SearchHistoryEntry {
+function parseSearchHistoryEntry(value: unknown): SearchHistoryEntry | null {
   if (!value || typeof value !== "object") {
-    return false;
+    return null;
   }
-
-  const entry = value as Partial<SearchHistoryEntry>;
-  return (
-    typeof entry.id === "string" &&
-    entry.id.length > 0 &&
-    typeof entry.searchedAt === "string" &&
-    !Number.isNaN(Date.parse(entry.searchedAt)) &&
-    typeof entry.tiktokUrl === "string" &&
-    entry.tiktokUrl.length > 0 &&
-    typeof entry.streamer === "string" &&
-    entry.streamer.length > 0 &&
-    (typeof entry.profileImageUrl === "string" || entry.profileImageUrl === null) &&
-    typeof entry.streamTitle === "string" &&
-    entry.streamTitle.length > 0 &&
-    typeof entry.twitchUrlAtTimestamp === "string" &&
-    entry.twitchUrlAtTimestamp.length > 0 &&
-    typeof entry.timestampSeconds === "number" &&
-    Number.isFinite(entry.timestampSeconds) &&
-    entry.timestampSeconds >= 0 &&
-    typeof entry.additionalMatchCount === "number" &&
-    Number.isInteger(entry.additionalMatchCount) &&
-    entry.additionalMatchCount >= 0
-  );
+  const source = "source" in value ? parseClipSource(value.source)
+    : "tiktokUrl" in value && typeof value.tiktokUrl === "string" && value.tiktokUrl.trim()
+      ? { kind: "link", url: value.tiktokUrl } satisfies ClipSourceMetadata : null;
+  if (
+    !source ||
+    !("id" in value) || typeof value.id !== "string" || !value.id ||
+    !("searchedAt" in value) || typeof value.searchedAt !== "string" || Number.isNaN(Date.parse(value.searchedAt)) ||
+    !("streamer" in value) || typeof value.streamer !== "string" || !value.streamer ||
+    !("profileImageUrl" in value) || !(typeof value.profileImageUrl === "string" || value.profileImageUrl === null) ||
+    !("streamTitle" in value) || typeof value.streamTitle !== "string" || !value.streamTitle ||
+    !("twitchUrlAtTimestamp" in value) || typeof value.twitchUrlAtTimestamp !== "string" || !value.twitchUrlAtTimestamp ||
+    !("timestampSeconds" in value) || typeof value.timestampSeconds !== "number" || !Number.isFinite(value.timestampSeconds) || value.timestampSeconds < 0 ||
+    !("additionalMatchCount" in value) || typeof value.additionalMatchCount !== "number" || !Number.isInteger(value.additionalMatchCount) || value.additionalMatchCount < 0
+  ) {
+    return null;
+  }
+  return {
+    id: value.id,
+    searchedAt: value.searchedAt,
+    source,
+    streamer: value.streamer,
+    profileImageUrl: value.profileImageUrl,
+    streamTitle: value.streamTitle,
+    twitchUrlAtTimestamp: value.twitchUrlAtTimestamp,
+    timestampSeconds: value.timestampSeconds,
+    additionalMatchCount: value.additionalMatchCount,
+  };
 }
 
 /**
- * Normalize the parts of a TikTok URL that identify a clip. Tracking query
+ * Normalize the parts of a clip URL that identify a clip. Tracking query
  * parameters and trailing slashes should not create duplicate history rows.
  */
 export function normalizeHistoryUrl(rawUrl: string): string {
@@ -82,8 +87,8 @@ export function normalizeHistoryUrl(rawUrl: string): string {
   }
 }
 
-function historyEntryId(tiktokUrl: string, streamer: string): string {
-  return `${streamer.trim().toLowerCase()}::${normalizeHistoryUrl(tiktokUrl)}`;
+function historyEntryId(clipUrl: string, streamer: string): string {
+  return `${streamer.trim().toLowerCase()}::${normalizeHistoryUrl(clipUrl)}`;
 }
 
 export function readSearchHistory(): SearchHistoryEntry[] {
@@ -103,7 +108,10 @@ export function readSearchHistory(): SearchHistoryEntry[] {
       return [];
     }
 
-    return parsed.filter(isSearchHistoryEntry).slice(0, MAX_SEARCH_HISTORY_ENTRIES);
+    return parsed.flatMap((value: unknown) => {
+      const entry = parseSearchHistoryEntry(value);
+      return entry ? [entry] : [];
+    }).slice(0, MAX_SEARCH_HISTORY_ENTRIES);
   } catch {
     return [];
   }
@@ -136,16 +144,15 @@ function countAdditionalMatches(result: SearchResponse): number {
 
 export function createSearchHistoryEntry(
   result: SearchResponse,
-  tiktokUrl: string,
+  source: ClipSourceMetadata,
   searchedAt: string,
+  searchToken: string,
 ): SearchHistoryEntry | null {
   const twitchUrlAtTimestamp = result.video_url_at_timestamp?.trim();
   const timestampSeconds = result.timestamp_seconds;
-  const submittedUrl = tiktokUrl.trim();
 
   if (
     !result.found ||
-    !submittedUrl ||
     !twitchUrlAtTimestamp ||
     timestampSeconds === null ||
     !Number.isFinite(timestampSeconds) ||
@@ -158,9 +165,9 @@ export function createSearchHistoryEntry(
   const safeSearchedAt = Number.isNaN(Date.parse(searchedAt)) ? new Date().toISOString() : searchedAt;
 
   return {
-    id: historyEntryId(submittedUrl, streamer),
+    id: source.kind === "link" ? historyEntryId(source.url, streamer) : `upload::${searchToken}`,
     searchedAt: safeSearchedAt,
-    tiktokUrl: submittedUrl,
+    source,
     streamer,
     profileImageUrl: result.profile_image_url,
     streamTitle: result.title?.trim() || "Matched Twitch VOD",
@@ -254,7 +261,7 @@ export function formatHistoryTime(searchedAt: string): string {
   }).format(date);
 }
 
-export function displayTikTokUrl(rawUrl: string): string {
+export function displayClipUrl(rawUrl: string): string {
   try {
     const parsed = new URL(rawUrl);
     const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
