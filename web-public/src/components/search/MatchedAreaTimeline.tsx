@@ -33,7 +33,7 @@ export function MatchedAreaTimeline({ segments, sourceHref, sourceTitle }: Match
   const vodRange = `${formatTimelineTime(activeSegment.vod_start)}–${formatTimelineTime(activeSegment.vod_end)}`;
 
   function chooseAdjacentMatch(direction: -1 | 1) {
-    const segment = orderedSegments[activeIndex + direction];
+    const segment = orderedSegments[(activeIndex + direction + orderedSegments.length) % orderedSegments.length];
     if (segment) setChoice({ segment, sourceHref });
   }
 
@@ -93,7 +93,7 @@ export function MatchedAreaTimeline({ segments, sourceHref, sourceTitle }: Match
             type="button"
             className="matched-area-arrow"
             aria-label="Previous match"
-            disabled={activeIndex === 0}
+            disabled={orderedSegments.length === 1}
             onClick={() => chooseAdjacentMatch(-1)}
           >
             <ChevronLeft aria-hidden="true" className="size-5" />
@@ -102,7 +102,7 @@ export function MatchedAreaTimeline({ segments, sourceHref, sourceTitle }: Match
             type="button"
             className="matched-area-arrow"
             aria-label="Next match"
-            disabled={activeIndex === orderedSegments.length - 1}
+            disabled={orderedSegments.length === 1}
             onClick={() => chooseAdjacentMatch(1)}
           >
             <ChevronRight aria-hidden="true" className="size-5" />
