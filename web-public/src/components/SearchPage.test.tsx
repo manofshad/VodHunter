@@ -195,7 +195,7 @@ describe("SearchResultCard", () => {
     expect(screen.getByText("Match 2 of 3")).toBeTruthy();
     expect(screen.getByRole("listitem", { name: /Match 2, clip/ }).getAttribute("aria-current")).toBe("true");
     expect(screen.getByRole("link", { name: /Open matched segment 2/ }).getAttribute("href")).toBe(sourceHref);
-    expect(screen.getByText("Score 0.500")).toBeTruthy();
+    expect(screen.queryByText(/Score/)).toBeNull();
     expect(previous.hasAttribute("disabled")).toBe(false);
     expect(next.hasAttribute("disabled")).toBe(false);
 
