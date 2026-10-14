@@ -376,6 +376,8 @@ def test_public_search_job_endpoint_returns_queued_job_context() -> None:
         "status": "queued",
         "stage": "validating",
         "tiktok_url": "https://www.tiktok.com/t/ZP8ctwC2V/",
+        "input_type": "tiktok_url",
+        "clip_filename": None,
         "streamer": "xqc",
         "created_at": "2026-04-15T00:00:00Z",
         "started_at": None,

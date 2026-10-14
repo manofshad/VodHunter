@@ -1,25 +1,26 @@
-import { FormEvent, RefObject, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, RefObject, useEffect, useRef, useState } from "react";
 
-import { createSearchJob, getSearchJob, listSearchableStreamers } from "../../api/client";
+import { SearchClipInput, createSearchJob, getSearchJob, listSearchableStreamers } from "../../api/client";
 import { CompletedSearchFeedback, SearchJobResponse, SearchResponse, StreamerListItem } from "../../api/types";
 import { createSearchHistoryEntry, SearchHistoryEntry } from "./searchHistory";
 import { isSupportedClipUrl } from "./searchUtils";
 import { isSearchToken, parseSharedSearchLocation, sharedSearchPath } from "./sharedSearch";
 import { useSearchHistory } from "./useSearchHistory";
+import { ClipDraft, ClipSourceMetadata, parseClipSource, restoredDraft, sourceFromJob, validateClipFile } from "./clipSource";
 
 const ACTIVE_SEARCH_STORAGE_KEY = "vodhunter-public-active-search";
 
 interface ActiveSearchState {
   searchToken: string;
-  tiktokUrl: string;
+  source: ClipSourceMetadata;
   streamedFrom?: string;
   streamedTo?: string;
 }
 
-function persistActiveSearch(searchToken: string, tiktokUrl: string, streamedFrom: string, streamedTo: string): void {
+function persistActiveSearch(searchToken: string, source: ClipSourceMetadata, streamedFrom: string, streamedTo: string): void {
   window.localStorage.setItem(
     ACTIVE_SEARCH_STORAGE_KEY,
-    JSON.stringify({ searchToken, tiktokUrl, streamedFrom, streamedTo }),
+    JSON.stringify({ searchToken, source, streamedFrom, streamedTo }),
   );
 }
 
@@ -34,15 +35,21 @@ function readActiveSearch(): ActiveSearchState | null {
   }
 
   try {
-    const parsed = JSON.parse(raw) as Partial<ActiveSearchState>;
-    if (!isSearchToken(parsed.searchToken) || typeof parsed.tiktokUrl !== "string") {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || !("searchToken" in parsed) || !isSearchToken(parsed.searchToken)) {
+      return null;
+    }
+    const source = "source" in parsed ? parseClipSource(parsed.source)
+      : "tiktokUrl" in parsed && typeof parsed.tiktokUrl === "string" && parsed.tiktokUrl.trim()
+        ? { kind: "link", url: parsed.tiktokUrl } satisfies ClipSourceMetadata : null;
+    if (!source) {
       return null;
     }
     return {
       searchToken: parsed.searchToken,
-      tiktokUrl: parsed.tiktokUrl,
-      streamedFrom: typeof parsed.streamedFrom === "string" ? parsed.streamedFrom : "",
-      streamedTo: typeof parsed.streamedTo === "string" ? parsed.streamedTo : "",
+      source,
+      streamedFrom: "streamedFrom" in parsed && typeof parsed.streamedFrom === "string" ? parsed.streamedFrom : "",
+      streamedTo: "streamedTo" in parsed && typeof parsed.streamedTo === "string" ? parsed.streamedTo : "",
     };
   } catch {
     return null;
@@ -50,7 +57,7 @@ function readActiveSearch(): ActiveSearchState | null {
 }
 
 export interface SearchPageState {
-  tiktokUrl: string;
+  source: ClipDraft;
   streamedFrom: string;
   streamedTo: string;
   streamer: string;
@@ -63,12 +70,14 @@ export interface SearchPageState {
   streamerError: string | null;
   submitting: boolean;
   activeSearchStage: string | null;
-  lastSubmittedUrl: string;
-  hasUrl: boolean;
+  submittedSource: ClipSourceMetadata | null;
+  canSubmit: boolean;
   searchButtonLabel: string;
   streamerTriggerRef: RefObject<HTMLButtonElement>;
   historyEntries: SearchHistoryEntry[];
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onSourceModeChange: (mode: "link" | "upload") => void;
+  onFileSelect: (file: File | null) => void;
   onUrlChange: (value: string) => void;
   onPaste: () => Promise<void>;
   onSelectStreamer: (value: string) => void;
@@ -78,7 +87,7 @@ export interface SearchPageState {
 }
 
 export function useSearchPage(): SearchPageState {
-  const [tiktokUrl, setTiktokUrl] = useState("");
+  const [source, setSource] = useState<ClipDraft>({ kind: "link", url: "" });
   const [streamedFrom, setStreamedFrom] = useState("");
   const [streamedTo, setStreamedTo] = useState("");
   const [streamer, setStreamer] = useState("");
@@ -92,12 +101,45 @@ export function useSearchPage(): SearchPageState {
   const [submitting, setSubmitting] = useState(false);
   const [activeSearchToken, setActiveSearchToken] = useState<string | null>(null);
   const [activeSearchStage, setActiveSearchStage] = useState<string | null>(null);
-  const [lastSubmittedUrl, setLastSubmittedUrl] = useState("");
+  const [submittedSource, setSubmittedSource] = useState<ClipSourceMetadata | null>(null);
   const streamerTriggerRef = useRef<HTMLButtonElement>(null);
+  const sourceRevisionRef = useRef(0);
+  const submittedUploadRef = useRef<{ searchToken: string; file: File } | null>(null);
   const { entries: historyEntries, addEntry, clearEntries: onClearHistory } = useSearchHistory();
 
-  const hasUrl = tiktokUrl.trim().length > 0;
-  const searchButtonLabel = useMemo(() => (submitting ? "Searching..." : "Search"), [submitting]);
+  const selectedFile = source.kind === "upload-selected" ? source.file : null;
+  const canSubmit = source.kind === "link" ? source.url.trim().length > 0
+    : source.kind === "upload-selected" && !validateClipFile(source.file, source.durationSeconds);
+  const searchButtonLabel = submitting ? activeSearchStage === "uploading" ? "Uploading..." : "Searching..." : "Search";
+
+  useEffect(() => {
+    if (!selectedFile || typeof URL.createObjectURL !== "function") {
+      return;
+    }
+    const video = document.createElement("video");
+    const objectUrl = URL.createObjectURL(selectedFile);
+    let cancelled = false;
+    video.preload = "metadata";
+    video.onloadedmetadata = () => {
+      if (cancelled || !Number.isFinite(video.duration) || video.duration <= 0) {
+        return;
+      }
+      const durationSeconds = video.duration;
+      setSource((current) => current.kind === "upload-selected" && current.file === selectedFile
+        ? { ...current, durationSeconds } : current);
+      const fileError = validateClipFile(selectedFile, durationSeconds);
+      if (fileError) {
+        setRequestError(fileError);
+      }
+    };
+    video.src = objectUrl;
+    return () => {
+      cancelled = true;
+      video.onloadedmetadata = null;
+      video.removeAttribute("src");
+      URL.revokeObjectURL(objectUrl);
+    };
+  }, [selectedFile]);
 
   useEffect(() => {
     let cancelled = false;
@@ -160,8 +202,8 @@ export function useSearchPage(): SearchPageState {
 
     setActiveSearchToken(activeSearch.searchToken);
     setActiveSearchStage("validating");
-    setLastSubmittedUrl(activeSearch.tiktokUrl);
-    setTiktokUrl(activeSearch.tiktokUrl);
+    setSubmittedSource(activeSearch.source);
+    setSource(restoredDraft(activeSearch.source));
     setStreamedFrom(activeSearch.streamedFrom ?? "");
     setStreamedTo(activeSearch.streamedTo ?? "");
     setSubmitting(true);
@@ -206,10 +248,19 @@ export function useSearchPage(): SearchPageState {
 
   const handlePolledJob = (job: SearchJobResponse) => {
     setActiveSearchStage(job.stage);
-    if (job.tiktok_url) {
-      setTiktokUrl(job.tiktok_url);
-      setLastSubmittedUrl(job.tiktok_url);
-    }
+    const jobSource = sourceFromJob(job);
+    setSubmittedSource(jobSource);
+    setSource((current) => {
+      if (!jobSource) {
+        return job.input_type === "upload" ? { kind: "upload-empty" } : { kind: "link", url: "" };
+      }
+      const submittedUpload = submittedUploadRef.current;
+      if (jobSource.kind === "upload" && current.kind === "upload-selected"
+        && submittedUpload?.searchToken === job.search_token && submittedUpload.file === current.file) {
+        return current;
+      }
+      return restoredDraft(jobSource);
+    });
     if (job.streamer) {
       setStreamer(job.streamer);
     }
@@ -228,11 +279,12 @@ export function useSearchPage(): SearchPageState {
       setResult(job.result);
       setCompletedSearchFeedback(job.result?.found ? { searchToken: job.search_token, feedback: job.feedback } : null);
       setRequestError(null);
-      if (job.result) {
+      if (job.result && jobSource) {
         const historyEntry = createSearchHistoryEntry(
           job.result,
-          job.tiktok_url ?? lastSubmittedUrl,
+          jobSource,
           job.created_at,
+          job.search_token,
         );
         if (historyEntry) {
           addEntry(historyEntry);
@@ -247,14 +299,48 @@ export function useSearchPage(): SearchPageState {
 
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!hasUrl) {
+    if (submitting) {
       return;
     }
-
-    const submittedUrl = tiktokUrl.trim();
-    if (!isSupportedClipUrl(submittedUrl)) {
-      setRequestError("Paste a TikTok video link, not a profile or other TikTok page.");
-      return;
+    let input: SearchClipInput;
+    let nextSubmittedSource: ClipSourceMetadata;
+    const options = {
+      streamer,
+      streamedFrom: streamedFrom.trim() || undefined,
+      streamedTo: streamedTo.trim() || undefined,
+    };
+    switch (source.kind) {
+      case "link": {
+        const url = source.url.trim();
+        if (!url) {
+          return;
+        }
+        if (!isSupportedClipUrl(url)) {
+          setRequestError("Paste a TikTok video link, not a profile or other TikTok page.");
+          return;
+        }
+        input = { ...options, kind: "link", url };
+        nextSubmittedSource = { kind: "link", url };
+        break;
+      }
+      case "upload-selected": {
+        const fileError = validateClipFile(source.file, source.durationSeconds);
+        if (fileError) {
+          setRequestError(fileError);
+          return;
+        }
+        input = { ...options, kind: "upload", file: source.file };
+        nextSubmittedSource = { kind: "upload", filename: source.file.name };
+        break;
+      }
+      case "upload-empty":
+      case "upload-restored":
+        setRequestError("Choose a video file to search again.");
+        return;
+      default: {
+        const exhaustive: never = source;
+        return exhaustive;
+      }
     }
 
     if (!streamer.trim()) {
@@ -267,24 +353,21 @@ export function useSearchPage(): SearchPageState {
     const submittedStreamedTo = streamedTo.trim();
 
     try {
+      sourceRevisionRef.current += 1;
       setSubmitting(true);
       setActiveSearchToken(null);
-      setActiveSearchStage("validating");
+      setActiveSearchStage(input.kind === "upload" ? "uploading" : "validating");
       setStreamerError(null);
       setRequestError(null);
       setResult(null);
       setCompletedSearchFeedback(null);
-      setLastSubmittedUrl(submittedUrl);
-      const created = await createSearchJob({
-        tiktokUrl: submittedUrl,
-        streamer,
-        streamedFrom: submittedStreamedFrom || undefined,
-        streamedTo: submittedStreamedTo || undefined,
-      });
+      setSubmittedSource(nextSubmittedSource);
+      const created = await createSearchJob(input);
       if (!isSearchToken(created.search_token)) {
         throw new Error("Could not open the search. Please refresh and try again.");
       }
-      persistActiveSearch(created.search_token, submittedUrl, submittedStreamedFrom, submittedStreamedTo);
+      submittedUploadRef.current = input.kind === "upload" ? { searchToken: created.search_token, file: input.file } : null;
+      persistActiveSearch(created.search_token, nextSubmittedSource, submittedStreamedFrom, submittedStreamedTo);
       window.history.replaceState(null, "", sharedSearchPath(created.search_token));
       setActiveSearchToken(created.search_token);
       setActiveSearchStage(created.stage);
@@ -295,8 +378,32 @@ export function useSearchPage(): SearchPageState {
     }
   };
 
+  const onSourceModeChange = (mode: "link" | "upload") => {
+    if ((source.kind === "link") === (mode === "link")) {
+      return;
+    }
+    submittedUploadRef.current = null;
+    sourceRevisionRef.current += 1;
+    setSource(mode === "link" ? { kind: "link", url: "" } : { kind: "upload-empty" });
+    setRequestError(null);
+    setStreamerError(null);
+  };
+
+  const onFileSelect = (file: File | null) => {
+    sourceRevisionRef.current += 1;
+    const fileError = file ? validateClipFile(file) : null;
+    if (submittedUploadRef.current?.file !== file) {
+      submittedUploadRef.current = null;
+    }
+    setSource(file && !fileError ? { kind: "upload-selected", file } : { kind: "upload-empty" });
+    setRequestError(fileError);
+    setStreamerError(null);
+  };
+
   const onUrlChange = (value: string) => {
-    setTiktokUrl(value);
+    submittedUploadRef.current = null;
+    sourceRevisionRef.current += 1;
+    setSource({ kind: "link", url: value });
     setStreamerError(null);
     setRequestError(null);
   };
@@ -309,21 +416,25 @@ export function useSearchPage(): SearchPageState {
   const onDateRangeChange = (nextFrom: string, nextTo: string) => {
     setStreamedFrom(nextFrom);
     setStreamedTo(nextTo);
-    setRequestError(null);
+    setRequestError(source.kind === "upload-selected" ? validateClipFile(source.file, source.durationSeconds) : null);
   };
 
   const onPaste = async () => {
+    const revision = sourceRevisionRef.current;
     try {
       const text = await navigator.clipboard.readText();
-      setTiktokUrl(text);
-      setStreamerError(null);
+      if (revision === sourceRevisionRef.current) {
+        onUrlChange(text);
+      }
     } catch {
-      setRequestError("Clipboard access was blocked. Paste the TikTok URL manually.");
+      if (revision === sourceRevisionRef.current) {
+        setRequestError("Clipboard access was blocked. Paste the clip link manually.");
+      }
     }
   };
 
   return {
-    tiktokUrl,
+    source,
     streamedFrom,
     streamedTo,
     streamer,
@@ -336,12 +447,14 @@ export function useSearchPage(): SearchPageState {
     streamerError,
     submitting,
     activeSearchStage,
-    lastSubmittedUrl,
-    hasUrl,
+    submittedSource,
+    canSubmit,
     searchButtonLabel,
     streamerTriggerRef,
     historyEntries,
     onSubmit,
+    onSourceModeChange,
+    onFileSelect,
     onUrlChange,
     onPaste,
     onSelectStreamer,

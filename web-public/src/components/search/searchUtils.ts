@@ -59,10 +59,12 @@ export function isSupportedClipUrl(rawUrl: string): boolean {
 
 export function getStageMessage(stage: string | null): string {
   switch (stage) {
+    case "uploading":
+      return "Uploading your clip…";
     case "validating":
       return "Getting your clip ready…";
     case "downloading":
-      return "Loading the TikTok clip…";
+      return "Loading your clip…";
     case "probing":
       return "Taking a quick look at the clip…";
     case "preprocessing":
@@ -76,6 +78,6 @@ export function getStageMessage(stage: string | null): string {
     case "finalizing":
       return "Almost there…";
     default:
-      return "We are matching your TikTok clip against indexed streamer audio.";
+      return "We are matching your clip against indexed streamer audio.";
   }
 }

@@ -25,6 +25,8 @@ describe("VodHunter home link", () => {
       search_token: searchToken,
       status: "running",
       stage: "validating",
+      input_type: "tiktok_url",
+      clip_filename: null,
       tiktok_url: tiktokUrl,
       streamer: "jason",
       created_at: "2026-09-14T12:00:00Z",

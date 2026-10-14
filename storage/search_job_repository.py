@@ -36,6 +36,27 @@ class SearchJobRepository:
         creator_id: int | None,
         date_range: SearchDateRange | None = None,
     ) -> int:
+        return self._create_public_search_job(
+            search_token=search_token, tiktok_url=tiktok_url, clip_filename=None,
+            input_type="tiktok_url", streamer=streamer, creator_id=creator_id,
+            date_range=date_range,
+        )
+
+    def create_uploaded_search_job(
+        self, *, search_token: str, clip_filename: str, streamer: str,
+        creator_id: int | None, date_range: SearchDateRange | None = None,
+    ) -> int:
+        return self._create_public_search_job(
+            search_token=search_token, tiktok_url=None, clip_filename=clip_filename,
+            input_type="upload", streamer=streamer, creator_id=creator_id,
+            date_range=date_range,
+        )
+
+    def _create_public_search_job(
+        self, *, search_token: str, tiktok_url: str | None, clip_filename: str | None,
+        input_type: str, streamer: str, creator_id: int | None,
+        date_range: SearchDateRange | None,
+    ) -> int:
         access_token_hash = hash_search_token(search_token)
         with self.database.connect() as conn:
             with conn.cursor() as cur:
@@ -52,25 +73,27 @@ class SearchJobRepository:
                         job_status,
                         job_stage,
                         tiktok_url,
+                        clip_filename,
                         streamed_from,
                         streamed_to,
                         model_version,
                         preprocessing_version
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
                     """,
                     (
                         access_token_hash,
                         "public",
                         "/api/search/clip",
-                        "tiktok_url",
+                        input_type,
                         streamer,
                         creator_id,
                         False,
                         "queued",
                         "validating",
                         tiktok_url,
+                        clip_filename,
                         date_range.streamed_from if date_range is not None else None,
                         date_range.streamed_to if date_range is not None else None,
                         self.database.model_version,
@@ -257,7 +280,9 @@ class SearchJobRepository:
                         result_payload,
                         tiktok_url,
                         feedback_rating,
-                        feedback_updated_at
+                        feedback_updated_at,
+                        input_type,
+                        clip_filename
                     FROM search_requests
                     WHERE access_token_hash = %s
                       AND source_app = 'public'
@@ -288,6 +313,8 @@ class SearchJobRepository:
             tiktok_url,
             feedback_rating,
             feedback_updated_at,
+            input_type,
+            clip_filename,
         ) = row
 
         result: SearchResult | None = None
@@ -340,6 +367,8 @@ class SearchJobRepository:
             error_code=str(error_code) if error_code else None,
             error_message=str(error_message) if error_message else None,
             tiktok_url=str(tiktok_url) if tiktok_url else None,
+            input_type=str(input_type),
+            clip_filename=str(clip_filename) if clip_filename else None,
             streamer=str(streamer) if streamer else None,
             feedback=SearchFeedbackRecord(feedback_rating, self._isoformat(feedback_updated_at))
             if feedback_rating is not None else None,

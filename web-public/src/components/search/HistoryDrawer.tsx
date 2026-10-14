@@ -4,7 +4,7 @@ import { Check, Copy, ExternalLink, History as HistoryIcon, X } from "lucide-rea
 import { AvatarImage } from "./AvatarImage";
 import { formatTimelineTime } from "./searchUtils";
 import {
-  displayTikTokUrl,
+  displayClipUrl,
   formatHistoryTime,
   groupSearchHistory,
   SearchHistoryEntry,
@@ -27,8 +27,11 @@ function HistoryEntryRow({ entry, tabIndex }: HistoryEntryRowProps) {
   const timestamp = formatTimelineTime(entry.timestampSeconds);
   const [copied, setCopied] = useState(false);
 
-  const handleCopyTikTokUrl = async () => {
-    await navigator.clipboard.writeText(entry.tiktokUrl);
+  const handleCopyClipUrl = async () => {
+    if (entry.source.kind !== "link") {
+      return;
+    }
+    await navigator.clipboard.writeText(entry.source.url);
     setCopied(true);
   };
 
@@ -71,22 +74,24 @@ function HistoryEntryRow({ entry, tabIndex }: HistoryEntryRowProps) {
             </a>
           </h3>
           <div className="mt-1 flex min-w-0 items-center gap-1">
-            <p className="min-w-0 truncate text-sm text-gray-400" title={entry.tiktokUrl}>
-              {displayTikTokUrl(entry.tiktokUrl)}
+            <p className="min-w-0 truncate text-sm text-gray-400" title={entry.source.kind === "link" ? entry.source.url : entry.source.filename}>
+              {entry.source.kind === "link" ? displayClipUrl(entry.source.url) : entry.source.filename}
             </p>
-            <button
-              type="button"
-              tabIndex={tabIndex}
-              onClick={handleCopyTikTokUrl}
-              aria-label={copied ? "TikTok URL copied" : "Copy TikTok URL"}
-              className="flex size-7 shrink-0 items-center justify-center rounded-md text-gray-400 transition hover:bg-gray-700 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#fb2844]"
-            >
-              {copied ? (
-                <Check aria-hidden="true" className="size-3.5 text-emerald-400" />
-              ) : (
-                <Copy aria-hidden="true" className="size-3.5" />
-              )}
-            </button>
+            {entry.source.kind === "link" ? (
+              <button
+                type="button"
+                tabIndex={tabIndex}
+                onClick={handleCopyClipUrl}
+                aria-label={copied ? "Clip link copied" : "Copy clip link"}
+                className="flex size-7 shrink-0 items-center justify-center rounded-md text-gray-400 transition hover:bg-gray-700 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#fb2844]"
+              >
+                {copied ? (
+                  <Check aria-hidden="true" className="size-3.5 text-emerald-400" />
+                ) : (
+                  <Copy aria-hidden="true" className="size-3.5" />
+                )}
+              </button>
+            ) : null}
           </div>
         </div>
       </div>

@@ -50,10 +50,10 @@ it("retains the saved selection after failure and retries the attempted rating",
 it("isolates a delayed save from the next result through the result token key", async () => {
   let resolveSave: (value: SearchFeedbackResponse) => void = () => { throw new Error("Save not started"); };
   vi.mocked(saveSearchFeedback).mockImplementation(() => new Promise(resolve => { resolveSave = resolve; }));
-  const { rerender } = render(<SearchResultCard result={result} lastSubmittedUrl="" completedSearchFeedback={{ searchToken, feedback: null }} />);
+  const { rerender } = render(<SearchResultCard result={result} submittedSource={null} completedSearchFeedback={{ searchToken, feedback: null }} />);
   fireEvent.click(upButton());
   const nextToken = "B".repeat(43);
-  rerender(<SearchResultCard result={result} lastSubmittedUrl="" completedSearchFeedback={{ searchToken: nextToken, feedback: savedDown }} />);
+  rerender(<SearchResultCard result={result} submittedSource={null} completedSearchFeedback={{ searchToken: nextToken, feedback: savedDown }} />);
   await act(async () => resolveSave(savedUp));
   expect(downButton().getAttribute("aria-pressed")).toBe("true");
   expect(upButton().getAttribute("aria-pressed")).toBe("false");

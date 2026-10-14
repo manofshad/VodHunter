@@ -221,3 +221,5 @@ class SearchJobRecord:
     tiktok_url: str | None = None
     streamer: str | None = None
     feedback: SearchFeedbackRecord | None = None
+    input_type: str = "tiktok_url"
+    clip_filename: str | None = None

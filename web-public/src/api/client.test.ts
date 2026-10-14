@@ -54,3 +54,28 @@ it("sends the search capability in authorization without leaking it into the req
   expect(new Headers(options.headers).get("Authorization")).toBe(`Bearer ${searchToken}`);
   expect(options.cache).toBe("no-store");
 });
+
+
+it.each(["link", "upload"] as const)("submits exactly one %s clip source with shared search options", async (kind) => {
+  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ search_token: "A".repeat(43), status: "queued", stage: "validating" })));
+  vi.stubGlobal("fetch", fetchMock);
+  const { createSearchJob } = await import("./client");
+  const options = { streamer: "jason", streamedFrom: "2026-10-01", streamedTo: "2026-10-12" };
+  const file = new File(["clip bytes"], "moment.mkv", { type: "video/x-matroska" });
+  await createSearchJob(kind === "link" ? { ...options, kind, url: "https://www.youtube.com/shorts/BaW_jenozKc" } : { ...options, kind, file });
+  const [url, request] = fetchMock.mock.calls[0];
+  expect(url).toContain("/api/search/clip");
+  expect(request.method).toBe("POST");
+  expect(request.headers).toBeUndefined();
+  expect(request.body).toBeInstanceOf(FormData);
+  const form: FormData = request.body;
+  expect(form.get("streamer")).toBe("jason");
+  expect(form.get("streamed_from")).toBe("2026-10-01");
+  expect(form.get("streamed_to")).toBe("2026-10-12");
+  expect([...form.keys()].sort()).toEqual([kind === "link" ? "tiktok_url" : "clip_file", "streamed_from", "streamed_to", "streamer"].sort());
+  if (kind === "link") {
+    expect(form.get("tiktok_url")).toBe("https://www.youtube.com/shorts/BaW_jenozKc");
+  } else {
+    expect(form.get("clip_file")).toBe(file);
+  }
+});

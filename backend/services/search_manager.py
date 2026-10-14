@@ -5,7 +5,7 @@ import time
 from typing import Callable
 from urllib.parse import urlparse
 
-from backend.services.media_duration import MediaDurationError, probe_media_duration_seconds
+from backend.services.media_duration import MediaDurationError, probe_media_duration_seconds, probe_uploaded_video
 from backend.services.remote_clip_downloader import RemoteClipDownloader, parse_clip_url
 from search.models import SearchDateRange, SearchRequestOutcome
 from search.search_service import SearchService
@@ -107,6 +107,41 @@ class SearchManager:
         finally:
             if downloaded_path:
                 self.remote_downloader.cleanup(downloaded_path)
+
+    def search_uploaded_file(
+        self,
+        path: str,
+        streamer: str,
+        date_range: SearchDateRange | None = None,
+        on_stage_change: Callable[[str], None] | None = None,
+        on_stage_timing: Callable[[str, int], None] | None = None,
+    ) -> SearchRequestOutcome:
+        started_at = time.perf_counter()
+        probe_started_at = time.perf_counter()
+        if on_stage_change is not None:
+            on_stage_change("probing")
+        try:
+            duration = probe_uploaded_video(path)
+        except MediaDurationError as exc:
+            raise SearchInputError(str(exc)) from exc
+        finally:
+            self._record_stage_timing("probe", probe_started_at, None, on_stage_timing)
+        probe_duration_ms = _duration_ms(time.perf_counter() - probe_started_at)
+        limit = self.max_duration_seconds if self.max_duration_seconds is not None else 180
+        if duration > limit:
+            raise InputDurationExceededError(duration, limit)
+        execution = self._search_local_file(
+            path, streamer, date_range=date_range,
+            on_stage_change=on_stage_change, on_stage_timing=on_stage_timing,
+            query_duration_seconds=duration,
+        )
+        execution.metadata.probe_duration_ms = probe_duration_ms
+        return SearchRequestOutcome(
+            result=execution.result, execution_metadata=execution.metadata,
+            input_type="upload", input_duration_seconds=duration,
+            total_duration_ms=_duration_ms(time.perf_counter() - started_at),
+            date_range=date_range,
+        )
 
     def _validate_duration(
         self,

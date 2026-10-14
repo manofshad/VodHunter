@@ -5,10 +5,11 @@ import { CompletedSearchFeedback, SearchResponse, SearchSegment, SearchSource } 
 import { MatchRating } from "./MatchRating";
 import { AvatarImage } from "./AvatarImage";
 import { MatchedAreaTimeline } from "./MatchedAreaTimeline";
+import { ClipSourceMetadata } from "./clipSource";
 
 interface SearchResultCardProps {
   result: SearchResponse;
-  lastSubmittedUrl: string;
+  submittedSource: ClipSourceMetadata | null;
   completedSearchFeedback?: CompletedSearchFeedback | null;
 }
 
@@ -140,7 +141,7 @@ function SearchSourceBlock({ source, fallbackStreamer, fallbackProfileImageUrl }
   );
 }
 
-export function SearchResultCard({ result, lastSubmittedUrl, completedSearchFeedback }: SearchResultCardProps) {
+export function SearchResultCard({ result, submittedSource, completedSearchFeedback }: SearchResultCardProps) {
   const sources = getSearchSources(result);
 
   return (
@@ -170,19 +171,23 @@ export function SearchResultCard({ result, lastSubmittedUrl, completedSearchFeed
         <h3 className="text-lg font-bold leading-tight text-white md:text-[1.5rem]">No matching Twitch VOD found</h3>
       )}
 
-      {lastSubmittedUrl ? (
+      {submittedSource ? (
         <div className="mt-5 border-t border-gray-700 pt-5">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">TikTok URL</p>
-          <a
-            href={lastSubmittedUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="mt-1 inline-flex max-w-full items-start gap-2 break-all text-sm text-gray-300 transition hover:text-[#fb2844]"
-            aria-label="Open original TikTok clip"
-          >
-            <span>{lastSubmittedUrl}</span>
-            <ExternalLink className="mt-0.5 size-4 shrink-0" />
-          </a>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">{submittedSource.kind === "upload" ? "Uploaded file" : "Clip link"}</p>
+          {submittedSource.kind === "upload" ? (
+            <p className="mt-1 truncate text-sm text-gray-300" title={submittedSource.filename}>{submittedSource.filename}</p>
+          ) : (
+            <a
+              href={submittedSource.url}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-1 inline-flex max-w-full items-start gap-2 break-all text-sm text-gray-300 transition hover:text-[#fb2844]"
+              aria-label="Open original clip"
+            >
+              <span>{submittedSource.url}</span>
+              <ExternalLink className="mt-0.5 size-4 shrink-0" />
+            </a>
+          )}
         </div>
       ) : null}
       {result.found && completedSearchFeedback ? (

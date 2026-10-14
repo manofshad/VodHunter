@@ -20,6 +20,26 @@ from storage.fingerprint_repository import (
 )
 
 
+@pytest.mark.integration
+def test_uploaded_search_source_survives_real_database_round_trip(store, database_scope) -> None:
+    creator_id = _create_creator(store, database_scope)
+    token = create_search_token()
+    identity = database_scope.remember_search(store.search_jobs.create_uploaded_search_job(
+        search_token=token, clip_filename="downloaded-clip.MOV", streamer=database_scope.streamer,
+        creator_id=creator_id,
+    ))
+    queued = store.search_jobs.get_public_search_job(token)
+    assert queued.id == identity
+    assert (queued.input_type, queued.clip_filename, queued.tiktok_url) == ("upload", "downloaded-clip.MOV", None)
+    store.search_jobs.complete_search_job(identity, SearchRequestOutcome(
+        result=SearchResult(found=False, streamer=database_scope.streamer),
+        execution_metadata=SearchExecutionMetadata(found_match=False), input_type="upload",
+    ))
+    restored = store.search_jobs.get_public_search_job(token)
+    assert restored.status == "completed"
+    assert (restored.input_type, restored.clip_filename, restored.tiktok_url) == ("upload", "downloaded-clip.MOV", None)
+
+
 def _create_creator(store, scope, *, suffix: str = "") -> int:
     name = f"{scope.streamer}{suffix}"
     creator_id = store.videos.create_or_get_creator(
