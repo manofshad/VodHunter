@@ -404,6 +404,8 @@ def test_get_public_search_job_restores_nested_multi_segment_payload() -> None:
             "https://www.tiktok.com/@alice/video/123",
             None,
             None,
+            "tiktok_url",
+            None,
         )
     )
     store = build_search_job_repository(cursor)
@@ -423,6 +425,8 @@ def test_get_public_search_job_restores_nested_multi_segment_payload() -> None:
     assert isinstance(job.result.unmatched_ranges[0], UnmatchedRange)
     assert job.result.unmatched_ranges[0].query_start == 5.0
     assert job.tiktok_url == "https://www.tiktok.com/@alice/video/123"
+    assert job.input_type == "tiktok_url"
+    assert job.clip_filename is None
     assert job.streamer == "alice"
     assert job.feedback is None
 
