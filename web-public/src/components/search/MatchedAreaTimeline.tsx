@@ -86,7 +86,6 @@ export function MatchedAreaTimeline({ segments, sourceHref, sourceTitle }: Match
             ) : (
               <p className="font-semibold text-white">{vodRange} <span className="font-normal text-gray-400">· Link unavailable</span></p>
             )}
-            <span className="text-xs font-medium text-gray-400">Score {activeSegment.score.toFixed(3)}</span>
           </div>
         </div>
         <div className="matched-area-controls">
