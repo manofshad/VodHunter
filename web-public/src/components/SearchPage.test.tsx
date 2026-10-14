@@ -199,7 +199,6 @@ describe("SearchResultCard", () => {
         vodStart: "05:49:30",
         vodRange: "05:49:30–05:49:34",
         href: "https://www.twitch.tv/videos/2848966623?t=5h49m30s",
-        score: "0.820",
       },
       {
         number: 2,
@@ -207,7 +206,6 @@ describe("SearchResultCard", () => {
         vodStart: "06:20:38",
         vodRange: "06:20:38–06:20:42",
         href: sourceHref,
-        score: "0.500",
       },
       {
         number: 3,
@@ -215,7 +213,6 @@ describe("SearchResultCard", () => {
         vodStart: "00:01:40",
         vodRange: "00:01:40–00:02:16",
         href: "https://www.twitch.tv/videos/2848966623?t=1m40s",
-        score: "0.910",
       },
     ];
     function expectMatch(match: typeof matches[number]) {
@@ -229,7 +226,8 @@ describe("SearchResultCard", () => {
       const announcement = count.closest("[aria-live]");
       expect(announcement?.getAttribute("aria-live")).toBe("polite");
       expect(announcement?.getAttribute("aria-atomic")).toBe("true");
-      expect(announcement?.textContent).toBe(`Match ${match.number} of 3Clip ${match.clipRange}${match.vodRange}Score ${match.score}`);
+      expect(announcement?.textContent).toBe(`Match ${match.number} of 3Clip ${match.clipRange}${match.vodRange}`);
+      expect(screen.queryByText(/Score/)).toBeNull();
       expect(previous.hasAttribute("disabled")).toBe(false);
       expect(next.hasAttribute("disabled")).toBe(false);
       expect(title.getAttribute("href")).toBe(sourceHref);
