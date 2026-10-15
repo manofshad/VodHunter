@@ -25,29 +25,38 @@ interface HeaderProps {
 function Header({ openPanel, historyButtonRef, shortcutButtonRef, onOpenHistory, onOpenShortcut, onGoHome }: HeaderProps) {
   return (
     <header className="border-b border-gray-700 bg-gray-900 px-3 py-4 sm:px-6">
-      <div className="mx-auto flex max-w-7xl items-center justify-between gap-2">
-        <a
-          href="/"
-          onClick={onGoHome}
-          className="flex min-h-11 items-center gap-2 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#fb2844]"
-          aria-label="VodHunter"
-        >
-          <span className="text-lg font-bold text-white sm:text-xl">
-            <span className="font-bold">Vod</span>
-            <span className="font-bold text-[#fb2844]">Hunter</span>
-          </span>
-        </a>
+      <div className="mx-auto flex max-w-7xl items-center justify-between gap-2 sm:gap-4">
+        <div className="flex min-w-0 items-center gap-5 sm:gap-10">
+          <a
+            href="/"
+            onClick={onGoHome}
+            className="flex min-h-11 shrink-0 items-center gap-2 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#fb2844]"
+            aria-label="VodHunter"
+          >
+            <span className="text-lg font-bold text-white sm:text-xl">
+              <span className="font-bold">Vod</span>
+              <span className="font-bold text-[#fb2844]">Hunter</span>
+            </span>
+          </a>
+          <a
+            href="/how-vodhunter-works/"
+            className="inline-flex min-h-11 min-w-0 items-center rounded-lg px-1 text-xs font-medium text-white transition hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#fb2844] sm:px-2 sm:text-sm"
+          >
+            What's VodHunter?
+          </a>
+        </div>
         <nav aria-label="Search tools" className="flex shrink-0 items-center gap-1 sm:gap-2">
           <button
             ref={shortcutButtonRef}
             type="button"
+            aria-label="iPhone shortcut"
             aria-haspopup="dialog"
             aria-expanded={openPanel === "shortcut"}
             aria-controls="vodhunter-shortcut-dialog"
             onClick={onOpenShortcut}
-            className="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-xs text-gray-300 transition hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#fb2844] sm:gap-2 sm:text-sm"
+            className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-lg px-1 text-xs text-gray-300 transition hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#fb2844] sm:gap-2 sm:px-2 sm:text-sm"
           >
-            <span>iPhone shortcut</span>
+            <span className="hidden sm:inline">iPhone shortcut</span>
             <Smartphone aria-hidden="true" className="size-4 shrink-0 sm:size-5" />
           </button>
           <span aria-hidden="true" className="h-6 w-px shrink-0 bg-gray-700" />

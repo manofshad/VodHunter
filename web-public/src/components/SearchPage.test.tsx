@@ -183,7 +183,7 @@ describe("SearchResultCard", () => {
     expect(screen.getByRole("link", { name: /Open matched segment 2/ }).getAttribute("href")).toContain("t=5h54m35s");
   });
 
-  it("uses the source URL for the default and keeps title and thumbnail links stable during bounded navigation", () => {
+  it("wraps in both directions from the source URL default and keeps title and thumbnail links stable", () => {
     const result = threeSegmentsInOneSourceResult();
     render(<SearchResultCard result={result} submittedSource={{ kind: "link", url: "https://tiktok.test/clip" }} />);
 
@@ -192,41 +192,115 @@ describe("SearchResultCard", () => {
     const previous = screen.getByRole("button", { name: "Previous match" });
     const next = screen.getByRole("button", { name: "Next match" });
     const sourceHref = "https://www.twitch.tv/videos/2848966623?t=6h20m38s";
-    expect(screen.getByText("Match 2 of 3")).toBeTruthy();
-    expect(screen.getByRole("listitem", { name: /Match 2, clip/ }).getAttribute("aria-current")).toBe("true");
-    expect(screen.getByRole("link", { name: /Open matched segment 2/ }).getAttribute("href")).toBe(sourceHref);
-    expect(screen.queryByText(/Score/)).toBeNull();
-    expect(previous.hasAttribute("disabled")).toBe(false);
-    expect(next.hasAttribute("disabled")).toBe(false);
+    const matches = [
+      {
+        number: 1,
+        clipRange: "00:00:07.5–00:00:11.5",
+        vodStart: "05:49:30",
+        vodRange: "05:49:30–05:49:34",
+        href: "https://www.twitch.tv/videos/2848966623?t=5h49m30s",
+      },
+      {
+        number: 2,
+        clipRange: "00:00:12–00:00:16",
+        vodStart: "06:20:38",
+        vodRange: "06:20:38–06:20:42",
+        href: sourceHref,
+      },
+      {
+        number: 3,
+        clipRange: "00:00:30–00:01:06",
+        vodStart: "00:01:40",
+        vodRange: "00:01:40–00:02:16",
+        href: "https://www.twitch.tv/videos/2848966623?t=1m40s",
+      },
+    ];
+    function expectMatch(match: typeof matches[number]) {
+      const count = screen.getByText(`Match ${match.number} of 3`);
+      expect(screen.getAllByRole("listitem").map((marker) => marker.getAttribute("aria-current"))).toEqual(
+        matches.map((candidate) => candidate.number === match.number ? "true" : null),
+      );
+      const link = screen.getByRole("link", { name: `Open matched segment ${match.number} in Matched stream at ${match.vodStart}` });
+      expect(link.getAttribute("href")).toBe(match.href);
+      expect(link.textContent).toBe(match.vodRange);
+      const announcement = count.closest("[aria-live]");
+      expect(announcement?.getAttribute("aria-live")).toBe("polite");
+      expect(announcement?.getAttribute("aria-atomic")).toBe("true");
+      expect(announcement?.textContent).toBe(`Match ${match.number} of 3Clip ${match.clipRange}${match.vodRange}`);
+      expect(screen.queryByText(/Score/)).toBeNull();
+      expect(previous.hasAttribute("disabled")).toBe(false);
+      expect(next.hasAttribute("disabled")).toBe(false);
+      expect(title.getAttribute("href")).toBe(sourceHref);
+      expect(thumbnail.getAttribute("href")).toBe(sourceHref);
+    }
+    expectMatch(matches[1]);
 
     fireEvent.click(previous);
-    expect(screen.getByText("Match 1 of 3")).toBeTruthy();
-    expect(screen.getByRole("listitem", { name: /Match 1, clip/ }).getAttribute("aria-current")).toBe("true");
-    expect(screen.getByRole("listitem", { name: /Match 2, clip/ }).hasAttribute("aria-current")).toBe(false);
-    expect(screen.getByText("Clip 00:00:07.5–00:00:11.5")).toBeTruthy();
-    expect(screen.getByRole("link", { name: /Open matched segment 1/ }).getAttribute("href")).toBe(
-      "https://www.twitch.tv/videos/2848966623?t=5h49m30s",
-    );
-    expect(previous.hasAttribute("disabled")).toBe(true);
+    expectMatch(matches[0]);
     fireEvent.click(previous);
-    expect(screen.getByText("Match 1 of 3")).toBeTruthy();
+    expectMatch(matches[2]);
     fireEvent.click(next);
-    expect(screen.getByText("Match 2 of 3")).toBeTruthy();
+    expectMatch(matches[0]);
     fireEvent.click(next);
-    expect(screen.getByText("Match 3 of 3")).toBeTruthy();
-    expect(screen.getByRole("link", { name: /Open matched segment 3/ }).getAttribute("href")).toBe(
-      "https://www.twitch.tv/videos/2848966623?t=1m40s",
-    );
-    expect(next.hasAttribute("disabled")).toBe(true);
+    expectMatch(matches[1]);
     fireEvent.click(next);
-    expect(screen.getByText("Match 3 of 3")).toBeTruthy();
-    expect(title.getAttribute("href")).toBe(sourceHref);
-    expect(thumbnail.getAttribute("href")).toBe(sourceHref);
+    expectMatch(matches[2]);
+    fireEvent.click(next);
+    expectMatch(matches[0]);
     expect(previous.closest("[aria-live]")).toBeNull();
     expect(next.closest("[aria-live]")).toBeNull();
-    const announcement = screen.getByText("Match 3 of 3").closest("[aria-live]");
-    expect(announcement?.getAttribute("aria-live")).toBe("polite");
-    expect(announcement?.textContent).toContain("Clip 00:00:30–00:01:06");
+  });
+
+  it("traverses eight matches in clip order through repeated full cycles in both directions", () => {
+    const matches = [
+      { query_start: 0, vod_start: 480, clipRange: "00:00:00–00:00:04", vodRange: "00:08:00–00:08:04", href: "https://www.twitch.tv/videos/2848966623?t=8m0s" },
+      { query_start: 5, vod_start: 60, clipRange: "00:00:05–00:00:09", vodRange: "00:01:00–00:01:04", href: "https://www.twitch.tv/videos/2848966623?t=1m0s" },
+      { query_start: 10, vod_start: 420, clipRange: "00:00:10–00:00:14", vodRange: "00:07:00–00:07:04", href: "https://www.twitch.tv/videos/2848966623?t=7m0s" },
+      { query_start: 15, vod_start: 120, clipRange: "00:00:15–00:00:19", vodRange: "00:02:00–00:02:04", href: "https://www.twitch.tv/videos/2848966623?t=2m0s" },
+      { query_start: 20, vod_start: 360, clipRange: "00:00:20–00:00:24", vodRange: "00:06:00–00:06:04", href: "https://www.twitch.tv/videos/2848966623?t=6m0s" },
+      { query_start: 25, vod_start: 180, clipRange: "00:00:25–00:00:29", vodRange: "00:03:00–00:03:04", href: "https://www.twitch.tv/videos/2848966623?t=3m0s" },
+      { query_start: 30, vod_start: 300, clipRange: "00:00:30–00:00:34", vodRange: "00:05:00–00:05:04", href: "https://www.twitch.tv/videos/2848966623?t=5m0s" },
+      { query_start: 35, vod_start: 240, clipRange: "00:00:35–00:00:39", vodRange: "00:04:00–00:04:04", href: "https://www.twitch.tv/videos/2848966623?t=4m0s" },
+    ];
+    const segments = matches.map((match) => ({
+      query_start: match.query_start,
+      query_end: match.query_start + 4,
+      video_id: 2848966623,
+      vod_start: match.vod_start,
+      vod_end: match.vod_start + 4,
+      video_url_at_timestamp: match.href,
+      score: 0.8,
+    })).reverse();
+    render(<MatchedAreaTimeline segments={segments} sourceHref="https://www.twitch.tv/videos/2848966623?t=2m0s" sourceTitle="Matched stream" />);
+
+    const previous = screen.getByRole("button", { name: "Previous match" });
+    const next = screen.getByRole("button", { name: "Next match" });
+    function expectMatch(index: number) {
+      const match = matches[index];
+      expect(screen.getByText(`Match ${index + 1} of 8`).textContent).toBe(`Match ${index + 1} of 8`);
+      expect(screen.getByText(`Clip ${match.clipRange}`).textContent).toBe(`Clip ${match.clipRange}`);
+      const link = screen.getByRole("link", { name: new RegExp(`^Open matched segment ${index + 1} in Matched stream at `) });
+      expect(link.getAttribute("href")).toBe(match.href);
+      expect(link.textContent).toBe(match.vodRange);
+      expect(screen.getAllByRole("listitem").map((marker) => marker.getAttribute("aria-current"))).toEqual(
+        matches.map((_, candidateIndex) => candidateIndex === index ? "true" : null),
+      );
+      expect(previous.hasAttribute("disabled")).toBe(false);
+      expect(next.hasAttribute("disabled")).toBe(false);
+    }
+    expectMatch(3);
+    for (let cycle = 0; cycle < 2; cycle += 1) {
+      for (const index of [4, 5, 6, 7, 0, 1, 2, 3]) {
+        fireEvent.click(next);
+        expectMatch(index);
+      }
+    }
+    for (let cycle = 0; cycle < 2; cycle += 1) {
+      for (const index of [2, 1, 0, 7, 6, 5, 4, 3]) {
+        fireEvent.click(previous);
+        expectMatch(index);
+      }
+    }
   });
 
   it("keeps timeline markers static on hover, click, and focus", () => {

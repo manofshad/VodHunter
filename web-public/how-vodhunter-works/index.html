@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="referrer" content="no-referrer" />
+    <meta
+      name="description"
+      content="Learn how VodHunter uses audio to find the original Twitch moment behind a TikTok clip. Search the past 30 days of supported streams and new live moments."
+    />
+    <link rel="canonical" href="https://vodhunter.com/how-vodhunter-works/" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <title>Find a Twitch VOD from a TikTok Clip | VodHunter</title>
+  </head>
+  <body class="explanation-page">
+    <header class="article-site-header">
+      <div class="article-site-header-inner">
+        <a class="article-logo" href="/" aria-label="VodHunter">Vod<span>Hunter</span></a>
+        <a class="article-nav-link" href="/">Search</a>
+      </div>
+    </header>
+
+    <main class="article-main">
+      <article class="explanation-article" aria-labelledby="article-title">
+        <header class="article-introduction">
+          <h1 id="article-title">What is VodHunter?</h1>
+          <p class="article-subtitle">Find the original Twitch moment behind a TikTok clip.</p>
+        </header>
+
+        <p>You see a TikTok from a stream and want to watch what happened before or after it. But the clip doesn't tell you which stream it came from, and searching through hours of recordings takes time.</p>
+        <p>VodHunter helps you find that moment. Paste a TikTok link, choose the streamer, and VodHunter compares the clip's audio with their Twitch streams. When it finds a match, you get a link to the matching timestamp in the original recording.</p>
+        <p>That recording is called a VOD, short for "video on demand." It lets you watch a stream after it happened.</p>
+
+        <section aria-labelledby="match-heading">
+          <h2 id="match-heading">What a match looks like</h2>
+          <p>A successful search shows the Twitch VOD and the timestamp where the clip's audio matches. Open the result to watch that part of the stream and see the context around it.</p>
+          <figure class="article-figure">
+            <a href="/images/matched-search.png">
+              <img
+                src="/images/matched-search.png"
+                width="1906"
+                height="952"
+                alt="A successful VodHunter search for jasontheween showing a TikTok audio match from 07:32:17 to 07:32:23 in his Twitch VOD."
+              />
+            </a>
+            <figcaption>This TikTok matched Jason's Twitch stream at 07:32:17. Select the screenshot to see the full-size result.</figcaption>
+          </figure>
+          <p><a href="https://www.tiktok.com/@jasontheween/video/7691557737766898975" target="_blank" rel="noopener noreferrer">Watch the example TikTok</a></p>
+        </section>
+
+        <section aria-labelledby="audio-heading">
+          <h2 id="audio-heading">How VodHunter finds the moment</h2>
+          <p>VodHunter uses audio, not video. It listens for the sound from the original stream rather than comparing faces, captions, or video frames.</p>
+          <p>To do this, it creates an <strong>audio fingerprint</strong>. This is a compact pattern that represents a short piece of sound. VodHunter creates these fingerprints from Twitch streams and stores them in its searchable database.</p>
+          <p>When you submit a TikTok, VodHunter creates fingerprints from that clip's audio and looks for matching patterns in the database. It then works out where that sound appears in the stream.</p>
+          <p>Because the search uses sound, a clip doesn't need to look exactly like the original recording. A cropped video or added captions can still contain the audio needed to find a match.</p>
+        </section>
+
+        <section aria-labelledby="streams-heading">
+          <h2 id="streams-heading">Which streams can you search?</h2>
+          <p>VodHunter currently supports <strong>jasontheween</strong> and <strong>stableronaldo</strong>.</p>
+          <p>We index the past 30 days of streams from supported streamers. We also index new live streams as they happen, so new moments become searchable almost immediately. You don't have to wait for the stream to finish.</p>
+          <p>The date of the original stream matters. A TikTok posted today might show a moment from months ago, which falls outside that 30-day window.</p>
+          <p>Matching also depends on the original audio being present. If a clip replaces the stream's sound with music or a voiceover, VodHunter may not have enough matching audio to find it.</p>
+        </section>
+
+        <section aria-labelledby="try-heading">
+          <h2 id="try-heading">Try it with a TikTok</h2>
+          <p>To find a moment:</p>
+          <ol>
+            <li>Choose the streamer shown in the clip.</li>
+            <li>Paste the TikTok link into VodHunter.</li>
+            <li>If you know when the stream happened, narrow the search by date.</li>
+            <li>Select <strong>Search</strong>, then open a matching result to watch the original moment.</li>
+          </ol>
+          <p class="article-search-link">Have a clip you want to find? <a href="/">Search a TikTok</a>.</p>
+        </section>
+      </article>
+    </main>
+  </body>
+</html>
