@@ -26,7 +26,7 @@ function Header({ openPanel, historyButtonRef, shortcutButtonRef, onOpenHistory,
   return (
     <header className="border-b border-gray-700 bg-gray-900 px-3 py-4 sm:px-6">
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-2 sm:gap-4">
-        <div className="flex min-w-0 items-center gap-2 sm:gap-4">
+        <div className="flex min-w-0 items-center gap-5 sm:gap-10">
           <a
             href="/"
             onClick={onGoHome}
