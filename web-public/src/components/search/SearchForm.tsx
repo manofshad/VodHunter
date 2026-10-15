@@ -108,6 +108,7 @@ export function SearchForm({
               {source.kind === "link" ? (
                 <>
                   <input
+                    key="clip-link"
                     type="url"
                     aria-label="Clip link"
                     placeholder="Paste TikTok URL here"
@@ -129,6 +130,7 @@ export function SearchForm({
               ) : (
                 <>
                   <input
+                    key="clip-file"
                     ref={fileInputRef}
                     type="file"
                     accept={VIDEO_FILE_ACCEPT}

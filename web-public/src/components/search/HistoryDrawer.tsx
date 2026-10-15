@@ -1,5 +1,5 @@
 import { RefObject, useEffect, useRef, useState } from "react";
-import { Check, Copy, ExternalLink, History as HistoryIcon, X } from "lucide-react";
+import { Check, Copy, History as HistoryIcon, X } from "lucide-react";
 
 import { AvatarImage } from "./AvatarImage";
 import { formatTimelineTime } from "./searchUtils";
@@ -16,14 +16,16 @@ interface HistoryDrawerProps {
   returnFocusRef: RefObject<HTMLButtonElement>;
   onClose: () => void;
   onClear: () => void;
+  onOpenEntry: (entry: SearchHistoryEntry) => void;
 }
 
 interface HistoryEntryRowProps {
   entry: SearchHistoryEntry;
   tabIndex: number;
+  onOpenEntry: (entry: SearchHistoryEntry) => void;
 }
 
-function HistoryEntryRow({ entry, tabIndex }: HistoryEntryRowProps) {
+function HistoryEntryRow({ entry, tabIndex, onOpenEntry }: HistoryEntryRowProps) {
   const timestamp = formatTimelineTime(entry.timestampSeconds);
   const [copied, setCopied] = useState(false);
 
@@ -45,7 +47,7 @@ function HistoryEntryRow({ entry, tabIndex }: HistoryEntryRowProps) {
   }, [copied]);
 
   return (
-    <li className="rounded-xl border border-gray-700 bg-gray-800/70 p-4">
+    <li className="relative isolate rounded-xl border border-gray-700 bg-gray-800/70 p-4">
       <div className="flex min-w-0 items-start gap-3">
         <AvatarImage
           src={entry.profileImageUrl}
@@ -58,21 +60,17 @@ function HistoryEntryRow({ entry, tabIndex }: HistoryEntryRowProps) {
             {entry.streamer}
           </p>
           <h3 className="mt-1 min-w-0 break-words text-base font-bold leading-tight text-white">
-            <a
-              href={entry.twitchUrlAtTimestamp}
-              target="_blank"
-              rel="noreferrer"
+            <button
+              type="button"
               tabIndex={tabIndex}
-              title={`Open on Twitch at ${timestamp}`}
-              className="group rounded-sm transition hover:text-gray-200 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#fb2844]"
+              onClick={() => onOpenEntry(entry)}
+              aria-label={`${entry.searchToken ? "Open search results" : "Search again"} for ${entry.streamTitle}`}
+              className="cursor-pointer text-left transition after:absolute after:inset-0 after:rounded-xl hover:text-gray-200 hover:underline hover:after:bg-white/5 focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-[#fb2844]"
             >
               {entry.streamTitle}
-              <ExternalLink
-                aria-hidden="true"
-                className="ml-1 inline size-4 align-[-0.125em] text-gray-400 transition group-hover:text-[#fb2844]"
-              />
-            </a>
+            </button>
           </h3>
+          {entry.searchToken === null ? <p className="mt-1 text-xs text-gray-400">Search again to view results</p> : null}
           <div className="mt-1 flex min-w-0 items-center gap-1">
             <p className="min-w-0 truncate text-sm text-gray-400" title={entry.source.kind === "link" ? entry.source.url : entry.source.filename}>
               {entry.source.kind === "link" ? displayClipUrl(entry.source.url) : entry.source.filename}
@@ -83,7 +81,7 @@ function HistoryEntryRow({ entry, tabIndex }: HistoryEntryRowProps) {
                 tabIndex={tabIndex}
                 onClick={handleCopyClipUrl}
                 aria-label={copied ? "Clip link copied" : "Copy clip link"}
-                className="flex size-7 shrink-0 items-center justify-center rounded-md text-gray-400 transition hover:bg-gray-700 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#fb2844]"
+                className="relative z-10 flex size-7 shrink-0 items-center justify-center rounded-md text-gray-400 transition hover:bg-gray-700 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#fb2844]"
               >
                 {copied ? (
                   <Check aria-hidden="true" className="size-3.5 text-emerald-400" />
@@ -107,7 +105,7 @@ function HistoryEntryRow({ entry, tabIndex }: HistoryEntryRowProps) {
   );
 }
 
-export function HistoryDrawer({ open, entries, returnFocusRef, onClose, onClear }: HistoryDrawerProps) {
+export function HistoryDrawer({ open, entries, returnFocusRef, onClose, onClear, onOpenEntry }: HistoryDrawerProps) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const wasOpenRef = useRef(false);
   const groups = groupSearchHistory(entries);
@@ -217,7 +215,7 @@ export function HistoryDrawer({ open, entries, returnFocusRef, onClose, onClear 
                   </h3>
                   <ul className="space-y-3">
                     {group.entries.map((entry) => (
-                      <HistoryEntryRow key={entry.id} entry={entry} tabIndex={tabIndex} />
+                      <HistoryEntryRow key={entry.id} entry={entry} tabIndex={tabIndex} onOpenEntry={onOpenEntry} />
                     ))}
                   </ul>
                 </section>

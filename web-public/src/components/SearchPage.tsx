@@ -134,6 +134,10 @@ export default function SearchPage() {
         returnFocusRef={historyButtonRef}
         onClose={() => setOpenPanel(null)}
         onClear={page.onClearHistory}
+        onOpenEntry={(entry) => {
+          page.onOpenHistory(entry);
+          setOpenPanel(null);
+        }}
       />
 
       <ShortcutDialog

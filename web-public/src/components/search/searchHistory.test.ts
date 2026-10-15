@@ -66,6 +66,7 @@ describe("createSearchHistoryEntry", () => {
 
     expect(entry).toMatchObject({
       id: "jasontheween::tiktok.com/t/ZP87",
+      searchToken: "A".repeat(43),
       source: { kind: "link", url: "https://www.tiktok.com/t/ZP87/?utm_source=share" },
       streamTitle: "Late Night Stream",
       twitchUrlAtTimestamp: "https://www.twitch.tv/videos/7?t=1h2m3s",
@@ -114,6 +115,7 @@ describe("search history storage", () => {
     for (let index = 0; index < MAX_SEARCH_HISTORY_ENTRIES + 3; index += 1) {
       addSearchHistoryEntry({
         id: `entry-${index}`,
+        searchToken: "A".repeat(43),
         searchedAt: `2026-09-${String((index % 9) + 1).padStart(2, "0")}T12:00:00.000Z`,
         source: { kind: "link", url: `https://tiktok.com/t/${index}` },
         streamer: "streamer",
@@ -149,6 +151,7 @@ describe("history display helpers", () => {
       },
     ].map((entry) => ({
       ...entry,
+      searchToken: null,
       source: { kind: "link" as const, url: "https://tiktok.com/t/abc" },
       streamer: "streamer",
       profileImageUrl: null,
@@ -171,7 +174,7 @@ it("migrates old URL history under the existing key and keeps upload identities 
   const legacy = { id: "legacy", searchedAt: "2026-10-01T12:00:00Z", tiktokUrl: "https://tiktok.com/t/abc", streamer: "jason", profileImageUrl: null,
     streamTitle: "Stream", twitchUrlAtTimestamp: "https://twitch.tv/videos/1?t=1s", timestampSeconds: 1, additionalMatchCount: 0 };
   window.localStorage.setItem(SEARCH_HISTORY_STORAGE_KEY, JSON.stringify([legacy]));
-  expect(readSearchHistory()[0]).toEqual({ id: "legacy", searchedAt: legacy.searchedAt, source: { kind: "link", url: legacy.tiktokUrl }, streamer: "jason", profileImageUrl: null,
+  expect(readSearchHistory()[0]).toEqual({ id: "legacy", searchToken: null, searchedAt: legacy.searchedAt, source: { kind: "link", url: legacy.tiktokUrl }, streamer: "jason", profileImageUrl: null,
     streamTitle: "Stream", twitchUrlAtTimestamp: legacy.twitchUrlAtTimestamp, timestampSeconds: 1, additionalMatchCount: 0 });
   for (const searchToken of ["A".repeat(43), "B".repeat(43)]) {
     const entry = createSearchHistoryEntry(matchedResult(), { kind: "upload", filename: "same-name.mp4" }, "2026-10-12T12:00:00Z", searchToken);
@@ -181,4 +184,28 @@ it("migrates old URL history under the existing key and keeps upload identities 
   const entries = readSearchHistory();
   expect(entries.map((entry) => entry.id)).toEqual([`upload::${"B".repeat(43)}`, `upload::${"A".repeat(43)}`, "legacy"]);
   expect(JSON.parse(window.localStorage.getItem(SEARCH_HISTORY_STORAGE_KEY) ?? "[]")).toEqual(entries);
+});
+
+it("persists the job token for reopening the complete result", () => {
+  const entry = createSearchHistoryEntry(matchedResult(), { kind: "link", url: "https://tiktok.com/t/abc" }, "2026-10-12T12:00:00Z", "B".repeat(43));
+  if (!entry) { throw new Error("Expected a usable match"); }
+  addSearchHistoryEntry(entry);
+  expect(readSearchHistory()[0].searchToken).toBe("B".repeat(43));
+  expect(createSearchHistoryEntry(matchedResult(), entry.source, entry.searchedAt, "invalid")).toBeNull();
+});
+
+it("validates persisted tokens and recovers only absent tokens from valid legacy upload identities", () => {
+  const entry = createSearchHistoryEntry(matchedResult(), { kind: "upload", filename: "moment.mp4" }, "2026-10-12T12:00:00Z", "A".repeat(43));
+  if (!entry) { throw new Error("Expected a usable match"); }
+  const { searchToken, ...legacy } = entry;
+  window.localStorage.setItem(SEARCH_HISTORY_STORAGE_KEY, JSON.stringify([
+    entry,
+    legacy,
+    { ...legacy, id: "upload::invalid" },
+    { ...legacy, source: { kind: "link", url: "https://tiktok.com/t/abc" } },
+    { ...entry, searchToken: "invalid" },
+    { ...entry, searchToken: null },
+    { ...entry, searchToken: 42 },
+  ]));
+  expect(readSearchHistory().map((saved) => saved.searchToken)).toEqual([searchToken, searchToken, null, null, null, null, null]);
 });

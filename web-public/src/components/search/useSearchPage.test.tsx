@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createSearchJob, getSearchJob, listSearchableStreamers } from "../../api/client";
 import { SearchJobResponse, SearchResponse } from "../../api/types";
 import { useSearchPage } from "./useSearchPage";
+import { createSearchHistoryEntry } from "./searchHistory";
 
 vi.mock("../../api/client", () => ({
   createSearchJob: vi.fn(),
@@ -214,6 +215,42 @@ describe("useSearchPage shared jobs", () => {
     vi.mocked(getSearchJob).mockResolvedValue(job());
     renderHook(() => useSearchPage());
     await waitFor(() => expect(getSearchJob).toHaveBeenCalledWith(searchToken));
+  });
+
+  it("restarts polling when reopening the same token and ignores the prior in-flight response", async () => {
+    window.history.replaceState(null, "", `/share#${searchToken}`);
+    let finishOldPoll: ((value: SearchJobResponse) => void) | undefined;
+    vi.mocked(getSearchJob).mockImplementationOnce(() => new Promise((resolve) => { finishOldPoll = resolve; }))
+      .mockResolvedValueOnce(job({ status: "completed", result: result() }));
+    const entry = createSearchHistoryEntry(result(), { kind: "link", url: tiktokUrl }, "2026-10-12T12:00:00Z", searchToken);
+    if (!entry) { throw new Error("Expected a saved result"); }
+    const { result: hook } = renderHook(() => useSearchPage());
+    await waitFor(() => expect(getSearchJob).toHaveBeenCalledOnce());
+    act(() => { hook.current.onOpenHistory(entry); });
+    await waitFor(() => expect(hook.current.result?.video_id).toBe(7));
+    expect(getSearchJob).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      finishOldPoll?.(job({ status: "failed", error: { code: "OLD", message: "Old poll failed" } }));
+    });
+    expect(hook.current.result?.video_id).toBe(7);
+    expect(hook.current.requestError).toBeNull();
+    expect(hook.current.completedSearchFeedback?.searchToken).toBe(searchToken);
+  });
+
+  it("clears date filters and preserves a saved supported streamer when the streamer list finishes loading", async () => {
+    let finishStreamers: ((value: Awaited<ReturnType<typeof listSearchableStreamers>>) => void) | undefined;
+    vi.mocked(listSearchableStreamers).mockImplementationOnce(() => new Promise((resolve) => { finishStreamers = resolve; }));
+    vi.mocked(getSearchJob).mockResolvedValue(job({ status: "completed", result: result() }));
+    const entry = createSearchHistoryEntry(result(), { kind: "link", url: tiktokUrl }, "2026-10-12T12:00:00Z", searchToken);
+    if (!entry) { throw new Error("Expected a saved result"); }
+    const { result: hook } = renderHook(() => useSearchPage());
+    act(() => { hook.current.onDateRangeChange("2026-10-01", "2026-10-12"); });
+    act(() => { hook.current.onOpenHistory(entry); });
+    expect(hook.current.streamedFrom).toBe("");
+    expect(hook.current.streamedTo).toBe("");
+    await act(async () => { finishStreamers?.([{ name: "jason", profile_image_url: null }]); });
+    expect(hook.current.streamer).toBe("jason");
+    expect(createSearchJob).not.toHaveBeenCalled();
   });
 });
 
