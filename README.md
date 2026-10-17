@@ -6,8 +6,6 @@ Find the original Twitch moments from a TikTok clip. VodHunter matches the clip'
 audio to a streamer's VODs and links you to the timestamps. It also works with
 edited clips that combine moments from multiple VODs.
 
-![VodHunter search result matching a TikTok clip to 07:32:17 in a jasontheween Twitch VOD](docs/images/matched-search.png)
-
 ## Find a moment
 
 1. Paste a TikTok link, choose a streamer, and click **Search**.

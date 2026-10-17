@@ -58,7 +58,25 @@ tmp/
 # Project data artifacts (generated at runtime)
 data/
 temp_live_chunks/
-experiments/fingerprint_benchmark/artifacts/
 
-# Docs
+# Local documentation, experiments, and notebooks
+docs/
+experiments/
+notebooks/
+*.ipynb
+.ipynb_checkpoints/
+[Rr][Ee][Aa][Dd][Mm][Ee]*
+!/README.md
 PRD.md
+
+# Temporary work and backup files
+temp/
+.tmp/
+scratch/
+.audit/
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
+*~

@@ -451,23 +451,31 @@ class VideoRepository:
         return self._video_from_row(row, with_creator=True)
 
     def list_searchable_streamers(self) -> list[SearchableStreamer]:
-        # An existence check can stop at the first indexed embedding for each
-        # creator instead of aggregating every fingerprint in the catalog.
+        # Both limits preserve correlated probes instead of allowing PostgreSQL
+        # to flatten them into a join over every fingerprint and embedding.
         with self.database.connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
                     SELECT c.name, c.profile_image_url
                     FROM creators c
+                    JOIN LATERAL (
+                        SELECT 1
+                        FROM videos v
+                        JOIN LATERAL (
+                            SELECT 1
+                            FROM fingerprints f
+                            JOIN fingerprint_embeddings fe
+                              ON fe.creator_id = v.creator_id
+                             AND fe.fingerprint_id = f.id
+                            WHERE f.video_id = v.id
+                            LIMIT 1
+                        ) indexed ON TRUE
+                        WHERE v.creator_id = c.id
+                          AND v.status IN ('indexing', 'searchable')
+                        LIMIT 1
+                    ) eligible ON TRUE
                     WHERE c.name IS NOT NULL AND BTRIM(c.name) <> ''
-                      AND EXISTS (
-                          SELECT 1
-                          FROM fingerprint_embeddings fe
-                          JOIN fingerprints f ON f.id = fe.fingerprint_id
-                          JOIN videos v ON v.id = f.video_id AND v.creator_id = fe.creator_id
-                          WHERE fe.creator_id = c.id
-                            AND v.status IN ('indexing', 'searchable')
-                      )
                     ORDER BY LOWER(c.name), c.name
                     """
                 )

@@ -150,9 +150,6 @@ class TestVideoRepository:
             SearchableStreamer(name='Jason', profile_image_url='https://cdn/jason.png'),
             SearchableStreamer(name='ronaldo', profile_image_url=None),
         ]
-        assert 'SELECT c.name, c.profile_image_url' in cursor.executed[0][0]
-        assert 'EXISTS' in cursor.executed[0][0]
-        assert 'WHERE fe.creator_id = c.id' in cursor.executed[0][0]
 
     def test_create_or_get_creator_upserts_profile_image_url(self) -> None:
         cursor = FakeCursor()
