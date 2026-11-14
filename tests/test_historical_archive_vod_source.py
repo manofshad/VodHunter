@@ -3,9 +3,10 @@ import subprocess
 import tempfile
 from dataclasses import replace
 from datetime import datetime, timezone
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 import pytest
 
+from services.twitch_monitor import TwitchMonitor
 from sources.historical_archive_vod_source import (
     HistoricalArchiveVODSource,
     parse_hls_media_playlist,
@@ -287,6 +288,60 @@ segment-2.ts
             source.next_chunk()
             assert source.ingest_cursor_seconds == 180
             assert source.is_finished
+
+    def test_discovery_duration_does_not_complete_a_growing_archive(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = FakeStore()
+            vod = {**self._make_vod(), 'duration_seconds': 10}
+            events: list[dict[str, object]] = []
+            monitor = Mock(spec=TwitchMonitor)
+            monitor.get_archive_vod_by_id.return_value = vod
+            monitor.is_live.return_value = True
+            monitor.get_latest_archive_vod.return_value = vod
+            source = HistoricalArchiveVODSource(
+                streamer='alice',
+                vod_metadata=vod,
+                videos=store,
+                ingest_states=FakeIngestStates(store),
+                creator_metadata={'id': 'user-1'},
+                chunk_seconds=60,
+                temp_dir=f'{tmp}/chunks',
+                progress_callback=events.append,
+            )
+            source.twitch_monitor = monitor
+            playlist = parse_hls_media_playlist(
+                """#EXTM3U
+#EXT-X-TARGETDURATION:10
+#EXTINF:10.0,
+segment-0.ts
+""",
+                'https://cdn.example.test/index.m3u8',
+            )
+
+            def fake_extract_chunk(start_seconds: float, duration_seconds: float) -> str:
+                out = os.path.join(source.temp_dir, 'chunk.wav')
+                with open(out, 'wb') as handle:
+                    handle.write(b'fake')
+                return out
+
+            with patch.object(source, '_extract_chunk', side_effect=fake_extract_chunk), patch.object(
+                source, '_load_media_playlist', return_value=playlist
+            ):
+                source.start()
+                chunk = source.next_chunk()
+                assert chunk is not None
+                assert chunk.offset_seconds == 0
+                assert chunk.duration_seconds == 10
+                assert store.vod_state['vod-1'].last_ingested_seconds == 0
+
+                assert source.next_chunk() is None
+
+            row = store.get_video_by_url(str(vod['url']))
+            assert row is not None
+            assert row.status.value == 'indexing'
+            assert store.vod_state['vod-1'].last_ingested_seconds == 10
+            assert not source.is_finished
+            assert all(event['event'] != 'vod_complete' for event in events)
 
     def test_finalize_marks_video_processed_and_clears_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
