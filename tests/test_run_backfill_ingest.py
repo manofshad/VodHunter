@@ -106,7 +106,7 @@ class FakeRepositories:
 
 class FakeSource:
 
-    def __init__(self, streamer, vod_metadata, videos, ingest_states, chunk_seconds, temp_dir, progress_callback=None, creator_metadata=None):
+    def __init__(self, streamer, vod_metadata, videos, ingest_states, chunk_seconds, temp_dir, twitch_monitor, progress_callback=None, creator_metadata=None):
         self.streamer = streamer
         self.vod_metadata = vod_metadata
         self.videos = videos
@@ -151,13 +151,16 @@ class TestRunBackfillIngest:
         logs: list[str] = []
         seen_vods: list[str] = []
         seen_creator_metadata: list[dict[str, str] | None] = []
+        seen_monitors: list[object] = []
 
         def source_factory(**kwargs):
             seen_vods.append(kwargs['vod_metadata']['id'])
             seen_creator_metadata.append(kwargs.get('creator_metadata'))
+            seen_monitors.append(kwargs['twitch_monitor'])
             return FakeSource(**kwargs)
         result = run_backfill_ingest('Alice', 7, monitor=monitor, build_storage=lambda: self._build_state(store), build_ingest=lambda: {'embedder': object()}, source_factory=source_factory, session_factory=FakeSession, out=logs.append)
         assert seen_vods == ['resume', 'fail']
+        assert seen_monitors == [monitor, monitor]
         assert seen_creator_metadata == [
             {
                 'id': 'user-1',

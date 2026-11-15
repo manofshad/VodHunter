@@ -1,11 +1,15 @@
+import io
 import os
 import subprocess
 import tempfile
 from dataclasses import replace
 from datetime import datetime, timezone
 from unittest.mock import Mock, patch
+import numpy as np
 import pytest
 
+from pipeline.ingest_session import IngestSession
+from runners.run_hybrid_ingest import _build_backlog
 from services.twitch_monitor import TwitchMonitor
 from sources.historical_archive_vod_source import (
     HistoricalArchiveVODSource,
@@ -134,7 +138,53 @@ class FakeIngestStates:
     def delete(self, vod_platform_id: str) -> None:
         self.store.delete_vod_ingest_state(vod_platform_id)
 
+    def list_pending(self, streamer: str):
+        return [state for state in self.store.vod_state.values() if state.streamer == streamer]
+
+
+@pytest.fixture
+def archive(tmp_path):
+    store = FakeStore()
+    vod = {'id': 'vod-1', 'url': 'https://www.twitch.tv/videos/vod-1', 'duration_seconds': 10}
+    monitor = Mock(spec=TwitchMonitor)
+    monitor.get_user_id.return_value = 'user-1'
+    monitor.get_archive_vod_by_id.return_value = vod
+    monitor.get_live_streamers.return_value = set()
+    events = []
+    source = HistoricalArchiveVODSource(
+        streamer='alice', vod_metadata=vod, videos=store,
+        ingest_states=FakeIngestStates(store), twitch_monitor=monitor,
+        temp_dir=str(tmp_path / 'chunks'), progress_callback=events.append,
+    )
+
+    def extract(start_seconds, duration_seconds):
+        path = os.path.join(source.temp_dir, f'{start_seconds}.wav')
+        with open(path, 'wb') as handle:
+            handle.write(b'fake')
+        return path
+
+    source._extract_chunk = Mock(side_effect=extract)
+    source._load_media_playlist = Mock(return_value=parse_hls_media_playlist(
+        '#EXTM3U\n#EXTINF:10,\nsegment.ts\n#EXT-X-ENDLIST\n',
+        'https://cdn.example.test/index.m3u8',
+    ))
+    return source, store, monitor, events
+
 class TestHistoricalArchiveVODSource:
+
+    def _make_monitor(self):
+        monitor = Mock(spec=TwitchMonitor)
+        monitor.get_user_id.return_value = 'user-1'
+        monitor.get_archive_vod_by_id.return_value = self._make_vod()
+        monitor.get_live_streamers.return_value = set()
+        return monitor
+
+    def _make_playlist(self, duration=180, *, endlist=True, media_sequence=0):
+        return parse_hls_media_playlist(
+            f'#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:{media_sequence}\n#EXTINF:{duration},\nsegment.ts\n'
+            + ('#EXT-X-ENDLIST\n' if endlist else ''),
+            'https://cdn.example.test/index.m3u8',
+        )
 
     def test_selects_only_overlapping_hls_segments_with_local_seek(self) -> None:
         playlist = parse_hls_media_playlist(
@@ -173,6 +223,7 @@ segment-3.ts
                 vod_metadata=self._make_vod(),
                 videos=store,
                 ingest_states=FakeIngestStates(store),
+                twitch_monitor=self._make_monitor(),
                 chunk_seconds=60,
                 temp_dir=f'{tmp}/chunks',
             )
@@ -243,6 +294,7 @@ segment-2.ts
             source = HistoricalArchiveVODSource(
                 streamer='alice', vod_metadata=self._make_vod(), videos=store,
                 ingest_states=FakeIngestStates(store),
+                twitch_monitor=self._make_monitor(),
                 creator_metadata={'profile_image_url': 'https://cdn/new-profile.png'},
                 temp_dir=f'{tmp}/chunks',
             )
@@ -262,7 +314,7 @@ segment-2.ts
             creator_id = store.create_or_get_creator('alice', 'https://twitch.tv/alice')
             video_id = store.create_video(creator_id=creator_id, url='https://www.twitch.tv/videos/vod-1', title='Old', thumbnail_url=None, processed=False)
             store.upsert_vod_ingest_state('vod-1', video_id, 'alice', 120, 180)
-            source = HistoricalArchiveVODSource(streamer='alice', vod_metadata=self._make_vod(), videos=store, ingest_states=FakeIngestStates(store), creator_metadata={'profile_image_url': 'https://cdn/alice.png'}, chunk_seconds=60, temp_dir=f'{tmp}/chunks')
+            source = HistoricalArchiveVODSource(streamer='alice', vod_metadata=self._make_vod(), videos=store, ingest_states=FakeIngestStates(store), twitch_monitor=self._make_monitor(), creator_metadata={'profile_image_url': 'https://cdn/alice.png'}, chunk_seconds=60, temp_dir=f'{tmp}/chunks')
 
             extraction_calls: list[tuple[float, float]] = []
 
@@ -285,7 +337,8 @@ segment-2.ts
             assert chunk.duration_seconds == 60.5
             assert extraction_calls == [(119.5, 60.5)]
             assert store.vod_state['vod-1'].last_ingested_seconds == 120
-            source.next_chunk()
+            with patch.object(source, '_load_media_playlist', return_value=self._make_playlist()):
+                source.next_chunk()
             assert source.ingest_cursor_seconds == 180
             assert source.is_finished
 
@@ -296,19 +349,19 @@ segment-2.ts
             events: list[dict[str, object]] = []
             monitor = Mock(spec=TwitchMonitor)
             monitor.get_archive_vod_by_id.return_value = vod
-            monitor.is_live.return_value = True
+            monitor.get_live_streamers.return_value = {'alice'}
             monitor.get_latest_archive_vod.return_value = vod
             source = HistoricalArchiveVODSource(
                 streamer='alice',
                 vod_metadata=vod,
                 videos=store,
                 ingest_states=FakeIngestStates(store),
+                twitch_monitor=monitor,
                 creator_metadata={'id': 'user-1'},
                 chunk_seconds=60,
                 temp_dir=f'{tmp}/chunks',
                 progress_callback=events.append,
             )
-            source.twitch_monitor = monitor
             playlist = parse_hls_media_playlist(
                 """#EXTM3U
 #EXT-X-TARGETDURATION:10
@@ -346,7 +399,7 @@ segment-0.ts
     def test_finalize_marks_video_processed_and_clears_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = FakeStore()
-            source = HistoricalArchiveVODSource(streamer='alice', vod_metadata=self._make_vod(), videos=store, ingest_states=FakeIngestStates(store), creator_metadata={'profile_image_url': 'https://cdn/alice.png'}, chunk_seconds=180, temp_dir=f'{tmp}/chunks')
+            source = HistoricalArchiveVODSource(streamer='alice', vod_metadata=self._make_vod(), videos=store, ingest_states=FakeIngestStates(store), twitch_monitor=self._make_monitor(), creator_metadata={'profile_image_url': 'https://cdn/alice.png'}, chunk_seconds=180, temp_dir=f'{tmp}/chunks')
 
             def fake_extract_chunk(start_seconds: int, duration_seconds: int) -> str:
                 out = os.path.join(source.temp_dir, f'chunk_{start_seconds}_{duration_seconds}.wav')
@@ -358,7 +411,8 @@ segment-0.ts
             source.start()
             assert 'vod-1' in store.vod_state
             source.next_chunk()
-            source.next_chunk()
+            with patch.object(source, '_load_media_playlist', return_value=self._make_playlist()):
+                source.next_chunk()
             row = store.get_video_by_url('https://www.twitch.tv/videos/vod-1')
             assert row is not None
             assert row is not None
@@ -385,6 +439,7 @@ segment-0.ts
                 vod_metadata=self._make_vod(),
                 videos=store,
                 ingest_states=FakeIngestStates(store),
+                twitch_monitor=self._make_monitor(),
                 creator_metadata={'profile_image_url': 'https://cdn/alice.png'},
                 chunk_seconds=60,
                 temp_dir=f'{tmp}/chunks',
@@ -412,6 +467,7 @@ segment-0.ts
                 vod_metadata=self._make_vod(),
                 videos=store,
                 ingest_states=FakeIngestStates(store),
+                twitch_monitor=self._make_monitor(),
                 creator_metadata={'profile_image_url': 'https://cdn/alice.png'},
                 chunk_seconds=60,
                 temp_dir=f'{tmp}/chunks',
@@ -434,3 +490,298 @@ segment-0.ts
             source.stop()
 
             assert store.vod_state['vod-1'].last_ingested_seconds == 0
+
+    def test_session_indexes_a_growing_tail_and_finishes_only_after_coverage(self, archive) -> None:
+        source, store, monitor, events = archive
+        source.completion_poll_seconds = 0
+        initial = dict(source.vod_metadata)
+        grown = {**initial, 'duration_seconds': 180}
+        monitor.get_archive_vod_by_id.side_effect = [initial, grown, grown]
+        monitor.get_live_streamers.side_effect = [{'alice'}, set(), set()]
+        monitor.get_latest_archive_vod.return_value = initial
+        source._load_media_playlist.side_effect = [
+            self._make_playlist(10, endlist=False),
+            self._make_playlist(180),
+            self._make_playlist(180),
+        ]
+        written_offsets = []
+
+        class Embedder:
+            def embed(self, audio_path, offset_seconds=0):
+                return np.ones((1, 2)), np.array([offset_seconds])
+
+        class Fingerprints:
+            def store_fingerprints(self, video_id, timestamps):
+                written_offsets.extend(timestamps.tolist())
+                return [len(written_offsets)]
+
+            def append_vectors(self, embeddings, ids, creator_id):
+                pass
+
+        def waiting_for_tail(_seconds):
+            assert store.get_video_status(source.video_id) == 'indexing'
+            assert store.vod_state['vod-1'].last_ingested_seconds == 10
+            monitor.list_archive_vods_since.return_value = [initial]
+            backlog = _build_backlog(
+                twitch_monitor=monitor, videos=store, ingest_states=source.ingest_states,
+                streamer='alice', user_id='user-1', days=1,
+                skipped_vods_logged=set(), out=lambda _line: None,
+            )
+            assert len(backlog) == 1
+            assert backlog[0].existing_state.last_ingested_seconds == 10
+
+        with patch('pipeline.ingest_session.time.sleep', side_effect=waiting_for_tail) as sleep:
+            IngestSession(source, Embedder(), Fingerprints(), poll_interval=0).run()
+
+        assert sleep.call_count == 1
+        assert written_offsets == [0, 9.5, 69.5, 129.5]
+        assert store.get_video_status(source.video_id) == 'searchable'
+        assert 'vod-1' not in store.vod_state
+        assert [event['event'] for event in events].count('vod_complete') == 1
+        assert events[-1]['duration_seconds'] == 180
+
+    @pytest.mark.parametrize('endlist,live,latest', [
+        (False, False, None), (True, True, 'vod-1'), (True, True, None),
+    ])
+    def test_incomplete_evidence_yields_and_paces_checks(self, archive, endlist, live, latest) -> None:
+        source, store, monitor, events = archive
+        monitor.get_live_streamers.return_value = {'alice'} if live else set()
+        monitor.get_latest_archive_vod.return_value = {'id': latest} if latest else None
+        source._load_media_playlist.return_value = self._make_playlist(10, endlist=endlist)
+        with patch('sources.historical_archive_vod_source.time.monotonic', return_value=100) as now, patch(
+            'sources.historical_archive_vod_source.time.sleep', side_effect=AssertionError('source slept')
+        ):
+            source.start()
+            assert source.next_chunk() is not None
+            for _ in range(100):
+                assert source.next_chunk() is None
+            assert monitor.get_archive_vod_by_id.call_count == 1
+            assert source._load_media_playlist.call_count == 1
+            now.return_value = 115
+            assert source.next_chunk() is None
+            assert monitor.get_archive_vod_by_id.call_count == 2
+
+        assert not source.is_finished
+        assert store.get_video_status(source.video_id) == 'indexing'
+        assert store.vod_state['vod-1'].last_ingested_seconds == 10
+        assert all(event['event'] != 'vod_complete' for event in events)
+
+    def test_old_closed_archive_completes_while_another_archive_is_live(self, archive) -> None:
+        source, store, monitor, events = archive
+        monitor.get_live_streamers.return_value = {'alice'}
+        monitor.get_archive_vod_by_id.return_value = {
+            **source.vod_metadata, 'created_at': '2026-11-14T01:00:00Z',
+        }
+        monitor.get_latest_archive_vod.return_value = {
+            'id': 'new-vod', 'created_at': '2026-11-15T01:00:00Z',
+        }
+        source.start()
+        source.next_chunk()
+        assert source.next_chunk() is None
+        assert source.is_finished
+        assert store.get_video_status(source.video_id) == 'searchable'
+        assert 'vod-1' not in store.vod_state
+        monitor.get_archive_vod_by_id.assert_called_with('vod-1', expected_user_id='user-1')
+        monitor.get_user_id.assert_called_once_with('alice')
+        monitor.is_live.assert_not_called()
+
+    @pytest.mark.parametrize('target_created,latest_created', [
+        ('2026-11-15T01:00:00Z', '2026-11-14T01:00:00Z'),
+        ('2026-11-15T01:00:00Z', '2026-11-15T01:00:00Z'),
+        ('2026-11-15T01:00:00Z', None),
+        ('2026-11-15T01:00:00Z', 'invalid'),
+        ('2026-11-15T01:00:00Z', '2026-11-16T01:00:00'),
+        (None, '2026-11-16T01:00:00Z'),
+        ('invalid', '2026-11-16T01:00:00Z'),
+    ])
+    def test_live_archive_listing_must_prove_the_target_is_older(self, archive, target_created, latest_created) -> None:
+        source, store, monitor, events = archive
+        monitor.get_live_streamers.return_value = {'alice'}
+        monitor.get_archive_vod_by_id.return_value = {
+            **source.vod_metadata, 'created_at': target_created,
+        }
+        monitor.get_latest_archive_vod.return_value = {
+            'id': 'different-vod', 'created_at': latest_created,
+        }
+        source.start()
+        source.next_chunk()
+        assert source.next_chunk() is None
+        assert store.get_video_status(source.video_id) == 'indexing'
+        assert store.vod_state['vod-1'].last_ingested_seconds == 10
+        assert not source.is_finished
+        assert all(event['event'] != 'vod_complete' for event in events)
+
+    def test_closed_playlist_can_extend_stale_metadata_and_floors_fractional_tail(self, archive) -> None:
+        source, store, monitor, events = archive
+        source.completion_poll_seconds = 0
+        source._load_media_playlist.return_value = self._make_playlist(30.9)
+        source.start()
+        first = source.next_chunk()
+        tail = source.next_chunk()
+        assert first.duration_seconds == 10
+        assert tail.offset_seconds == 9.5
+        assert tail.duration_seconds == 20.5
+        assert store.vod_state['vod-1'].last_ingested_seconds == 10
+        assert store.vod_state['vod-1'].last_seen_duration_seconds == 30
+        assert source.next_chunk() is None
+        assert store.get_video_status(source.video_id) == 'searchable'
+        assert events[-1]['duration_seconds'] == 30
+
+    @pytest.mark.parametrize('cursor,observed', [(30, 60), (60, 30)])
+    def test_resume_never_rewinds_known_cursor_or_extent(self, archive, cursor, observed) -> None:
+        source, store, monitor, events = archive
+        creator_id = store.create_or_get_creator('alice', 'https://twitch.tv/alice')
+        video_id = store.create_video(creator_id, source.current_vod_url, 'Old', False)
+        store.upsert_vod_ingest_state('vod-1', video_id, 'alice', cursor, observed)
+        source.start()
+        assert source.ingest_cursor_seconds == cursor
+        assert store.vod_state['vod-1'].last_seen_duration_seconds == 60
+        if cursor == 30:
+            chunk = source.next_chunk()
+            assert chunk.offset_seconds == 29.5
+        assert source.next_chunk() is None
+        assert store.vod_state['vod-1'].last_ingested_seconds == 60
+        assert store.vod_state['vod-1'].last_seen_duration_seconds == 60
+        assert store.get_video_status(video_id) == 'indexing'
+        assert not source.is_finished
+
+    @pytest.mark.parametrize('failure', ['lookup', 'manifest', 'live', 'missing', 'persist'])
+    def test_completion_failure_retains_committed_progress(self, archive, failure) -> None:
+        source, store, monitor, events = archive
+        source.start()
+        source.next_chunk()
+        if failure == 'lookup':
+            monitor.get_archive_vod_by_id.side_effect = RuntimeError('lookup failed')
+        elif failure == 'manifest':
+            source._load_media_playlist.side_effect = RuntimeError('manifest failed')
+        elif failure == 'live':
+            monitor.get_live_streamers.side_effect = RuntimeError('live lookup failed')
+        elif failure == 'missing':
+            monitor.get_archive_vod_by_id.return_value = None
+        else:
+            source.ingest_states.upsert = Mock(side_effect=RuntimeError('save failed'))
+        with pytest.raises(RuntimeError):
+            source.next_chunk()
+        assert store.get_video_status(source.video_id) == 'indexing'
+        assert store.vod_state['vod-1'].last_ingested_seconds == (0 if failure == 'persist' else 10)
+        assert source.ingest_cursor_seconds == (0 if failure == 'persist' else 10)
+        assert not source.is_finished
+        assert all(event['event'] != 'vod_complete' for event in events)
+
+    def test_failed_tail_extraction_retains_preceding_chunk(self, archive) -> None:
+        source, store, monitor, events = archive
+        source.start()
+        source.next_chunk()
+        monitor.get_archive_vod_by_id.return_value = {**source.vod_metadata, 'duration_seconds': 60}
+        source._load_media_playlist.return_value = self._make_playlist(60)
+        source._extract_chunk.side_effect = RuntimeError('extraction failed')
+        with pytest.raises(RuntimeError, match='extraction failed'):
+            source.next_chunk()
+        assert store.vod_state['vod-1'].last_ingested_seconds == 10
+        assert store.vod_state['vod-1'].last_seen_duration_seconds == 60
+        assert store.get_video_status(source.video_id) == 'indexing'
+
+    @pytest.mark.parametrize('observed_duration', [10, 20])
+    def test_rolling_playlist_cannot_supply_a_growing_tail(self, archive, observed_duration) -> None:
+        source, store, monitor, events = archive
+        source.completion_poll_seconds = 0
+        del source._load_media_playlist
+        monitor.get_archive_vod_by_id.return_value = {
+            **source.vod_metadata, 'duration_seconds': observed_duration,
+        }
+        rolling = b'#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:100\n#EXTINF:10,\n100.ts\n#EXTINF:10,\n101.ts\n#EXT-X-ENDLIST\n'
+        full = b'#EXTM3U\n#EXTINF:10,\n0.ts\n#EXTINF:10,\n1.ts\n#EXT-X-ENDLIST\n'
+        source.start()
+        source.next_chunk()
+        with patch.object(source, '_resolve_media_url', return_value='https://cdn.example.test/index.m3u8'), patch(
+            'sources.historical_archive_vod_source.urllib.request.urlopen',
+            side_effect=[io.BytesIO(rolling), io.BytesIO(full), io.BytesIO(full)],
+        ):
+            with pytest.raises(RuntimeError, match='origin'):
+                source.next_chunk()
+            assert source._extract_chunk.call_count == 1
+            assert store.get_video_status(source.video_id) == 'indexing'
+            assert store.vod_state['vod-1'].last_ingested_seconds == 10
+            assert not source.is_finished
+            assert source._media_playlist is None
+
+            tail = source.next_chunk()
+            assert tail.offset_seconds == 9.5
+            assert tail.duration_seconds == 10.5
+            assert source.next_chunk() is None
+
+        assert store.get_video_status(source.video_id) == 'searchable'
+        assert 'vod-1' not in store.vod_state
+        assert source.is_finished
+
+    def test_initial_rolling_playlist_is_rejected_before_audio_extraction(self, archive) -> None:
+        source, store, monitor, events = archive
+        del source._extract_chunk
+        del source._load_media_playlist
+        rolling = b'#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:100\n#EXTINF:10,\n100.ts\n#EXT-X-ENDLIST\n'
+        source.start()
+        with patch.object(source, '_resolve_media_url', return_value='https://cdn.example.test/index.m3u8'), patch(
+            'sources.historical_archive_vod_source.urllib.request.urlopen',
+            side_effect=lambda *_args, **_kwargs: io.BytesIO(rolling),
+        ), patch(
+            'sources.historical_archive_vod_source.subprocess.run',
+            side_effect=AssertionError('rolling playlist reached ffmpeg'),
+        ) as ffmpeg:
+            with pytest.raises(RuntimeError, match='origin'):
+                source.next_chunk()
+        ffmpeg.assert_not_called()
+        assert source._media_playlist is None
+        assert store.vod_state['vod-1'].last_ingested_seconds == 0
+        assert store.get_video_status(source.video_id) == 'indexing'
+
+    def test_subset_endlist_does_not_change_original_playlist_finality(self) -> None:
+        playlist = self._make_playlist(10, endlist=False)
+        selection = select_hls_chunk(playlist, 0, 10)
+        assert '#EXT-X-ENDLIST' in selection.manifest
+        assert not playlist.endlist
+        assert playlist.duration_seconds == 10
+
+    def test_completion_refresh_reloads_and_revalidates_the_original_manifest(self, archive) -> None:
+        source, store, monitor, events = archive
+        del source._load_media_playlist
+        source._media_playlist = self._make_playlist(10)
+        response = Mock()
+        response.read.return_value = b'#EXTM3U\n#EXTINF:30,\ntail.ts\n'
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        with patch.object(source, '_resolve_media_url', return_value='https://cdn.example.test/index.m3u8') as resolve, patch(
+            'sources.historical_archive_vod_source.urllib.request.urlopen', return_value=response,
+        ) as urlopen:
+            playlist = source._load_media_playlist(force_refresh=True)
+        assert playlist.duration_seconds == 30
+        assert not playlist.endlist
+        resolve.assert_called_once_with(force_refresh=True)
+        request = urlopen.call_args.args[0]
+        assert request.full_url == 'https://cdn.example.test/index.m3u8'
+        assert request.get_header('Cache-control') == 'no-cache'
+        assert request.get_header('Pragma') == 'no-cache'
+
+    @pytest.mark.parametrize('status', ['deleted', 'unavailable', 'reindex_requested'])
+    def test_terminal_status_cannot_be_finalized(self, archive, status) -> None:
+        source, store, monitor, events = archive
+        source.start()
+        source.next_chunk()
+        store.update_video_status(source.video_id, status)
+        with pytest.raises(RuntimeError, match='outside indexing status'):
+            source.next_chunk()
+        assert store.get_video_status(source.video_id) == status
+        assert 'vod-1' in store.vod_state
+        assert not source.is_finished
+        assert all(event['event'] != 'vod_complete' for event in events)
+
+    def test_searchable_video_is_not_reopened(self, archive) -> None:
+        source, store, monitor, events = archive
+        creator_id = store.create_or_get_creator('alice', 'https://twitch.tv/alice')
+        video_id = store.create_video(creator_id, source.current_vod_url, 'Done', True)
+        source.start()
+        assert source.next_chunk() is None
+        assert source.is_finished
+        assert store.get_video_status(video_id) == 'searchable'
+        assert 'vod-1' not in store.vod_state
+        assert not os.path.exists(source.temp_dir)
+        assert events == []

@@ -4,13 +4,14 @@ import subprocess
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from math import ceil
+from math import ceil, floor
 import re
 from typing import Any, Callable, Optional
 import urllib.parse
 import urllib.request
 
 from pipeline.nmfp_inference import NMFP_HOP_SECONDS, NMFP_SAMPLE_RATE
+from services.twitch_monitor import TwitchMonitor
 from sources.audio_chunk import AudioChunk
 from sources.audio_source import AudioSource
 from storage.ingest_state_repository import IngestStateRepository
@@ -41,6 +42,11 @@ class HLSMediaPlaylist:
     media_sequence: int
     target_duration: int
     segments: tuple[HLSSegment, ...]
+    endlist: bool
+
+    @property
+    def duration_seconds(self) -> float:
+        return self.segments[-1].end_seconds
 
 
 @dataclass(frozen=True)
@@ -71,6 +77,7 @@ def parse_hls_media_playlist(manifest: str, playlist_url: str) -> HLSMediaPlayli
     pending_discontinuity = False
     active_key: str | None = None
     active_map: str | None = None
+    endlist = False
     segments: list[HLSSegment] = []
 
     for raw_line in manifest.splitlines():
@@ -91,6 +98,8 @@ def parse_hls_media_playlist(manifest: str, playlist_url: str) -> HLSMediaPlayli
             pending_byte_range = line
         elif line == "#EXT-X-DISCONTINUITY":
             pending_discontinuity = True
+        elif line == "#EXT-X-ENDLIST":
+            endlist = True
         elif line.startswith("#EXTINF:"):
             pending_duration = float(line.split(":", 1)[1].split(",", 1)[0])
         elif not line.startswith("#") and pending_duration is not None:
@@ -122,6 +131,7 @@ def parse_hls_media_playlist(manifest: str, playlist_url: str) -> HLSMediaPlayli
         media_sequence=media_sequence,
         target_duration=target_duration,
         segments=tuple(segments),
+        endlist=endlist,
     )
 
 
@@ -186,12 +196,17 @@ class HistoricalArchiveVODSource(AudioSource):
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
         extract_timeout_seconds: float = 180.0,
         metadata_timeout_seconds: float = 30.0,
+        *,
+        twitch_monitor: TwitchMonitor,
+        completion_poll_seconds: float = 15.0,
     ):
         self.streamer = streamer.strip().lower()
         self.vod_metadata = dict(vod_metadata)
         self.creator_metadata = dict(creator_metadata or {})
         self.videos = videos
         self.ingest_states = ingest_states
+        self.twitch_monitor = twitch_monitor
+        self.completion_poll_seconds = max(0.0, float(completion_poll_seconds))
         self.chunk_seconds = int(chunk_seconds)
         self.temp_dir = temp_dir
         self.progress_callback = progress_callback
@@ -210,6 +225,7 @@ class HistoricalArchiveVODSource(AudioSource):
         self._media_url: str | None = None
         self._media_url_resolved_at = 0.0
         self._media_playlist: HLSMediaPlaylist | None = None
+        self._next_completion_check_at = 0.0
 
         self._vod_platform_id = str(self.vod_metadata.get("id", "")).strip()
         self.current_vod_url = str(self.vod_metadata.get("url", "")).strip()
@@ -236,8 +252,15 @@ class HistoricalArchiveVODSource(AudioSource):
             raise ValueError("vod duration_seconds must be positive")
 
         existing_video = self.videos.get_video_by_url(self.current_vod_url)
-        if existing_video is not None and existing_video.status is VideoStatus.UNAVAILABLE:
-            raise RuntimeError(f"VOD source is unavailable: {self._vod_platform_id}")
+        if existing_video is not None:
+            if existing_video.status in {VideoStatus.UNAVAILABLE, VideoStatus.DELETED}:
+                raise RuntimeError(f"VOD source is {existing_video.status.value}: {self._vod_platform_id}")
+            if existing_video.status is VideoStatus.SEARCHABLE:
+                self.video_id = existing_video.id
+                self._creator_id = existing_video.creator_id
+                self._started = True
+                self._finished = True
+                return
 
         os.makedirs(self.temp_dir, exist_ok=True)
         self._started = True
@@ -278,6 +301,12 @@ class HistoricalArchiveVODSource(AudioSource):
 
         state = self.ingest_states.get(self._vod_platform_id)
         self.ingest_cursor_seconds = state.last_ingested_seconds if state else 0
+        if state is not None:
+            self._duration_seconds = max(
+                self._duration_seconds,
+                state.last_seen_duration_seconds,
+                self.ingest_cursor_seconds,
+            )
         self._save_ingest_state()
 
     def next_chunk(self) -> Optional[AudioChunk]:
@@ -289,8 +318,14 @@ class HistoricalArchiveVODSource(AudioSource):
         self._commit_pending_progress()
 
         if self.ingest_cursor_seconds >= self._duration_seconds:
-            self._finalize()
-            return None
+            if time.monotonic() < self._next_completion_check_at:
+                return None
+            self._next_completion_check_at = time.monotonic() + self.completion_poll_seconds
+            complete = self._refresh_completion_evidence()
+            if self.ingest_cursor_seconds >= self._duration_seconds:
+                if complete:
+                    self._finalize()
+                return None
 
         chunk_len = min(self.chunk_seconds, self._duration_seconds - self.ingest_cursor_seconds)
         self._emit_progress(
@@ -440,13 +475,19 @@ class HistoricalArchiveVODSource(AudioSource):
             return self._media_playlist
 
         media_url = self._resolve_media_url(force_refresh=force_refresh)
+        request = urllib.request.Request(
+            media_url,
+            headers={"Cache-Control": "no-cache", "Pragma": "no-cache"} if force_refresh else {},
+        )
         try:
-            with urllib.request.urlopen(media_url, timeout=self.metadata_timeout_seconds) as response:
+            with urllib.request.urlopen(request, timeout=self.metadata_timeout_seconds) as response:
                 manifest = response.read().decode("utf-8", errors="replace")
         except (OSError, TimeoutError) as exc:
             raise RuntimeError(f"Failed to download Twitch HLS playlist: {exc}") from exc
 
         playlist = parse_hls_media_playlist(manifest, media_url)
+        if playlist.media_sequence != 0:
+            raise RuntimeError("Twitch HLS playlist does not start at the VOD origin")
         self._media_playlist = playlist
         return playlist
 
@@ -507,29 +548,73 @@ class HistoricalArchiveVODSource(AudioSource):
         if self._pending_commit_end_seconds is None:
             return
 
-        self.ingest_cursor_seconds = int(self._pending_commit_end_seconds)
+        self._save_ingest_state(cursor_seconds=self._pending_commit_end_seconds)
+        self.ingest_cursor_seconds = self._pending_commit_end_seconds
         self._pending_commit_end_seconds = None
-        self._save_ingest_state()
 
         if self._pending_chunk_path and os.path.exists(self._pending_chunk_path):
             os.remove(self._pending_chunk_path)
         self._pending_chunk_path = None
 
-    def _save_ingest_state(self) -> None:
+    def _save_ingest_state(self, *, cursor_seconds: int | None = None) -> None:
         if self.video_id is None:
             return
         self.ingest_states.upsert(
             vod_platform_id=self._vod_platform_id,
             video_id=self.video_id,
             streamer=self.streamer,
-            last_ingested_seconds=self.ingest_cursor_seconds,
+            last_ingested_seconds=self.ingest_cursor_seconds if cursor_seconds is None else cursor_seconds,
             last_seen_duration_seconds=self._duration_seconds,
         )
 
+    def _refresh_completion_evidence(self) -> bool:
+        user_id = str(self.creator_metadata.get("id") or "").strip()
+        if not user_id:
+            user_id = self.twitch_monitor.get_user_id(self.streamer)
+            self.creator_metadata["id"] = user_id
+        vod = self.twitch_monitor.get_archive_vod_by_id(
+            self._vod_platform_id, expected_user_id=user_id,
+        )
+        if vod is None:
+            raise RuntimeError(f"Twitch archive metadata is missing: {self._vod_platform_id}")
+        self._duration_seconds = max(self._duration_seconds, int(vod["duration_seconds"]))
+        self._save_ingest_state()
+
+        playlist = self._load_media_playlist(force_refresh=True)
+        playlist_duration = floor(playlist.duration_seconds)
+        self._duration_seconds = max(self._duration_seconds, playlist_duration)
+        self._save_ingest_state()
+
+        live_streamers = self.twitch_monitor.get_live_streamers([self.streamer])
+        if self.streamer in live_streamers:
+            latest = self.twitch_monitor.get_latest_archive_vod(user_id)
+            if latest is None or not latest.get("id") or str(latest["id"]) == self._vod_platform_id:
+                return False
+            try:
+                target_created = datetime.fromisoformat(str(vod.get("created_at") or "").replace("Z", "+00:00"))
+                latest_created = datetime.fromisoformat(str(latest.get("created_at") or "").replace("Z", "+00:00"))
+            except ValueError:
+                return False
+            if (
+                target_created.utcoffset() is None
+                or latest_created.utcoffset() is None
+                or latest_created <= target_created
+            ):
+                return False
+        return playlist.endlist and playlist_duration >= self._duration_seconds
+
     def _finalize(self) -> None:
-        self._commit_pending_progress()
-        if self.video_id is not None:
-            self.videos.update_video_status(self.video_id, VideoStatus.SEARCHABLE)
+        state = self.ingest_states.get(self._vod_platform_id)
+        if (
+            state is None
+            or state.video_id != self.video_id
+            or state.streamer != self.streamer
+            or state.last_ingested_seconds < self._duration_seconds
+        ):
+            raise RuntimeError("Cannot complete VOD without persisted coverage")
+        if self.videos.get_video_status(self.video_id) != VideoStatus.INDEXING:
+            raise RuntimeError("Cannot complete VOD outside indexing status")
+        self.videos.update_video_status(self.video_id, VideoStatus.SEARCHABLE)
         self.ingest_states.delete(self._vod_platform_id)
         self._finished = True
         self._emit_progress(
