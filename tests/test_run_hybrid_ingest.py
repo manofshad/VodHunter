@@ -458,12 +458,16 @@ class TestRunHybridIngest:
             if line == "completed mode=backlog vod=newest url=https://www.twitch.tv/videos/newest":
                 stop_flag["done"] = True
 
+        def historical_source_factory(**kwargs):
+            assert kwargs['twitch_monitor'] is monitor
+            return FakeSource(**kwargs)
+
         result = run_hybrid_ingest(
             "alice",
             monitor=monitor,
             build_storage=lambda: FakeRepositories(store),
             build_ingest=lambda: {"embedder": object()},
-            historical_source_factory=FakeSource,
+            historical_source_factory=historical_source_factory,
             live_source_factory=FakeSource,
             session_factory=HybridSessionFactory(),
             out=out,
@@ -909,11 +913,15 @@ class TestRunHybridIngest:
 
         class BlockingLiveSession(FakeLiveSession):
             started = threading.Event()
+            stopped = threading.Event()
 
             def run(self) -> None:
                 BlockingLiveSession.started.set()
-                while not stop_flag["done"]:
-                    time.sleep(0.01)
+                assert BlockingLiveSession.stopped.wait(timeout=5.0)
+
+            def stop(self) -> None:
+                super().stop()
+                BlockingLiveSession.stopped.set()
 
         class StopAwareFactory:
             def __call__(self, source, embedder, fingerprints, poll_interval):
@@ -947,6 +955,7 @@ class TestRunHybridIngest:
         )
         stopper.join(timeout=1.0)
 
+        assert FakeLiveSession.stop_calls == 1
         assert result.handoffs_to_backlog == 0
         assert not any(line == "handoff event=live_to_backlog streamer=alice" for line in logs)
 

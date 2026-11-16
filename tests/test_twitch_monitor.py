@@ -124,3 +124,8 @@ class TestTwitchMonitor:
         assert monitor.is_live('jasontheween') is False
         assert monitor.is_live('stableronaldo') is True
         assert base.calls == [('jasontheween', 'stableronaldo')]
+
+        assert monitor.get_live_streamers(['jasontheween']) == {'stableronaldo'}
+        assert base.calls == [('jasontheween', 'stableronaldo'), ('jasontheween',)]
+        assert monitor.is_live('stableronaldo') is True
+        assert len(base.calls) == 2

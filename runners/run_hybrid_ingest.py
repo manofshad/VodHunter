@@ -480,6 +480,7 @@ def _run_backlog_session(
     source = historical_source_factory(
         streamer=streamer,
         vod_metadata=vod,
+        twitch_monitor=twitch_monitor,
         creator_metadata=creator_metadata,
         videos=videos,
         ingest_states=ingest_states,
