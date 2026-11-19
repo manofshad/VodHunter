@@ -1,5 +1,10 @@
 import threading
 import time
+import io
+import json
+import socket
+import urllib.error
+import urllib.parse
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
@@ -16,6 +21,7 @@ from runners.run_hybrid_ingest import (
     run_multi_streamer_ingest,
 )
 from storage.records import VodIngestStateRecord, VideoRecord, VideoStatus
+from services.twitch_monitor import TwitchMonitor
 
 
 class FakeMonitor:
@@ -1126,6 +1132,62 @@ class TestRunHybridIngest:
             assert state["embedder"] is embedder
             assert state["live_embedder"].priority == LIVE_PRIORITY  # type: ignore[union-attr]
             assert state["backlog_embedder"].priority == BACKLOG_PRIORITY  # type: ignore[union-attr]
+
+    def test_archive_dns_failure_recovers_while_other_streamer_keeps_polling(self) -> None:
+        class Embedder:
+            load_calls = 0
+
+            def load(self):
+                self.load_calls += 1
+                return 0
+
+        monitor = TwitchMonitor("client", "secret")
+        monitor._access_token = "token"
+        archives = {"jasontheween": 0, "stableronaldo": 0}
+        logs = []
+        healthy_polled = threading.Event()
+        deadline = time.monotonic() + 1.0
+
+        def request(req, **kwargs):
+            parsed = urllib.parse.urlparse(req.full_url)
+            query = urllib.parse.parse_qs(parsed.query)
+            if parsed.path.endswith("/users"):
+                streamer = query["login"][0]
+                payload = {"data": [{"id": streamer, "login": streamer}]}
+            elif parsed.path.endswith("/streams"):
+                payload = {"data": []}
+            else:
+                streamer = query["user_id"][0]
+                archives[streamer] += 1
+                if streamer == "jasontheween" and archives[streamer] == 1:
+                    assert healthy_polled.wait(0.5)
+                    raise urllib.error.URLError(socket.gaierror(-3, "Temporary failure in name resolution"))
+                if streamer == "stableronaldo":
+                    healthy_polled.set()
+                payload = {"data": []}
+            return io.BytesIO(json.dumps(payload).encode())
+
+        def controller(streamer, days, **kwargs):
+            return run_hybrid_ingest(
+                streamer, days, **kwargs,
+                watch_poll_seconds=0.001, retry_seconds=0.001,
+            )
+
+        embedder = Embedder()
+        with patch("urllib.request.urlopen", side_effect=request):
+            run_multi_streamer_ingest(
+                ["jasontheween", "stableronaldo"], monitor=monitor,
+                build_storage=lambda: FakeRepositories(FakeStore()),
+                build_ingest=lambda: {"embedder": embedder},
+                controller=controller, out=logs.append,
+                should_stop=lambda: (
+                    archives["jasontheween"] >= 2 and archives["stableronaldo"] >= 2
+                ) or time.monotonic() >= deadline,
+            )
+
+        assert archives["jasontheween"] >= 2, archives
+        assert archives["stableronaldo"] >= 2, archives
+        assert embedder.load_calls == 1
 
     def test_normalize_streamers_accepts_repeated_and_csv_values(self) -> None:
         assert _normalize_streamers(
