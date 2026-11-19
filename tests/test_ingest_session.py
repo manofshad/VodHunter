@@ -45,6 +45,18 @@ class FakeStore:
 
 class TestIngestSession:
 
+    def test_startup_failure_stops_partially_started_source(self) -> None:
+        class FailingSource(FakeSource):
+            def start(self):
+                self.started = True
+                raise TimeoutError("metadata request timed out")
+
+        source = FailingSource()
+        session = IngestSession(source, FakeEmbedder(), FakeStore())
+        with pytest.raises(TimeoutError):
+            session.run()
+        assert source.stopped
+
     def test_append_vectors_receives_creator_id(self) -> None:
         source = FakeSource()
         store = FakeStore()

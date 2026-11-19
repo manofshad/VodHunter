@@ -45,9 +45,9 @@ class IngestSession:
         Main ingest loop.
         """
         self._running = True
-        self.source.start()
 
         try:
+            self.source.start()
             while self._running:
                 chunk = self.source.next_chunk()
 

@@ -2,6 +2,7 @@ import os
 import tempfile
 import numpy as np
 import pytest
+from unittest.mock import patch
 from dataclasses import replace
 from datetime import datetime, timezone
 from pipeline.nmfp_inference import segment_audio_windows
@@ -202,6 +203,32 @@ class FakeIngestStates:
         self.store.delete_vod_ingest_state(vod_platform_id)
 
 class TestLiveArchiveVODSource:
+
+    def test_failed_metadata_refresh_does_not_emit_a_successful_poll(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = self._make_source(tmp, live_sequence=[True, True])
+            source.start()
+            successful_poll = source.last_successful_poll_at
+            assert successful_poll is not None
+            with patch.object(source.twitch_monitor, 'get_latest_archive_vod', side_effect=TimeoutError):
+                with pytest.raises(TimeoutError):
+                    source._refresh_state(force=True)
+            assert source.last_successful_poll_at == successful_poll
+            source.stop()
+
+    def test_failed_cursor_save_does_not_publish_uncommitted_progress(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = self._make_source(tmp, live_sequence=[True, True])
+            source.start()
+            chunk = source.next_chunk()
+            assert chunk is not None
+            with patch.object(source.ingest_states, 'upsert', side_effect=RuntimeError('database write failed')):
+                with pytest.raises(RuntimeError):
+                    source.next_chunk()
+            assert source.ingest_cursor_seconds == 0
+            assert source.videos.vod_state['vod-1'].last_ingested_seconds == 0
+            source.stop()
+            assert not os.path.exists(chunk.audio_path)
 
     def _make_source(
         self,

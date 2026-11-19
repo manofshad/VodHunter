@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sys
+import random
 from threading import Event, Thread
 import time
 from typing import Callable
@@ -25,7 +26,7 @@ from pipeline.scheduled_embedder import (
     LIVE_PRIORITY,
     ScheduledEmbedder,
 )
-from services.twitch_monitor import CachedMultiStreamerTwitchMonitor, TwitchMonitor
+from services.twitch_monitor import CachedMultiStreamerTwitchMonitor, TwitchMonitor, TwitchRequestError
 from sources.historical_archive_vod_source import HistoricalArchiveVODSource
 from sources.live_archive_vod_source import LiveArchiveVODSource
 from storage.records import VodIngestStateRecord, VideoRecord, VideoStatus
@@ -36,6 +37,9 @@ INGEST_CHUNK_SECONDS = 60
 MONITOR_POLL_SECONDS = 30.0
 SESSION_POLL_INTERVAL = 0.5
 MONITOR_RETRY_SECONDS = 5.0
+MAX_RETRY_SECONDS = 60.0
+CONTROLLER_HEARTBEAT_SECONDS = 60.0
+CONTROLLER_DEGRADED_FAILURES = 3
 LIVE_ARCHIVE_LAG_SECONDS = 120
 LIVE_ARCHIVE_POLL_SECONDS = 15.0
 LIVE_ARCHIVE_FINALIZE_CHECKS = 3
@@ -83,6 +87,49 @@ class BacklogRunOutcome:
     preempted_for_live: bool = False
     interrupted: bool = False
     error: Exception | None = None
+
+
+@dataclass
+class RecoveryFailure:
+    attempts: int
+    twitch_request: bool
+
+
+class ControllerRecovery:
+    def __init__(
+        self, streamer: str, out: Callable[[str], None],
+        should_stop: Callable[[], bool], retry_seconds: float,
+    ) -> None:
+        self.streamer = streamer
+        self.out = out
+        self.should_stop = should_stop
+        self.retry_seconds = max(0.0, float(retry_seconds))
+        self.failures: dict[str, RecoveryFailure] = {}
+
+    def succeeded(self, phase: str, *, twitch_only: bool = False) -> None:
+        failure = self.failures.get(phase)
+        if failure is not None and (not twitch_only or failure.twitch_request):
+            del self.failures[phase]
+            self.out(f"event=controller_recovered streamer={self.streamer} phase={phase}")
+
+    def wait(self, error: Exception, phase: str) -> None:
+        if isinstance(error, TwitchRequestError) and not error.retryable:
+            raise error
+        previous = self.failures.get(phase)
+        attempts = (previous.attempts if previous else 0) + 1
+        self.failures[phase] = RecoveryFailure(attempts, isinstance(error, TwitchRequestError))
+        ceiling = min(MAX_RETRY_SECONDS, self.retry_seconds * 2 ** min(attempts - 1, 16))
+        delay = random.uniform(0.8 * ceiling, ceiling)
+        details = f"error={type(error).__name__} error_class={type(error).__name__}"
+        if isinstance(error, TwitchRequestError):
+            delay = max(delay, (error.retry_at or 0.0) - time.time())
+            details = f"error={error.error_class} {error}"
+        self.out(
+            f"event=controller_retry streamer={self.streamer} phase={phase} "
+            f"{details} retry_seconds={delay:.3f} failures={attempts} "
+            f"degraded={str(attempts >= CONTROLLER_DEGRADED_FAILURES).lower()}"
+        )
+        _sleep_interruptibly(delay, self.should_stop)
 
 
 def _get_existing_video_status(
@@ -182,145 +229,181 @@ def run_hybrid_ingest(
     backlog_embedder = ingest_state.get("backlog_embedder", embedder)
     twitch_monitor = monitor or TwitchMonitor.from_env()
 
-    if provision_streamer:
-        creator_metadata = _provision_streamer(
-            streamer=normalized_streamer,
-            repositories=repositories,
-            twitch_monitor=twitch_monitor,
-        )
-    else:
-        creator_metadata = twitch_monitor.get_user_profile(normalized_streamer)
-    user_id = str(creator_metadata["id"])
-
     result = HybridIngestResult()
     logged_skipped_vods: set[str] = set()
     last_mode: str | None = None
     should_log_watch = True
     force_live_handoff = False
+    creator_metadata = None
+    recovery = ControllerRecovery(normalized_streamer, out, should_stop, retry_seconds)
+    heartbeats: dict[str, float] = {}
+
+    def heartbeat(event: str, phase: str, detail: str = "") -> None:
+        now = time.monotonic()
+        if now - heartbeats.get(event, float("-inf")) >= CONTROLLER_HEARTBEAT_SECONDS:
+            out(f"event={event} streamer={normalized_streamer} phase={phase} {detail}".rstrip())
+            heartbeats[event] = now
+
+    def live_progress(cursor: int) -> None:
+        recovery.succeeded("live_session")
+        heartbeat("controller_progress", "live_session", f"cursor={cursor}")
+
+    def live_poll() -> None:
+        recovery.succeeded("live_session", twitch_only=True)
+        recovery.succeeded("archive_discovery", twitch_only=True)
+        heartbeat("controller_poll", "live_session")
+
+    def backlog_progress(cursor: int) -> None:
+        recovery.succeeded("backlog_session")
+        heartbeat("controller_progress", "backlog_session", f"cursor={cursor}")
+
+    out(f"event=controller_started streamer={normalized_streamer} phase=provision")
 
     while not should_stop():
-        if force_live_handoff:
-            is_live = True
-            force_live_handoff = False
-        else:
-            try:
+        phase = "provision"
+        try:
+            if creator_metadata is None:
+                if provision_streamer:
+                    creator_metadata = _provision_streamer(
+                        streamer=normalized_streamer,
+                        repositories=repositories,
+                        twitch_monitor=twitch_monitor,
+                    )
+                else:
+                    creator_metadata = twitch_monitor.get_user_profile(normalized_streamer)
+                out(
+                    f"provisioned streamer={normalized_streamer} user_id={creator_metadata['id']} "
+                    f"partition={creator_metadata.get('partition_name', 'unmanaged')}"
+                )
+                recovery.succeeded(phase)
+            user_id = str(creator_metadata["id"])
+            phase = "live_check"
+            if force_live_handoff:
+                is_live = True
+                force_live_handoff = False
+            else:
                 is_live = twitch_monitor.is_live(normalized_streamer)
-            except Exception as exc:
-                out(f"mode=watch streamer={normalized_streamer} error=live_check_failed detail={exc}")
-                _sleep_interruptibly(retry_seconds, should_stop)
-                continue
+                recovery.succeeded(phase)
 
-        if is_live:
-            if last_mode != "live":
-                out(f"mode=live streamer={normalized_streamer} reason=stream_live")
-            live_handle = _start_live_session(
-                streamer=normalized_streamer,
-                videos=videos,
-                ingest_states=ingest_states,
-                fingerprints=fingerprints,
-                embedder=live_embedder,
-                twitch_monitor=twitch_monitor,
-                session_factory=session_factory,
-                live_source_factory=live_source_factory,
-            )
-            result.live_sessions_started += 1
-            last_mode = "live"
-            should_log_watch = True
-
-            live_error = _wait_for_session(
-                handle=live_handle,
-                should_stop=should_stop,
-                wait_seconds=session_wait_seconds,
-            )
-            if live_error is not None:
-                result.failed += 1
-                out(f"failed mode=live streamer={normalized_streamer} error={live_error}")
-                _sleep_interruptibly(retry_seconds, should_stop)
-                continue
-            if live_handle.interrupted:
-                break
-
-            result.handoffs_to_backlog += 1
-            out(f"handoff event=live_to_backlog streamer={normalized_streamer}")
-            last_mode = "backlog"
-            continue
-
-        backlog = _build_backlog(
-            twitch_monitor=twitch_monitor,
-            videos=videos,
-            ingest_states=ingest_states,
-            streamer=normalized_streamer,
-            user_id=user_id,
-            days=days,
-            skipped_vods_logged=logged_skipped_vods,
-            out=out,
-        )
-
-        if backlog:
-            candidate = backlog[0]
-            vod = candidate.vod
-            vod_id = str(vod["id"])
-            if last_mode != "backlog":
-                out(
-                    f"mode=backlog streamer={normalized_streamer} backlog={len(backlog)} "
-                    f"vod={vod_id} url={vod['url']}"
+            if is_live:
+                phase = "live_session"
+                if last_mode != "live":
+                    out(f"mode=live streamer={normalized_streamer} reason=stream_live")
+                live_handle = _start_live_session(
+                    streamer=normalized_streamer,
+                    videos=videos,
+                    ingest_states=ingest_states,
+                    fingerprints=fingerprints,
+                    embedder=live_embedder,
+                    twitch_monitor=twitch_monitor,
+                    session_factory=session_factory,
+                    live_source_factory=live_source_factory,
                 )
-            elif should_log_watch:
-                out(
-                    f"mode=backlog streamer={normalized_streamer} backlog={len(backlog)} "
-                    f"vod={vod_id} url={vod['url']}"
+                result.live_sessions_started += 1
+                last_mode = "live"
+                should_log_watch = True
+
+                live_error = _wait_for_session(
+                    handle=live_handle,
+                    should_stop=should_stop,
+                    wait_seconds=session_wait_seconds,
+                    progress=live_progress,
+                    poll_succeeded=live_poll,
                 )
-
-            if candidate.existing_state is not None and candidate.existing_state.last_ingested_seconds > 0:
-                result.resumed += 1
-                out(
-                    f"resume mode=backlog vod={vod_id} "
-                    f"cursor={candidate.existing_state.last_ingested_seconds}"
-                )
-
-            backlog_outcome = _run_backlog_session(
-                streamer=normalized_streamer,
-                vod=vod,
-                existing_state=candidate.existing_state,
-                videos=videos,
-                ingest_states=ingest_states,
-                fingerprints=fingerprints,
-                embedder=backlog_embedder,
-                twitch_monitor=twitch_monitor,
-                session_factory=session_factory,
-                historical_source_factory=historical_source_factory,
-                should_stop=should_stop,
-                out=out,
-                backlog_size=len(backlog),
-                backlog_live_poll_seconds=backlog_live_poll_seconds,
-            )
-            last_mode = "backlog"
-            should_log_watch = True
-
-            if backlog_outcome.preempted_for_live:
-                if should_stop():
+                if live_error is not None:
+                    result.failed += 1
+                    recovery.wait(live_error, phase)
+                    continue
+                recovery.succeeded(phase)
+                if live_handle.interrupted:
                     break
-                result.handoffs_to_live += 1
-                out(f"handoff event=backlog_to_live streamer={normalized_streamer} vod={vod_id}")
-                force_live_handoff = True
-                continue
-            if backlog_outcome.interrupted:
-                break
-            if backlog_outcome.error is not None:
-                result.failed += 1
-                out(f"failed mode=backlog vod={vod_id} url={vod['url']} error={backlog_outcome.error}")
+
+                result.handoffs_to_backlog += 1
+                out(f"handoff event=live_to_backlog streamer={normalized_streamer}")
+                last_mode = "backlog"
                 continue
 
-            result.backlog_ingested += 1
-            out(f"completed mode=backlog vod={vod_id} url={vod['url']}")
-            continue
+            phase = "archive_discovery"
+            backlog = _build_backlog(
+                twitch_monitor=twitch_monitor,
+                videos=videos,
+                ingest_states=ingest_states,
+                streamer=normalized_streamer,
+                user_id=user_id,
+                days=days,
+                skipped_vods_logged=logged_skipped_vods,
+                out=out,
+            )
+            recovery.succeeded(phase)
 
-        result.watch_cycles += 1
-        if last_mode != "watch" or should_log_watch:
-            out(f"mode=watch streamer={normalized_streamer} backlog=0 is_live=false")
-        last_mode = "watch"
-        should_log_watch = False
-        _sleep_interruptibly(watch_poll_seconds, should_stop)
+            if backlog:
+                phase = "backlog_session"
+                candidate = backlog[0]
+                vod = candidate.vod
+                vod_id = str(vod["id"])
+                if last_mode != "backlog" or should_log_watch:
+                    out(
+                        f"mode=backlog streamer={normalized_streamer} backlog={len(backlog)} "
+                        f"vod={vod_id} url={vod['url']}"
+                    )
+
+                if candidate.existing_state is not None and candidate.existing_state.last_ingested_seconds > 0:
+                    result.resumed += 1
+                    out(
+                        f"resume mode=backlog vod={vod_id} "
+                        f"cursor={candidate.existing_state.last_ingested_seconds}"
+                    )
+
+                backlog_outcome = _run_backlog_session(
+                    streamer=normalized_streamer,
+                    vod=vod,
+                    existing_state=candidate.existing_state,
+                    videos=videos,
+                    ingest_states=ingest_states,
+                    fingerprints=fingerprints,
+                    embedder=backlog_embedder,
+                    twitch_monitor=twitch_monitor,
+                    session_factory=session_factory,
+                    historical_source_factory=historical_source_factory,
+                    should_stop=should_stop,
+                    out=out,
+                    backlog_size=len(backlog),
+                    backlog_live_poll_seconds=backlog_live_poll_seconds,
+                    progress=backlog_progress,
+                    poll_succeeded=lambda: heartbeat("controller_poll", "backlog_session"),
+                )
+                last_mode = "backlog"
+                should_log_watch = True
+
+                if backlog_outcome.preempted_for_live:
+                    if should_stop():
+                        break
+                    result.handoffs_to_live += 1
+                    out(f"handoff event=backlog_to_live streamer={normalized_streamer} vod={vod_id}")
+                    force_live_handoff = True
+                    continue
+                if backlog_outcome.interrupted:
+                    break
+                if backlog_outcome.error is not None:
+                    result.failed += 1
+                    recovery.wait(backlog_outcome.error, phase)
+                    continue
+
+                recovery.succeeded(phase)
+                result.backlog_ingested += 1
+                out(f"completed mode=backlog vod={vod_id} url={vod['url']}")
+                heartbeat("controller_progress", phase)
+                continue
+
+            result.watch_cycles += 1
+            if last_mode != "watch" or should_log_watch:
+                out(f"mode=watch streamer={normalized_streamer} backlog=0 is_live=false")
+            heartbeat("controller_poll", "watch")
+            last_mode = "watch"
+            should_log_watch = False
+            _sleep_interruptibly(watch_poll_seconds, should_stop)
+        except TwitchRequestError as exc:
+            recovery.wait(exc, phase)
 
     return result
 
@@ -357,8 +440,10 @@ def _build_backlog(
                     f"cursor={saved.last_ingested_seconds} "
                     f"observed_seconds={saved.last_seen_duration_seconds}"
                 )
+        except TwitchRequestError:
+            raise
         except Exception as exc:
-            out(f"mode=backlog streamer={streamer} vod={vod_id} error=source_lookup_failed detail={exc}")
+            out(f"mode=backlog streamer={streamer} vod={vod_id} error=source_lookup_failed error_class={type(exc).__name__}")
     backlog: list[BacklogCandidate] = []
 
     for vod in by_id.values():
@@ -458,6 +543,8 @@ def _run_backlog_session(
     out: Callable[[str], None],
     backlog_size: int,
     backlog_live_poll_seconds: float,
+    progress: Callable[[int], None] = lambda cursor: None,
+    poll_succeeded: Callable[[], None] = lambda: None,
 ) -> BacklogRunOutcome:
     creator_metadata = twitch_monitor.get_user_profile(streamer, force_refresh=True)
     starting_cursor = 0 if existing_state is None else existing_state.last_ingested_seconds
@@ -497,24 +584,44 @@ def _run_backlog_session(
     handle = _spawn_session(session=session, source=source)
 
     preempted_for_live = False
-    while handle.thread.is_alive():
-        if should_stop():
-            handle.interrupted = True
-            handle.session.stop()
-            break
-        try:
-            if twitch_monitor.is_live(streamer):
-                if not handle.thread.is_alive():
-                    break
-                preempted_for_live = True
-                out(f"handoff_requested event=backlog_to_live vod={vod_id}")
-                handle.session.stop()
-                break
-        except Exception as exc:
-            out(f"mode=backlog vod={vod_id} error=live_check_failed detail={exc}")
-        _sleep_interruptibly(backlog_live_poll_seconds, should_stop)
+    last_cursor = starting_cursor
 
-    handle.thread.join()
+    def sample_progress() -> None:
+        nonlocal last_cursor
+        cursor = getattr(source, "ingest_cursor_seconds", starting_cursor)
+        if cursor > last_cursor:
+            progress(cursor)
+            last_cursor = cursor
+
+    try:
+        while handle.thread.is_alive():
+            if should_stop():
+                handle.interrupted = True
+                break
+            sample_progress()
+            try:
+                is_live = twitch_monitor.is_live(streamer)
+                poll_succeeded()
+                if is_live:
+                    if not handle.thread.is_alive():
+                        break
+                    preempted_for_live = True
+                    out(f"handoff_requested event=backlog_to_live vod={vod_id}")
+                    break
+            except TwitchRequestError as exc:
+                if not exc.retryable:
+                    raise
+                out(
+                    f"event=controller_retry streamer={streamer} phase=backlog_live_check "
+                    f"error={exc.error_class} {exc} retry_seconds={backlog_live_poll_seconds:.3f} "
+                    f"rate_limit_at={exc.retry_at or 'none'}"
+                )
+            _sleep_interruptibly(backlog_live_poll_seconds, should_stop)
+    finally:
+        if handle.thread.is_alive():
+            handle.session.stop()
+        handle.thread.join()
+    sample_progress()
     return BacklogRunOutcome(
         preempted_for_live=preempted_for_live,
         interrupted=handle.interrupted,
@@ -543,14 +650,36 @@ def _wait_for_session(
     handle: SessionRunHandle,
     should_stop: Callable[[], bool],
     wait_seconds: float,
+    progress: Callable[[int], None] = lambda cursor: None,
+    poll_succeeded: Callable[[], None] = lambda: None,
 ) -> Exception | None:
-    while handle.thread.is_alive():
-        if should_stop():
-            handle.interrupted = True
+    last_cursor = None
+    last_poll = None
+
+    def sample_progress() -> None:
+        nonlocal last_cursor, last_poll
+        successful_poll = getattr(handle.source, "last_successful_poll_at", None)
+        cursor = getattr(handle.source, "ingest_cursor_seconds", 0) or 0
+        if successful_poll is not None:
+            if last_cursor is not None and cursor > last_cursor:
+                progress(cursor)
+            last_cursor = cursor
+        if successful_poll is not None and successful_poll != last_poll:
+            poll_succeeded()
+            last_poll = successful_poll
+
+    try:
+        while handle.thread.is_alive():
+            if should_stop():
+                handle.interrupted = True
+                break
+            sample_progress()
+            _sleep_interruptibly(wait_seconds, should_stop)
+    finally:
+        if handle.thread.is_alive():
             handle.session.stop()
-            break
-        _sleep_interruptibly(wait_seconds, should_stop)
-    handle.thread.join()
+        handle.thread.join()
+    sample_progress()
     return handle.error
 
 
@@ -584,17 +713,6 @@ def run_multi_streamer_ingest(
     base_embedder = ingest_state["embedder"]
     raw_monitor = monitor or TwitchMonitor.from_env()
 
-    for streamer in normalized_streamers:
-        provisioned = _provision_streamer(
-            streamer=streamer,
-            repositories=repositories,
-            twitch_monitor=raw_monitor,
-        )
-        out(
-            f"provisioned streamer={streamer} user_id={provisioned['id']} "
-            f"partition={provisioned.get('partition_name', 'unmanaged')}"
-        )
-
     model_load_ms = base_embedder.load()
     scheduler = ScheduledEmbedder(base_embedder)
     shared_monitor = CachedMultiStreamerTwitchMonitor(
@@ -612,32 +730,48 @@ def run_multi_streamer_ingest(
         return stop_event.is_set() or external_should_stop()
 
     def run_controller(streamer: str) -> None:
-        try:
-            live_client = scheduler.client(
-                priority=LIVE_PRIORITY,
-                source_name=f"{streamer}:live",
-            )
-            backlog_client = scheduler.client(
-                priority=BACKLOG_PRIORITY,
-                source_name=f"{streamer}:backlog",
-            )
-            results[streamer] = controller(
-                streamer,
-                days,
-                monitor=shared_monitor,
-                build_storage=lambda: repositories,
-                build_ingest=lambda: {
-                    "embedder": base_embedder,
-                    "live_embedder": live_client,
-                    "backlog_embedder": backlog_client,
-                },
-                out=out,
-                should_stop=stopping,
-                provision_streamer=False,
-            )
-        except Exception as exc:
-            errors[streamer] = exc
-            out(f"failed mode=controller streamer={streamer} error={exc}")
+        recovery = ControllerRecovery(streamer, out, stopping, MONITOR_RETRY_SECONDS)
+        live_client = scheduler.client(priority=LIVE_PRIORITY, source_name=f"{streamer}:live")
+        backlog_client = scheduler.client(priority=BACKLOG_PRIORITY, source_name=f"{streamer}:backlog")
+        while not stopping():
+            started_at = time.monotonic()
+            out(f"event=controller_start streamer={streamer} phase=controller")
+
+            def controller_out(line: str) -> None:
+                out(line)
+                if (
+                    line.startswith(("event=controller_poll ", "event=controller_progress "))
+                    and time.monotonic() - started_at >= CONTROLLER_HEARTBEAT_SECONDS
+                ):
+                    recovery.succeeded("controller")
+
+            try:
+                results[streamer] = controller(
+                    streamer,
+                    days,
+                    monitor=shared_monitor,
+                    build_storage=lambda: repositories,
+                    build_ingest=lambda: {
+                        "embedder": base_embedder,
+                        "live_embedder": live_client,
+                        "backlog_embedder": backlog_client,
+                    },
+                    out=controller_out,
+                    should_stop=stopping,
+                    provision_streamer=True,
+                )
+                if stopping():
+                    break
+                error = RuntimeError("controller exited unexpectedly")
+            except TwitchRequestError as exc:
+                if not exc.retryable:
+                    errors[streamer] = exc
+                    out(f"event=controller_failed streamer={streamer} phase=controller permanent=true error={exc.error_class} {exc}")
+                    return
+                error = exc
+            except Exception as exc:
+                error = exc
+            recovery.wait(error, "controller")
 
     out(
         f"worker mode=multi_streamer streamers={','.join(normalized_streamers)} "
@@ -663,7 +797,7 @@ def run_multi_streamer_ingest(
         scheduler.close()
 
     if errors and not external_should_stop():
-        details = "; ".join(f"{streamer}: {error}" for streamer, error in errors.items())
+        details = "; ".join(f"{streamer}: {type(error).__name__}" for streamer, error in errors.items())
         raise RuntimeError(f"streamer controllers failed: {details}")
 
     return MultiStreamerIngestResult(

@@ -1,13 +1,35 @@
 import json
+import http.client
+import math
 import os
 import re
 import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from threading import Lock
 import time
 from typing import Any, Optional
+
+
+class TwitchRequestError(RuntimeError):
+    """A request failure safe to include in worker diagnostics."""
+
+    def __init__(
+        self, *, operation: str, hostname: str, error_class: str,
+        retryable: bool, retry_at: float | None = None, status: int | None = None,
+    ) -> None:
+        self.operation = operation
+        self.hostname = hostname
+        self.error_class = error_class
+        self.retryable = retryable
+        self.retry_at = retry_at
+        self.status = status
+        super().__init__(
+            f"operation={operation} hostname={hostname} error_class={error_class} "
+            f"status={status or 'none'} retryable={str(retryable).lower()}"
+        )
 
 
 class TwitchMonitor:
@@ -26,7 +48,10 @@ class TwitchMonitor:
         self.client_secret = client_secret
         self.request_timeout = request_timeout
         self._access_token: Optional[str] = None
+        self._token_lock = Lock()
         self._user_profile_cache: dict[str, dict[str, Any]] = {}
+        self._rate_limit_lock = Lock()
+        self._rate_limits: dict[str, float] = {}
 
     @classmethod
     def from_env(cls) -> "TwitchMonitor":
@@ -50,21 +75,28 @@ class TwitchMonitor:
             method="POST",
         )
 
-        with urllib.request.urlopen(req, timeout=self.request_timeout) as resp:
-            body = resp.read().decode("utf-8")
-
-        data = json.loads(body)
+        data = self._request_json(req, operation="oauth_token")
         token = data.get("access_token")
-        if not token:
-            raise RuntimeError("Failed to acquire Twitch access token")
+        if not isinstance(token, str) or not token:
+            raise TwitchRequestError(
+                operation="oauth_token", hostname="id.twitch.tv",
+                error_class="MissingAccessToken", retryable=True,
+            )
 
         self._access_token = token
         return token
 
     def _ensure_token(self) -> str:
-        if self._access_token:
-            return self._access_token
-        return self._request_access_token()
+        with self._token_lock:
+            if self._access_token:
+                return self._access_token
+            return self._request_access_token()
+
+    def _refresh_rejected_token(self, rejected_token: str) -> str:
+        with self._token_lock:
+            if self._access_token and self._access_token != rejected_token:
+                return self._access_token
+            return self._request_access_token()
 
     def _helix_request(
         self,
@@ -95,25 +127,92 @@ class TwitchMonitor:
                 data=payload,
                 method=method,
             )
-            return urllib.request.urlopen(req, timeout=self.request_timeout)
+            return self._request_json(req, operation=f"helix_{path}")
 
         try:
-            with _call(token) as resp:
-                body = resp.read().decode("utf-8")
-        except urllib.error.HTTPError as exc:
-            if exc.code == 401:
-                fresh_token = self._request_access_token()
-                with _call(fresh_token) as resp:
-                    body = resp.read().decode("utf-8")
+            return _call(token)
+        except TwitchRequestError as exc:
+            if exc.status == 401:
+                fresh_token = self._refresh_rejected_token(token)
+                return _call(fresh_token)
             else:
                 raise
 
-        if not body.strip():
-            return {}
-        return json.loads(body)
+    def _request_json(self, req: urllib.request.Request, *, operation: str) -> dict[str, Any]:
+        hostname = urllib.parse.urlparse(req.full_url).hostname or "unknown"
+        with self._rate_limit_lock:
+            retry_at = self._rate_limits.get(hostname, 0.0)
+        if retry_at > time.time():
+            raise TwitchRequestError(
+                operation=operation, hostname=hostname, error_class="RateLimited",
+                retryable=True, retry_at=retry_at, status=429,
+            )
+        try:
+            with urllib.request.urlopen(req, timeout=self.request_timeout) as resp:
+                body = resp.read()
+        except urllib.error.HTTPError as exc:
+            retry_at = None
+            if exc.code == 429:
+                retry_at = self._rate_limit_deadline(exc.headers)
+                with self._rate_limit_lock:
+                    self._rate_limits[hostname] = max(
+                        self._rate_limits.get(hostname, 0.0), retry_at,
+                    )
+                    retry_at = self._rate_limits[hostname]
+            exc.close()
+            raise TwitchRequestError(
+                operation=operation, hostname=hostname, error_class="HTTPError",
+                retryable=exc.code in {408, 429} or 500 <= exc.code < 600,
+                retry_at=retry_at, status=exc.code,
+            ) from None
+        except (urllib.error.URLError, OSError, http.client.HTTPException) as exc:
+            reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+            raise TwitchRequestError(
+                operation=operation, hostname=hostname,
+                error_class=type(reason).__name__, retryable=True,
+            ) from None
+        try:
+            body = body.decode("utf-8")
+            if not body.strip():
+                return {}
+            payload = json.loads(body)
+            if not isinstance(payload, dict):
+                raise ValueError("expected object")
+            return payload
+        except ValueError:
+            raise TwitchRequestError(
+                operation=operation, hostname=hostname,
+                error_class="InvalidResponse", retryable=True,
+            ) from None
+
+    @staticmethod
+    def _rate_limit_deadline(headers: object) -> float:
+        now = time.time()
+        deadlines = [now + 5.0]
+        for name in ("Ratelimit-Reset", "Retry-After"):
+            value = headers.get(name) if headers is not None else None
+            if not value:
+                continue
+            try:
+                parsed = float(value)
+                if math.isfinite(parsed):
+                    deadlines.append(parsed + (now if name == "Retry-After" else 0.0))
+            except ValueError:
+                if name == "Retry-After":
+                    try:
+                        deadlines.append(parsedate_to_datetime(value).timestamp())
+                    except (TypeError, ValueError, OverflowError):
+                        pass
+        return max(deadlines)
 
     def _helix_get(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
-        return self._helix_request(path=path, method="GET", params=params)
+        payload = self._helix_request(path=path, method="GET", params=params)
+        if payload.get("error") or not isinstance(payload.get("data"), list):
+            raise TwitchRequestError(
+                operation=f"helix_{path}", hostname="api.twitch.tv",
+                error_class="InvalidResponse", retryable=True,
+            )
+        return payload
 
     @staticmethod
     def parse_twitch_datetime(value: str) -> datetime:
@@ -168,12 +267,18 @@ class TwitchMonitor:
         data = self._helix_get("users", {"login": streamer})
         rows = data.get("data") or []
         if not rows:
-            raise RuntimeError(f"Streamer not found: {streamer}")
+            raise TwitchRequestError(
+                operation="helix_users", hostname="api.twitch.tv",
+                error_class="StreamerNotFound", retryable=False,
+            )
 
         raw_user = rows[0]
         user_id = str(raw_user.get("id", "")).strip()
         if not user_id:
-            raise RuntimeError(f"Missing user id for streamer: {streamer}")
+            raise TwitchRequestError(
+                operation="helix_users", hostname="api.twitch.tv",
+                error_class="MissingUserId", retryable=True,
+            )
         normalized = {
             "id": user_id,
             "login": str(raw_user.get("login", streamer)).strip().lower(),

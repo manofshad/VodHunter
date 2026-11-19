@@ -1,9 +1,149 @@
 from unittest.mock import patch
 from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
+from email.message import Message
+import io
+import json
+import socket
+import threading
+import urllib.error
 import pytest
-from services.twitch_monitor import CachedMultiStreamerTwitchMonitor, TwitchMonitor
+from services.twitch_monitor import CachedMultiStreamerTwitchMonitor, TwitchMonitor, TwitchRequestError
 
 class TestTwitchMonitor:
+
+    @pytest.mark.parametrize('failure', [
+        urllib.error.URLError(socket.gaierror(-3, 'DNS detail with secret')),
+        TimeoutError('signed URL must not be logged'),
+        ConnectionResetError('connection lost'),
+        urllib.error.HTTPError('https://api.twitch.tv/secret', 503, 'private body', {}, None),
+    ])
+    def test_request_failures_are_retryable_and_sanitized(self, failure) -> None:
+        monitor = TwitchMonitor('client', 'secret')
+        monitor._access_token = 'token'
+        with patch('urllib.request.urlopen', side_effect=failure):
+            with pytest.raises(TwitchRequestError) as raised:
+                monitor.get_latest_archive_vod('user-1')
+        error = raised.value
+        assert error.retryable
+        assert error.operation == 'helix_videos'
+        assert error.hostname == 'api.twitch.tv'
+        assert 'secret' not in str(error)
+        assert 'signed' not in str(error)
+        assert 'private' not in str(error)
+
+    def test_rate_limit_is_shared_by_other_helix_operations_without_sleeping(self) -> None:
+        monitor = TwitchMonitor('client', 'secret')
+        monitor._access_token = 'token'
+        headers = Message()
+        headers['Ratelimit-Reset'] = '130'
+        error = urllib.error.HTTPError('https://api.twitch.tv/videos?secret=private', 429, '', headers, None)
+        with patch('services.twitch_monitor.time.time', return_value=100), patch(
+            'urllib.request.urlopen', side_effect=error,
+        ) as request:
+            with pytest.raises(TwitchRequestError) as first:
+                monitor.get_latest_archive_vod('user-1')
+            with pytest.raises(TwitchRequestError) as second:
+                monitor.is_live('alice')
+        assert first.value.retry_at == second.value.retry_at == 130
+        assert second.value.operation == 'helix_streams'
+        assert request.call_count == 1
+        with patch('services.twitch_monitor.time.time', return_value=131), patch(
+            'urllib.request.urlopen', return_value=io.BytesIO(b'{"data": []}'),
+        ) as request:
+            assert monitor.is_live('alice') is False
+        assert request.call_count == 1
+
+    @pytest.mark.parametrize('header', ['inf', 'NaN', '-inf', 'invalid'])
+    def test_invalid_rate_limit_deadline_does_not_disable_requests_forever(self, header) -> None:
+        monitor = TwitchMonitor('client', 'secret')
+        monitor._access_token = 'token'
+        headers = Message()
+        headers['Ratelimit-Reset'] = header
+        error = urllib.error.HTTPError('https://api.twitch.tv/videos', 429, '', headers, None)
+        with patch('services.twitch_monitor.time.time', return_value=100), patch(
+            'urllib.request.urlopen', side_effect=error,
+        ):
+            with pytest.raises(TwitchRequestError) as raised:
+                monitor.get_latest_archive_vod('user-1')
+        assert raised.value.retry_at == 105
+
+    def test_unauthorized_request_refreshes_once_then_surfaces_permanent_auth_failure(self) -> None:
+        monitor = TwitchMonitor('client', 'secret')
+        monitor._access_token = 'old'
+        failure = lambda: urllib.error.HTTPError('https://api.twitch.tv/secret', 401, 'private', {}, None)
+        with patch('urllib.request.urlopen', side_effect=[
+            failure(), io.BytesIO(b'{"access_token": "new"}'), failure(),
+        ]) as request:
+            with pytest.raises(TwitchRequestError) as raised:
+                monitor.is_live('alice')
+        assert not raised.value.retryable
+        assert raised.value.status == 401
+        assert request.call_count == 3
+
+    def test_concurrent_startup_and_unauthorized_requests_share_tokens(self) -> None:
+        monitor = TwitchMonitor('client', 'secret')
+        rejected = threading.Barrier(2)
+        token_requests = []
+
+        def request(req, **kwargs):
+            if req.full_url.startswith('https://id.twitch.tv'):
+                token = 'old' if not token_requests else 'new'
+                token_requests.append(token)
+                return io.BytesIO(json.dumps({'access_token': token}).encode())
+            if req.get_header('Authorization') == 'Bearer old':
+                rejected.wait(timeout=1)
+                raise urllib.error.HTTPError(req.full_url, 401, '', {}, None)
+            return io.BytesIO(b'{"data": []}')
+
+        with patch('urllib.request.urlopen', side_effect=request), ThreadPoolExecutor(2) as executor:
+            results = list(executor.map(monitor.is_live, ['alice', 'bob']))
+        assert results == [False, False]
+        assert token_requests == ['old', 'new']
+
+    def test_oauth_transport_and_auth_errors_have_token_operation(self) -> None:
+        monitor = TwitchMonitor('client', 'secret')
+        with patch('urllib.request.urlopen', side_effect=TimeoutError('private')):
+            with pytest.raises(TwitchRequestError) as raised:
+                monitor.is_live('alice')
+        assert raised.value.operation == 'oauth_token'
+        assert raised.value.hostname == 'id.twitch.tv'
+        assert raised.value.retryable
+        with patch('urllib.request.urlopen', side_effect=urllib.error.HTTPError(
+            'https://id.twitch.tv/oauth2/token?secret=private', 400, 'bad client', {}, None,
+        )):
+            with pytest.raises(TwitchRequestError) as raised:
+                monitor.is_live('alice')
+        assert not raised.value.retryable
+        assert raised.value.status == 400
+
+    @pytest.mark.parametrize('body', [
+        b'{broken json', b'[]', b'\xff', b'', b'{}', b'{"data": null}',
+        b'{"error": "temporary error", "data": []}',
+    ])
+    def test_malformed_successful_response_is_retryable(self, body) -> None:
+        monitor = TwitchMonitor('client', 'secret')
+        monitor._access_token = 'token'
+        with patch('urllib.request.urlopen', return_value=io.BytesIO(body)):
+            with pytest.raises(TwitchRequestError) as raised:
+                monitor.is_live('alice')
+        assert raised.value.retryable
+        assert raised.value.error_class == 'InvalidResponse'
+
+    @pytest.mark.parametrize(('method', 'body', 'error_class'), [
+        ('is_live', b'{}', 'MissingAccessToken'),
+        ('get_user_profile', b'{"data": [{"login": "alice"}]}', 'MissingUserId'),
+        ('get_user_profile', b'{"data": []}', 'StreamerNotFound'),
+    ])
+    def test_missing_provider_fields_distinguish_protocol_error_from_unknown_streamer(self, method, body, error_class) -> None:
+        monitor = TwitchMonitor('client', 'secret')
+        if method != 'is_live':
+            monitor._access_token = 'token'
+        with patch('urllib.request.urlopen', return_value=io.BytesIO(body)):
+            with pytest.raises(TwitchRequestError) as raised:
+                getattr(monitor, method)('alice')
+        assert raised.value.error_class == error_class
+        assert raised.value.retryable is (error_class != 'StreamerNotFound')
 
     def test_direct_archive_lookup_distinguishes_valid_archive_from_confirmed_absence(self) -> None:
         monitor = TwitchMonitor(client_id='x', client_secret='y')
