@@ -65,7 +65,7 @@ describe("shortcut instructions", () => {
     const download = within(dialog).getByRole("link", { name: "Download shortcut" });
     expect(download.getAttribute("href")).toBe("/shortcuts/vodhunter-search.shortcut");
     expect(download.getAttribute("download")).toBe("vodhunter-search.shortcut");
-    expect(dialog.getAttribute("aria-describedby")).toBe("vodhunter-shortcut-description");
+    expect(within(dialog).queryByText("Find the original Twitch VOD from TikTok.")).toBeNull();
     expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Close shortcut instructions" }));
     expect(screen.queryByRole("dialog", { name: "History" })).toBeNull();
 
