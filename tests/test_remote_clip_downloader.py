@@ -1,8 +1,10 @@
 import http.client
+import logging
 import os
 import pytest
 import subprocess
 import tempfile
+import wave
 from types import SimpleNamespace
 from unittest.mock import patch
 from backend.services.remote_clip_downloader import (
@@ -14,6 +16,135 @@ from backend.services.remote_clip_downloader import (
 )
 
 class TestRemoteClipDownloader:
+
+    def test_tiktok_media_403_recovers_with_one_fresh_download(self, tmp_path, caplog) -> None:
+        downloader = RemoteClipDownloader(temp_dir=str(tmp_path))
+        clock = SimpleNamespace(now=100.0)
+        calls = []
+        secret = "media-cookie-sentinel"
+
+        def fake_run(cmd, **kwargs):
+            calls.append((list(cmd), kwargs["timeout"]))
+            output = cmd[cmd.index("-o") + 1]
+            if len(calls) == 1:
+                with open(output.replace("%(ext)s", "mp4.part"), "wb") as file:
+                    file.write(b"partial")
+                clock.now += 7
+                return subprocess.CompletedProcess(
+                    cmd, 1, stdout="", stderr=(
+                        "ERROR: unable to download video data: HTTP Error 403: Forbidden\n"
+                        f"https://media.test/video?signature={secret}\nCookie: {secret}"
+                    ),
+                )
+            assert list(tmp_path.iterdir()) == []
+            with wave.open(output.replace("%(ext)s", "wav"), "wb") as audio:
+                audio.setparams((1, 2, 16000, 0, "NONE", "not compressed"))
+                audio.writeframes(b"\x01\x00" * 16000)
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        with caplog.at_level(logging.INFO, logger="uvicorn.error"):
+            with patch("backend.services.remote_clip_downloader.time.perf_counter", side_effect=lambda: clock.now):
+                with patch("backend.services.remote_clip_downloader.subprocess.run", side_effect=fake_run):
+                    result = downloader.download_clip("https://www.tiktok.com/@demo/video/1")
+
+        assert len(calls) == 2
+        assert calls[0][0] == calls[1][0]
+        assert [call[1] for call in calls] == [90, 83]
+        with wave.open(result.path, "rb") as audio:
+            assert audio.getnframes() == 16000
+        assert "attempt_count=2 retry_outcome=recovered" in caplog.text
+        assert secret not in caplog.text
+        assert "media.test" not in caplog.text
+        assert "Cookie:" not in caplog.text
+        downloader.cleanup(result.path)
+
+    def test_tiktok_media_403_stops_after_two_failures(self, tmp_path, caplog) -> None:
+        downloader = RemoteClipDownloader(temp_dir=str(tmp_path))
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            assert list(tmp_path.iterdir()) == []
+            output = cmd[cmd.index("-o") + 1]
+            with open(output.replace("%(ext)s", "mp4.part"), "wb") as file:
+                file.write(b"partial")
+            return subprocess.CompletedProcess(
+                cmd, 1, stdout="", stderr=(
+                    "ERROR: unable to download video data: HTTP Error 403: Forbidden\n"
+                    "https://media.test/video?signature=retry-secret\nCookie: retry-secret"
+                ),
+            )
+
+        with patch("backend.services.remote_clip_downloader.subprocess.run", side_effect=fake_run):
+            with pytest.raises(DownloadError) as error:
+                downloader.download_clip("https://www.tiktok.com/@demo/video/1")
+
+        assert len(calls) == 2
+        assert error.value.diagnostics.provider_http_status == 403
+        assert list(tmp_path.iterdir()) == []
+        assert "attempt_count=2 retry_outcome=failed" in caplog.text
+        assert "retry-secret" not in caplog.text
+        assert "media.test" not in caplog.text
+        assert "Cookie:" not in caplog.text
+
+    @pytest.mark.parametrize("url, stderr", [
+        ("https://www.tiktok.com/@demo/video/1", "ERROR: [TikTok] 1: Unable to download webpage: HTTP Error 403: Forbidden"),
+        ("https://www.tiktok.com/@demo/video/1", "ERROR: unable to download video data: HTTP Error 404: Not Found"),
+        ("https://www.tiktok.com/@demo/video/1", "ERROR: unable to download video data: HTTP Error 429: Too Many Requests"),
+        ("https://www.tiktok.com/@demo/video/1", "ERROR: [TikTok] 1: Private video. Log in for access."),
+        ("https://www.tiktok.com/@demo/video/1", "WARNING: HTTP Error 403: Forbidden"),
+        ("https://www.youtube.com/shorts/BaW_jenozKc", "ERROR: unable to download video data: HTTP Error 403: Forbidden"),
+        ("https://www.instagram.com/reel/Cx123/", "ERROR: unable to download video data: HTTP Error 403: Forbidden"),
+    ])
+    def test_other_download_failures_do_not_retry(self, url, stderr, tmp_path) -> None:
+        failed = subprocess.CompletedProcess([], 1, stdout="", stderr=stderr)
+        downloader = RemoteClipDownloader(temp_dir=str(tmp_path))
+        with patch("backend.services.remote_clip_downloader.subprocess.run", return_value=failed) as run:
+            with pytest.raises(DownloadError):
+                downloader.download_clip(url)
+        run.assert_called_once()
+
+    def test_tiktok_media_403_does_not_restart_after_deadline(self, tmp_path, caplog) -> None:
+        clock = SimpleNamespace(now=100.0)
+        downloader = RemoteClipDownloader(temp_dir=str(tmp_path))
+
+        def fake_run(cmd, **kwargs):
+            clock.now += 91
+            return subprocess.CompletedProcess(
+                cmd, 1, stdout="", stderr="ERROR: unable to download video data: HTTP Error 403: Forbidden",
+            )
+
+        with patch("backend.services.remote_clip_downloader.time.perf_counter", side_effect=lambda: clock.now):
+            with patch("backend.services.remote_clip_downloader.subprocess.run", side_effect=fake_run) as run:
+                with pytest.raises(DownloadError) as error:
+                    downloader.download_clip("https://www.tiktok.com/@demo/video/1")
+
+        run.assert_called_once()
+        assert error.value.diagnostics.provider_http_status == 403
+        assert "attempt_count=1 retry_outcome=budget_exhausted" in caplog.text
+
+    def test_tiktok_retry_timeout_cleans_partial_download(self, tmp_path, caplog) -> None:
+        downloader = RemoteClipDownloader(temp_dir=str(tmp_path))
+        attempts = 0
+
+        def fake_run(cmd, **kwargs):
+            nonlocal attempts
+            attempts += 1
+            output = cmd[cmd.index("-o") + 1]
+            with open(output.replace("%(ext)s", "mp4.part"), "wb") as file:
+                file.write(b"partial")
+            if attempts == 2:
+                raise subprocess.TimeoutExpired(cmd, kwargs["timeout"])
+            return subprocess.CompletedProcess(
+                cmd, 1, stdout="", stderr="ERROR: unable to download video data: HTTP Error 403: Forbidden",
+            )
+
+        with patch("backend.services.remote_clip_downloader.subprocess.run", side_effect=fake_run):
+            with pytest.raises(DownloadError, match="timed out"):
+                downloader.download_clip("https://www.tiktok.com/@demo/video/1")
+        assert attempts == 2
+        assert list(tmp_path.iterdir()) == []
+        assert "attempt_count=2 retry_outcome=timeout" in caplog.text
 
     @pytest.mark.parametrize("apostrophe", ["'", "’"])
     def test_youtube_bot_challenge_has_safe_user_message(self, apostrophe, tmp_path, caplog) -> None:

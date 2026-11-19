@@ -396,29 +396,70 @@ class RemoteClipDownloader:
                 cmd.extend(["--proxy", self.youtube_proxy_url])
         cmd.extend(["--", url])
 
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout_seconds,
-            )
-        except subprocess.TimeoutExpired as exc:
-            self._cleanup_download(output_prefix)
-            if parsed_url.platform == "youtube":
-                logger.warning("youtube_download_failed reason=timeout proxy_configured=%s", bool(self.youtube_proxy_url))
+        attempt_count = 0
+        download_deadline = download_started_at + self.timeout_seconds
+        while True:
+            download_timeout = self.timeout_seconds
+            if attempt_count:
+                download_timeout = download_deadline - time.perf_counter()
+                if download_timeout <= 0:
+                    logger.warning(
+                        "tiktok_download_retry attempt_count=%d retry_outcome=budget_exhausted",
+                        attempt_count,
+                    )
+                    break
+            attempt_count += 1
+            try:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=download_timeout,
+                )
+            except subprocess.TimeoutExpired as exc:
+                self._cleanup_download(output_prefix)
+                if attempt_count == 2:
+                    logger.warning("tiktok_download_retry attempt_count=2 retry_outcome=timeout")
+                if parsed_url.platform == "youtube":
+                    logger.warning("youtube_download_failed reason=timeout proxy_configured=%s", bool(self.youtube_proxy_url))
+                    raise DownloadError(_YOUTUBE_DOWNLOAD_ERROR) from None
+                raise DownloadError(f"yt-dlp timed out while downloading {parsed_url.platform} clip") from exc
+            except OSError:
+                if attempt_count == 2:
+                    self._cleanup_download(output_prefix)
+                    logger.warning("tiktok_download_retry attempt_count=2 retry_outcome=process_error")
+                if parsed_url.platform != "youtube":
+                    raise
+                self._cleanup_download(output_prefix)
+                logger.warning("youtube_download_failed reason=process_error proxy_configured=%s", bool(self.youtube_proxy_url))
                 raise DownloadError(_YOUTUBE_DOWNLOAD_ERROR) from None
-            raise DownloadError(f"yt-dlp timed out while downloading {parsed_url.platform} clip") from exc
-        except OSError:
-            if parsed_url.platform != "youtube":
-                raise
-            self._cleanup_download(output_prefix)
-            logger.warning("youtube_download_failed reason=process_error proxy_configured=%s", bool(self.youtube_proxy_url))
-            raise DownloadError(_YOUTUBE_DOWNLOAD_ERROR) from None
+
+            if result.returncode == 0:
+                break
+            diagnostics = _download_failure_diagnostics(parsed_url, result)
+            if (
+                attempt_count == 1
+                and parsed_url.platform == "tiktok"
+                and diagnostics.failure_category == "http_error"
+                and diagnostics.failure_stage == "media"
+                and diagnostics.provider_http_status == 403
+            ):
+                self._cleanup_download(output_prefix)
+                logger.warning("tiktok_download_retry attempt_count=1 retry_outcome=pending")
+                continue
+            break
 
         if result.returncode != 0:
             self._cleanup_download(output_prefix)
             diagnostics = _download_failure_diagnostics(parsed_url, result)
+            if attempt_count == 2:
+                logger.warning(
+                    "tiktok_download_retry attempt_count=2 retry_outcome=failed "
+                    "failure_category=%s failure_stage=%s provider_http_status=%s",
+                    diagnostics.failure_category,
+                    diagnostics.failure_stage,
+                    diagnostics.provider_http_status,
+                )
             if parsed_url.platform == "youtube":
                 bot_challenge = diagnostics.failure_category == "bot_challenge"
                 logger.warning(
@@ -463,6 +504,8 @@ class RemoteClipDownloader:
                 self._cleanup_download(output_prefix)
                 raise DownloadError(f"Downloaded file exceeds {self.max_file_mb}MB limit")
 
+        if attempt_count == 2:
+            logger.info("tiktok_download_retry attempt_count=2 retry_outcome=recovered")
         logger.info(
             "timing event=clip_download platform=%s seconds=%.2f size_bytes=%d",
             parsed_url.platform,
