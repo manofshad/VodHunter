@@ -250,6 +250,41 @@ class TestRemoteClipDownloader:
                 with pytest.raises(DownloadError, match="^boom$"):
                     downloader.download_clip('https://www.tiktok.com/@demo/video/1')
 
+    @pytest.mark.parametrize(
+        "stdout, stderr, category, stage, provider_status",
+        [
+            (
+                "ERROR: unable to download video data: HTTP Error 403: Forbidden",
+                "WARNING: earlier HTTP Error 429: Too Many Requests",
+                "http_error", "media", 403,
+            ),
+            (
+                "", "WARNING: HTTP Error 403: Forbidden",
+                "provider_error", "unknown", None,
+            ),
+            (
+                "", "ERROR: request failed for https://media.test/path/HTTP Error 403: Forbidden",
+                "provider_error", "unknown", None,
+            ),
+        ],
+    )
+    def test_download_failure_diagnostics_use_http_error_lines(
+        self, tmp_path, stdout, stderr, category, stage, provider_status,
+    ) -> None:
+        downloader = RemoteClipDownloader(temp_dir=str(tmp_path))
+        failed = subprocess.CompletedProcess([], 2, stdout=stdout, stderr=stderr)
+        with patch("backend.services.remote_clip_downloader.subprocess.run", return_value=failed):
+            with pytest.raises(DownloadError) as error:
+                downloader.download_clip("https://www.tiktok.com/@demo/video/1")
+
+        assert error.value.diagnostics.to_dict() == {
+            "provider": "tiktok",
+            "failure_category": category,
+            "failure_stage": stage,
+            "provider_http_status": provider_status,
+            "process_returncode": 2,
+        }
+
     def test_download_reports_login_required_without_ytdlp_instructions(self, caplog) -> None:
         stderr = (
             "WARNING: [TikTok] The extractor is attempting impersonation, but no "
@@ -277,7 +312,8 @@ class TestRemoteClipDownloader:
             "This TikTok requires login, so VodHunter cannot download it. "
             "Try a publicly accessible TikTok video."
         )
-        assert stderr in caplog.text
+        assert "tiktok_download_login_required" in caplog.text
+        assert stderr not in caplog.text
 
     def test_download_raises_when_output_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

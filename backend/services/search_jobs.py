@@ -10,7 +10,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
 
 from backend.observability import observe_terminal_search
-from backend.services.remote_clip_downloader import DownloadError, InvalidClipUrlError, validate_clip_url
+from backend.services.remote_clip_downloader import DownloadError, DownloadFailureDiagnostics, InvalidClipUrlError, validate_clip_url
 from backend.services.search_manager import InputDurationExceededError, SearchInputError
 from backend.services.uploaded_clip_store import StagedUpload, UploadedClipStore
 from search.access import create_search_token
@@ -229,6 +229,7 @@ class SearchJobService:
                 error_code="DOWNLOAD_ERROR",
                 error_message=str(exc),
                 http_status=400,
+                download_failure=exc.diagnostics,
             )
         except RuntimeError as exc:
             self._fail_and_observe(
@@ -266,6 +267,7 @@ class SearchJobService:
         error_message: str,
         http_status: int,
         input_duration_seconds: float | None = None,
+        download_failure: DownloadFailureDiagnostics | None = None,
     ) -> None:
         persist_started_at = time.perf_counter()
         self.jobs.fail_search_job(
@@ -279,6 +281,9 @@ class SearchJobService:
         stage_durations_ms["persist"] = _duration_ms(
             time.perf_counter() - persist_started_at
         )
+        diagnostics: dict[str, object] = {"input_duration_seconds": input_duration_seconds}
+        if download_failure is not None:
+            diagnostics["download_failure"] = download_failure.to_dict()
         self._observe_terminal(
             search_id=search_id,
             streamer=streamer,
@@ -288,9 +293,7 @@ class SearchJobService:
             stage_durations_ms=stage_durations_ms,
             error_code=error_code,
             http_status=http_status,
-            diagnostics={
-                "input_duration_seconds": input_duration_seconds,
-            },
+            diagnostics=diagnostics,
         )
 
     @staticmethod

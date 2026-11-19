@@ -1,10 +1,17 @@
 from concurrent.futures import Future
 from datetime import datetime, timezone
+import io
+import json
+import logging
+import subprocess
+from types import SimpleNamespace
 
 import pytest
 
+import backend.observability as observability
+from backend.json_logging import JsonFormatter
 from backend.services.search_jobs import SearchJobService
-from backend.services.remote_clip_downloader import DownloadError, InvalidClipUrlError
+from backend.services.remote_clip_downloader import DownloadError, InvalidClipUrlError, RemoteClipDownloader
 from backend.services.search_manager import SearchInputError
 from search.access import is_search_token
 from search.models import SearchDateRange, SearchExecutionMetadata, SearchRequestOutcome, SearchResult
@@ -225,6 +232,111 @@ def test_search_job_service_emits_error_event_for_failed_job(monkeypatch) -> Non
     assert events[0]["search_id"] == 7
     assert events[0]["outcome"] == "error"
     assert events[0]["error_code"] == "DOWNLOAD_ERROR"
+    assert store.failure_total_duration_ms[0] is not None
+
+
+@pytest.mark.parametrize(
+    "url, provider_error, category, stage, provider_status",
+    [
+        (
+            "https://www.tiktok.com/@u/video/1",
+            "ERROR: unable to download video data: HTTP Error 403: Forbidden",
+            "http_error", "media", 403,
+        ),
+        (
+            "https://www.tiktok.com/@u/video/1",
+            "ERROR: [TikTok] 1: Unable to download webpage: HTTP Error 403: Forbidden",
+            "http_error", "extraction", 403,
+        ),
+        (
+            "https://www.tiktok.com/@u/video/1",
+            "ERROR: [TikTok] 1: Unable to download API page: HTTP Error 403: Forbidden",
+            "http_error", "extraction", 403,
+        ),
+        (
+            "https://www.tiktok.com/@u/video/1",
+            "ERROR: [TikTok] 1: Unable to download JSON metadata: HTTP Error 403: Forbidden",
+            "http_error", "extraction", 403,
+        ),
+        (
+            "https://www.tiktok.com/@u/video/1",
+            "ERROR: [TikTok] 1: HTTP Error 403: Forbidden",
+            "http_error", "unknown", 403,
+        ),
+        (
+            "https://www.tiktok.com/@u/video/1",
+            "ERROR: provider unavailable",
+            "provider_error", "unknown", None,
+        ),
+        (
+            "https://www.tiktok.com/@u/video/1",
+            "ERROR: [TikTok] 1: This post is restricted. Log in for access.",
+            "login_required", "unknown", None,
+        ),
+        (
+            "https://www.youtube.com/shorts/stUeIqtnRYs",
+            "ERROR: [youtube] stUeIqtnRYs: Sign in to confirm you're not a bot.",
+            "bot_challenge", "unknown", None,
+        ),
+    ],
+)
+def test_download_failure_emits_safe_provider_diagnostics_in_json(
+    monkeypatch, tmp_path, url, provider_error, category, stage, provider_status,
+) -> None:
+    log_output = io.StringIO()
+    event_handler = logging.StreamHandler(log_output)
+    event_handler.setFormatter(logging.Formatter("%(message)s"))
+    monkeypatch.setattr(observability._SEARCH_EVENT_LOGGER, "handlers", [event_handler])
+    diagnostic_handler = logging.StreamHandler(log_output)
+    diagnostic_handler.setFormatter(JsonFormatter())
+    downloader_logger = logging.getLogger("uvicorn.error")
+    monkeypatch.setattr(downloader_logger, "handlers", [diagnostic_handler])
+    monkeypatch.setattr(downloader_logger, "propagate", False)
+    monkeypatch.setattr(downloader_logger, "level", logging.INFO)
+    stderr = (
+        "WARNING: earlier HTTP Error 429: Too Many Requests\n"
+        f"{provider_error}\n"
+        "Proxy http://operator:proxy-password-sentinel@proxy.test:8080\n"
+        "Cookie: session=cookie-value-sentinel\n"
+        "https://media.test/path/HTTP Error 401?signature=signed-url-sentinel\n"
+    )
+    monkeypatch.setattr(
+        "backend.services.remote_clip_downloader.subprocess.run",
+        lambda *args, **kwargs: subprocess.CompletedProcess([], 1, stdout="", stderr=stderr),
+    )
+    downloader = RemoteClipDownloader(temp_dir=str(tmp_path))
+    manager = SimpleNamespace(search_clip_url=lambda url, *args, **kwargs: downloader.download_clip(url))
+    store = StubStore()
+    service = SearchJobService(jobs=store, search_manager=manager, executor=InlineExecutor())
+
+    service.create_public_search_job(tiktok_url=url, streamer="jason", creator_id=2)
+
+    serialized = log_output.getvalue()
+    events = [json.loads(line) for line in serialized.splitlines()]
+    terminal_events = [event for event in events if event.get("event") == "search_finished"]
+    assert len(terminal_events) == 1
+    event = terminal_events[0]
+    assert event["search_id"] == 7
+    assert event["error"] == {"code": "DOWNLOAD_ERROR", "http_status": 400}
+    assert event["diagnostics"].get("download_failure") == {
+        "provider": "youtube" if "youtube.com" in url else "tiktok",
+        "failure_category": category,
+        "failure_stage": stage,
+        "provider_http_status": provider_status,
+        "process_returncode": 1,
+    }
+    for secret in ("proxy-password-sentinel", "cookie-value-sentinel", "signed-url-sentinel", "http://operator", "https://media.test"):
+        assert secret not in serialized
+    expected_message = stderr.strip()
+    if category == "login_required":
+        expected_message = (
+            "This TikTok requires login, so VodHunter cannot download it. "
+            "Try a publicly accessible TikTok video."
+        )
+    elif category == "bot_challenge":
+        expected_message = "YouTube blocked VodHunter from downloading this Short. Please try again later."
+    assert store.failed == [(7, "DOWNLOAD_ERROR", expected_message, 400, None)]
+    assert store.completed == []
     assert store.failure_total_duration_ms[0] is not None
 
 

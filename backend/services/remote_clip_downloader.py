@@ -17,8 +17,28 @@ class InvalidClipUrlError(Exception):
     pass
 
 
+@dataclass(frozen=True)
+class DownloadFailureDiagnostics:
+    provider: Literal["tiktok", "instagram", "youtube"]
+    failure_category: Literal["http_error", "login_required", "bot_challenge", "provider_error"]
+    failure_stage: Literal["media", "extraction", "unknown"]
+    provider_http_status: int | None
+    process_returncode: int
+
+    def to_dict(self) -> dict[str, str | int | None]:
+        return {
+            "provider": self.provider,
+            "failure_category": self.failure_category,
+            "failure_stage": self.failure_stage,
+            "provider_http_status": self.provider_http_status,
+            "process_returncode": self.process_returncode,
+        }
+
+
 class DownloadError(Exception):
-    pass
+    def __init__(self, message: str, *, diagnostics: DownloadFailureDiagnostics | None = None):
+        super().__init__(message)
+        self.diagnostics = diagnostics
 
 
 class _TransientTikTokResolveError(Exception):
@@ -71,6 +91,11 @@ _TIKTOK_LOGIN_REQUIRED_ERROR = re.compile(
     re.MULTILINE,
 )
 _YOUTUBE_BOT_ERROR = re.compile(r"sign in to confirm you['’]re not a bot", re.IGNORECASE)
+_YTDLP_HTTP_ERROR = re.compile(
+    r"^ERROR: (?:\[[^\]\r\n]+\] [^:\r\n]+: )?"
+    r"(?P<context>(?:[A-Za-z][A-Za-z ]*: )?)HTTP Error (?P<status>[1-5][0-9]{2})\b",
+    re.IGNORECASE,
+)
 _YOUTUBE_DOWNLOAD_ERROR = "VodHunter could not download this YouTube Short. Please try again later."
 _TRANSIENT_RESOLVE_EXCEPTIONS = (
     _TransientTikTokResolveError,
@@ -82,6 +107,44 @@ _DIRECT_CLIP_RULES = (
     ("instagram", {"instagram.com", "www.instagram.com"}, re.compile(r"/reels?/[A-Za-z0-9_-]+/?")),
     ("youtube", {"youtube.com", "www.youtube.com", "m.youtube.com"}, re.compile(r"/shorts/[A-Za-z0-9_-]{11}/?")),
 )
+
+
+def _download_failure_diagnostics(
+    clip: ClipUrl, result: subprocess.CompletedProcess[str],
+) -> DownloadFailureDiagnostics:
+    category: Literal["http_error", "login_required", "bot_challenge", "provider_error"] = "provider_error"
+    stage: Literal["media", "extraction", "unknown"] = "unknown"
+    provider_http_status = None
+    stderr, stdout = result.stderr or "", result.stdout or ""
+    if clip.platform == "tiktok" and _TIKTOK_LOGIN_REQUIRED_ERROR.search(stderr):
+        category = "login_required"
+    elif clip.platform == "youtube" and (_YOUTUBE_BOT_ERROR.search(stderr) or _YOUTUBE_BOT_ERROR.search(stdout)):
+        category = "bot_challenge"
+    else:
+        for line in (stdout + "\n" + stderr).splitlines():
+            match = _YTDLP_HTTP_ERROR.match(line)
+            if match is None:
+                continue
+            category = "http_error"
+            provider_http_status = int(match["status"])
+            context = match["context"].lower()
+            if context == "unable to download video data: ":
+                stage = "media"
+            elif context in (
+                "unable to download webpage: ",
+                "unable to download api page: ",
+                "unable to download json metadata: ",
+            ):
+                stage = "extraction"
+            else:
+                stage = "unknown"
+    return DownloadFailureDiagnostics(
+        provider=clip.platform,
+        failure_category=category,
+        failure_stage=stage,
+        provider_http_status=provider_http_status,
+        process_returncode=result.returncode,
+    )
 
 
 def _invalid_path_error() -> InvalidClipUrlError:
@@ -355,8 +418,9 @@ class RemoteClipDownloader:
 
         if result.returncode != 0:
             self._cleanup_download(output_prefix)
+            diagnostics = _download_failure_diagnostics(parsed_url, result)
             if parsed_url.platform == "youtube":
-                bot_challenge = bool(_YOUTUBE_BOT_ERROR.search(result.stderr or "") or _YOUTUBE_BOT_ERROR.search(result.stdout or ""))
+                bot_challenge = diagnostics.failure_category == "bot_challenge"
                 logger.warning(
                     "youtube_download_failed reason=%s returncode=%s proxy_configured=%s",
                     "bot_challenge" if bot_challenge else "provider_error",
@@ -365,17 +429,19 @@ class RemoteClipDownloader:
                 )
                 if bot_challenge:
                     raise DownloadError(
-                        "YouTube blocked VodHunter from downloading this Short. Please try again later."
+                        "YouTube blocked VodHunter from downloading this Short. Please try again later.",
+                        diagnostics=diagnostics,
                     ) from None
-                raise DownloadError(_YOUTUBE_DOWNLOAD_ERROR) from None
+                raise DownloadError(_YOUTUBE_DOWNLOAD_ERROR, diagnostics=diagnostics) from None
             message = (result.stderr or result.stdout or "yt-dlp failed").strip()
-            if _TIKTOK_LOGIN_REQUIRED_ERROR.search(result.stderr or ""):
-                logger.warning("tiktok_download_login_required error=%s", message)
+            if diagnostics.failure_category == "login_required":
+                logger.warning("tiktok_download_login_required")
                 raise DownloadError(
                     "This TikTok requires login, so VodHunter cannot download it. "
-                    "Try a publicly accessible TikTok video."
+                    "Try a publicly accessible TikTok video.",
+                    diagnostics=diagnostics,
                 )
-            raise DownloadError(message)
+            raise DownloadError(message, diagnostics=diagnostics)
 
         matches = [
             path for path in glob.glob(f"{output_prefix}.*")
