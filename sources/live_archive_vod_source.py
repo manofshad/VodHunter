@@ -59,6 +59,7 @@ class LiveArchiveVODSource(AudioSource):
         self._last_is_live: bool | None = None
         self._no_growth_checks = 0
         self._last_refresh_at = 0.0
+        self.last_successful_poll_at: float | None = None
 
         self._pending_commit_end_seconds: int | None = None
         self._pending_chunk_path: str | None = None
@@ -142,6 +143,7 @@ class LiveArchiveVODSource(AudioSource):
 
         latest_vod = self.twitch_monitor.get_latest_archive_vod(self._user_id)
         if latest_vod is None:
+            self.last_successful_poll_at = time.monotonic()
             return
 
         vod_platform_id = str(latest_vod["id"])
@@ -155,6 +157,7 @@ class LiveArchiveVODSource(AudioSource):
                 VideoStatus.UNAVAILABLE.value,
             }:
                 self._clear_active_vod(mark_finished=True)
+                self.last_successful_poll_at = time.monotonic()
                 return
             if (
                 existing_status == VideoStatus.REINDEX_REQUESTED.value
@@ -183,6 +186,7 @@ class LiveArchiveVODSource(AudioSource):
             self._no_growth_checks += 1
 
         self._save_ingest_state()
+        self.last_successful_poll_at = time.monotonic()
 
     def _switch_to_vod(self, vod: dict) -> None:
         self._vod_platform_id = str(vod["id"])
@@ -435,16 +439,15 @@ class LiveArchiveVODSource(AudioSource):
         if self._vod_platform_id is None or self.video_id is None:
             return
 
+        self._save_ingest_state(cursor_seconds=self._pending_commit_end_seconds)
         self.ingest_cursor_seconds = int(self._pending_commit_end_seconds)
         self._pending_commit_end_seconds = None
-
-        self._save_ingest_state()
 
         if self._pending_chunk_path and os.path.exists(self._pending_chunk_path):
             os.remove(self._pending_chunk_path)
         self._pending_chunk_path = None
 
-    def _save_ingest_state(self) -> None:
+    def _save_ingest_state(self, *, cursor_seconds: int | None = None) -> None:
         if self._vod_platform_id is None or self.video_id is None:
             return
 
@@ -452,7 +455,7 @@ class LiveArchiveVODSource(AudioSource):
             vod_platform_id=self._vod_platform_id,
             video_id=self.video_id,
             streamer=self.streamer,
-            last_ingested_seconds=int(self.ingest_cursor_seconds or 0),
+            last_ingested_seconds=int(self.ingest_cursor_seconds or 0) if cursor_seconds is None else cursor_seconds,
             last_seen_duration_seconds=int(self._last_seen_duration_seconds),
         )
 

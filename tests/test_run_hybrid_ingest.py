@@ -21,7 +21,7 @@ from runners.run_hybrid_ingest import (
     run_multi_streamer_ingest,
 )
 from storage.records import VodIngestStateRecord, VideoRecord, VideoStatus
-from services.twitch_monitor import TwitchMonitor
+from services.twitch_monitor import TwitchMonitor, TwitchRequestError
 
 
 class FakeMonitor:
@@ -152,6 +152,21 @@ class FakeRepositories:
         self.videos = store
         self.ingest_states = store
         self.fingerprints = store
+
+
+class WorkerEmbedder:
+    load_calls = 0
+
+    def load(self):
+        self.load_calls += 1
+        return 0
+
+
+def twitch_failure(*, retryable=True, retry_at=None, status=None):
+    return TwitchRequestError(
+        operation="helix_videos", hostname="api.twitch.tv", error_class="TimeoutError",
+        retryable=retryable, retry_at=retry_at, status=status,
+    )
 
 
 class FakeSource:
@@ -1079,7 +1094,7 @@ class TestRunHybridIngest:
         )
 
         assert result.failed == 1
-        assert any(line == "failed mode=live streamer=alice error=live-boom" for line in logs)
+        assert any("event=controller_retry streamer=alice phase=live_session error=RuntimeError" in line for line in logs)
 
     def test_multi_streamer_worker_loads_one_model_and_uses_priority_clients(self) -> None:
         class FakeEmbedder:
@@ -1107,7 +1122,7 @@ class TestRunHybridIngest:
         def controller(streamer: str, days: int, **kwargs) -> HybridIngestResult:
             state = kwargs["build_ingest"]()
             assert kwargs["build_storage"]() is repositories
-            assert kwargs["provision_streamer"] is False
+            assert kwargs["provision_streamer"] is True
             seen[streamer] = state
             return HybridIngestResult(watch_cycles=1)
 
@@ -1118,6 +1133,7 @@ class TestRunHybridIngest:
             build_ingest=lambda: {"embedder": embedder},
             controller=controller,
             out=lambda _: None,
+            should_stop=lambda: len(seen) == 2,
         )
 
         assert result.streamers == ("jasontheween", "stableronaldo")
@@ -1188,6 +1204,500 @@ class TestRunHybridIngest:
         assert archives["jasontheween"] >= 2, archives
         assert archives["stableronaldo"] >= 2, archives
         assert embedder.load_calls == 1
+
+    def test_archive_outage_backs_off_to_cap_and_resets_after_discovery_succeeds(self) -> None:
+        monitor = FakeMonitor()
+        attempts = []
+        delays = []
+        logs = []
+
+        def archives(**kwargs):
+            attempts.append(len(attempts) + 1)
+            if len(attempts) not in {8, 10}:
+                raise twitch_failure()
+            return []
+
+        with patch.object(monitor, "list_archive_vods_since", side_effect=archives), patch(
+            "runners.run_hybrid_ingest._sleep_interruptibly", side_effect=lambda delay, stop: delays.append(delay),
+        ), patch("runners.run_hybrid_ingest.random.uniform", side_effect=lambda low, high: high):
+            result = run_hybrid_ingest(
+                "alice", monitor=monitor, out=logs.append,
+                build_storage=lambda: FakeRepositories(FakeStore()),
+                build_ingest=lambda: {"embedder": object()},
+                should_stop=lambda: len(attempts) >= 10, watch_poll_seconds=0,
+            )
+
+        assert [delay for delay in delays if delay] == [5, 10, 20, 40, 60, 60, 60, 5]
+        assert result.watch_cycles == 2
+        assert sum("event=controller_recovered" in line for line in logs) == 2
+        assert any("degraded=true" in line for line in logs)
+
+    def test_rate_limit_wait_honors_reset_and_permanent_auth_is_not_retried(self) -> None:
+        monitor = FakeMonitor()
+        stop = threading.Event()
+        delays = []
+
+        def wait(delay, should_stop):
+            delays.append(delay)
+            stop.set()
+
+        with patch.object(monitor, "list_archive_vods_since", side_effect=twitch_failure(retry_at=175, status=429)), patch(
+            "runners.run_hybrid_ingest.time.time", return_value=100,
+        ), patch("runners.run_hybrid_ingest._sleep_interruptibly", side_effect=wait):
+            run_hybrid_ingest(
+                "alice", monitor=monitor, out=lambda line: None,
+                build_storage=lambda: FakeRepositories(FakeStore()),
+                build_ingest=lambda: {"embedder": object()}, should_stop=stop.is_set,
+            )
+        assert delays == [75]
+
+        with patch.object(monitor, "list_archive_vods_since", side_effect=twitch_failure(retryable=False, status=403)) as lookup, patch(
+            "runners.run_hybrid_ingest._sleep_interruptibly",
+        ) as wait:
+            with pytest.raises(TwitchRequestError):
+                run_hybrid_ingest(
+                    "alice", monitor=monitor, out=lambda line: None,
+                    build_storage=lambda: FakeRepositories(FakeStore()),
+                    build_ingest=lambda: {"embedder": object()},
+                )
+        assert lookup.call_count == 1
+        wait.assert_not_called()
+
+    def test_shutdown_interrupts_retry_wait_without_another_twitch_request(self) -> None:
+        monitor = FakeMonitor()
+        stop = threading.Event()
+        retrying = threading.Event()
+
+        def stop_during_retry():
+            assert retrying.wait(1)
+            time.sleep(0.02)
+            stop.set()
+
+        stopper = threading.Thread(target=stop_during_retry)
+        stopper.start()
+        started_at = time.monotonic()
+        with patch.object(monitor, "list_archive_vods_since", side_effect=twitch_failure()) as lookup:
+            run_hybrid_ingest(
+                "alice", monitor=monitor,
+                out=lambda line: retrying.set() if "event=controller_retry" in line else None,
+                build_storage=lambda: FakeRepositories(FakeStore()),
+                build_ingest=lambda: {"embedder": object()},
+                should_stop=stop.is_set, retry_seconds=60,
+            )
+        stopper.join()
+        assert time.monotonic() - started_at < 1
+        assert lookup.call_count == 1
+
+    def test_profile_outage_does_not_block_other_streamer_provisioning_or_session(self) -> None:
+        healthy_started = threading.Event()
+        recovered_started = threading.Event()
+        provisioned = set()
+        profile_calls = {"jasontheween": 0, "stableronaldo": 0}
+        active = {"jasontheween": 0, "stableronaldo": 0}
+        peak = dict(active)
+        logs = []
+
+        class Monitor:
+            def get_user_profile(self, streamer, force_refresh=False):
+                profile_calls[streamer] += 1
+                if streamer == "jasontheween" and profile_calls[streamer] == 1:
+                    assert healthy_started.wait(1)
+                    raise twitch_failure()
+                return {"id": streamer}
+
+            def get_live_streamers(self, streamers):
+                return set(streamers)
+
+        class Store(FakeStore):
+            def create_or_get_creator(self, streamer, *args, **kwargs):
+                return streamer
+
+        class Partitions:
+            def ensure_creator_partition(self, creator_id):
+                provisioned.add(creator_id)
+                return creator_id
+
+        repositories = FakeRepositories(Store())
+        repositories.embedding_partitions = Partitions()
+
+        class Session:
+            def __init__(self, source, **kwargs):
+                self.streamer = source.kwargs["streamer"]
+                self.stop_event = threading.Event()
+
+            def run(self):
+                assert self.streamer in provisioned
+                active[self.streamer] += 1
+                peak[self.streamer] = max(peak[self.streamer], active[self.streamer])
+                if self.streamer == "stableronaldo":
+                    healthy_started.set()
+                else:
+                    recovered_started.set()
+                try:
+                    assert self.stop_event.wait(2)
+                finally:
+                    active[self.streamer] -= 1
+
+            def stop(self):
+                self.stop_event.set()
+
+        def controller(streamer, days, **kwargs):
+            return run_hybrid_ingest(
+                streamer, days, **kwargs, live_source_factory=FakeSource,
+                session_factory=Session, retry_seconds=0.001, session_wait_seconds=0.001,
+            )
+
+        deadline = time.monotonic() + 2
+        embedder = WorkerEmbedder()
+        run_multi_streamer_ingest(
+            ["jasontheween", "stableronaldo"], monitor=Monitor(),
+            build_storage=lambda: repositories, build_ingest=lambda: {"embedder": embedder},
+            controller=controller, out=logs.append,
+            should_stop=lambda: recovered_started.is_set() or time.monotonic() >= deadline,
+        )
+        assert healthy_started.is_set() and recovered_started.is_set()
+        assert profile_calls == {"jasontheween": 2, "stableronaldo": 1}
+        assert peak == {"jasontheween": 1, "stableronaldo": 1}
+        assert active == {"jasontheween": 0, "stableronaldo": 0}
+        assert embedder.load_calls == 1
+        assert any("event=controller_recovered streamer=jasontheween phase=provision" in line for line in logs)
+
+    @pytest.mark.parametrize("exit_kind", ["exception", "return"])
+    def test_worker_restarts_only_the_unexpected_controller_exit(self, exit_kind) -> None:
+        calls = {"jasontheween": 0, "stableronaldo": 0}
+        active = dict(calls)
+        peak = dict(calls)
+        healthy_running = threading.Event()
+        recovered = threading.Event()
+        logs = []
+
+        def controller(streamer, days, **kwargs):
+            calls[streamer] += 1
+            active[streamer] += 1
+            peak[streamer] = max(peak[streamer], active[streamer])
+            try:
+                if streamer == "stableronaldo":
+                    healthy_running.set()
+                    assert recovered.wait(1)
+                elif calls[streamer] == 1:
+                    assert healthy_running.wait(1)
+                    if exit_kind == "exception":
+                        raise RuntimeError("unexpected failure with private details")
+                else:
+                    recovered.set()
+                return HybridIngestResult()
+            finally:
+                active[streamer] -= 1
+
+        embedder = WorkerEmbedder()
+        with patch("runners.run_hybrid_ingest.MONITOR_RETRY_SECONDS", 0.001):
+            run_multi_streamer_ingest(
+                ["jasontheween", "stableronaldo"], monitor=FakeMonitor(),
+                build_storage=lambda: FakeRepositories(FakeStore()),
+                build_ingest=lambda: {"embedder": embedder},
+                controller=controller, out=logs.append, should_stop=recovered.is_set,
+            )
+        assert calls == {"jasontheween": 2, "stableronaldo": 1}
+        assert peak == {"jasontheween": 1, "stableronaldo": 1}
+        assert active == {"jasontheween": 0, "stableronaldo": 0}
+        assert embedder.load_calls == 1
+        assert any("event=controller_retry streamer=jasontheween phase=controller error=RuntimeError" in line for line in logs)
+        assert not any("private details" in line for line in logs)
+
+    def test_permanent_controller_auth_failure_is_visible_without_stopping_peer(self) -> None:
+        healthy_ran = threading.Event()
+        failure_logged = threading.Event()
+        calls = {"jasontheween": 0, "stableronaldo": 0}
+        logs = []
+
+        def controller(streamer, days, **kwargs):
+            calls[streamer] += 1
+            if streamer == "jasontheween":
+                raise twitch_failure(retryable=False, status=401)
+            healthy_ran.set()
+            assert failure_logged.wait(1)
+            return HybridIngestResult()
+
+        def out(line):
+            logs.append(line)
+            if "event=controller_failed streamer=jasontheween" in line:
+                failure_logged.set()
+
+        run_multi_streamer_ingest(
+            ["jasontheween", "stableronaldo"], monitor=FakeMonitor(),
+            build_storage=lambda: FakeRepositories(FakeStore()),
+            build_ingest=lambda: {"embedder": WorkerEmbedder()},
+            controller=controller, out=out,
+            should_stop=lambda: healthy_ran.is_set() and failure_logged.is_set(),
+        )
+        assert calls == {"jasontheween": 1, "stableronaldo": 1}
+        assert any("permanent=true" in line and "error=" in line for line in logs)
+
+    def test_offline_successful_poll_heartbeat_has_fixed_cadence(self) -> None:
+        now = [0]
+        polls = []
+        logs = []
+        monitor = FakeMonitor()
+
+        def archives(**kwargs):
+            polls.append(now[0])
+            return []
+
+        with patch.object(monitor, "list_archive_vods_since", side_effect=archives), patch(
+            "runners.run_hybrid_ingest.time.monotonic", side_effect=lambda: now[0],
+        ), patch("runners.run_hybrid_ingest._sleep_interruptibly", side_effect=lambda delay, stop: now.__setitem__(0, now[0] + delay)):
+            run_hybrid_ingest(
+                "alice", monitor=monitor, out=logs.append,
+                build_storage=lambda: FakeRepositories(FakeStore()),
+                build_ingest=lambda: {"embedder": object()},
+                should_stop=lambda: len(polls) >= 6, watch_poll_seconds=30,
+            )
+        assert polls == [0, 30, 60, 90, 120, 150]
+        assert sum("event=controller_poll streamer=alice phase=watch" in line for line in logs) == 3
+
+    @pytest.mark.parametrize("request_error", [True, False])
+    def test_live_poll_recovers_request_failure_but_does_not_clear_media_failure(self, request_error) -> None:
+        observed_poll = threading.Event()
+        stop = threading.Event()
+        logs = []
+        runs = []
+        delays = []
+
+        class Source(FakeSource):
+            last_successful_poll_at = None
+            ingest_cursor_seconds = 0
+
+        class Session:
+            def __init__(self, source, **kwargs):
+                self.source = source
+
+            def run(self):
+                runs.append(self)
+                if len(runs) == 2:
+                    self.source.last_successful_poll_at = 1.0
+                    assert observed_poll.wait(1)
+                raise twitch_failure() if request_error else RuntimeError("media failed")
+
+            def stop(self):
+                observed_poll.set()
+
+        def out(line):
+            logs.append(line)
+            if "event=controller_poll" in line:
+                observed_poll.set()
+            if sum("event=controller_retry" in logged for logged in logs) >= 2:
+                stop.set()
+
+        def wait(delay, should_stop):
+            if delay > 1:
+                delays.append(delay)
+            else:
+                time.sleep(0.001)
+
+        with patch("runners.run_hybrid_ingest._sleep_interruptibly", side_effect=wait), patch(
+            "runners.run_hybrid_ingest.random.uniform", side_effect=lambda low, high: high,
+        ):
+            run_hybrid_ingest(
+                "alice", monitor=FakeMonitor(live_sequence=[True]), out=out,
+                build_storage=lambda: FakeRepositories(FakeStore()),
+                build_ingest=lambda: {"embedder": object()},
+                live_source_factory=Source, session_factory=Session,
+                should_stop=stop.is_set, session_wait_seconds=0.001,
+            )
+        assert delays == ([5, 5] if request_error else [5, 10])
+        assert any("event=controller_recovered" in line for line in logs) is request_error
+        assert not any("event=controller_progress" in line for line in logs)
+
+    def test_backlog_committed_progress_resets_retry_on_controller_thread(self) -> None:
+        recovered = threading.Event()
+        stop = threading.Event()
+        logs = []
+        runs = []
+        owner_thread = threading.get_ident()
+        delays = []
+
+        class Source(FakeSource):
+            ingest_cursor_seconds = 0
+
+        class Session:
+            def __init__(self, source, **kwargs):
+                self.source = source
+
+            def run(self):
+                runs.append(self)
+                if len(runs) == 2:
+                    self.source.ingest_cursor_seconds = 60
+                    assert recovered.wait(1)
+                raise twitch_failure()
+
+            def stop(self):
+                recovered.set()
+
+        def out(line):
+            logs.append(line)
+            if "event=controller_recovered" in line:
+                assert threading.get_ident() == owner_thread
+                recovered.set()
+            if sum("event=controller_retry" in logged for logged in logs) >= 2:
+                stop.set()
+
+        def wait(delay, should_stop):
+            if delay > 1:
+                delays.append(delay)
+            else:
+                time.sleep(0.001)
+
+        with patch("runners.run_hybrid_ingest._sleep_interruptibly", side_effect=wait), patch(
+            "runners.run_hybrid_ingest.random.uniform", side_effect=lambda low, high: high,
+        ):
+            run_hybrid_ingest(
+                "alice", monitor=FakeMonitor(vods=[{"id": "vod", "url": "https://www.twitch.tv/videos/vod"}]),
+                out=out, build_storage=lambda: FakeRepositories(FakeStore()),
+                build_ingest=lambda: {"embedder": object()},
+                historical_source_factory=Source, session_factory=Session,
+                should_stop=stop.is_set, backlog_live_poll_seconds=0.001,
+            )
+        assert delays == [5, 5]
+        assert any("event=controller_recovered streamer=alice phase=backlog_session" in line for line in logs)
+
+    def test_live_poll_recovers_archive_discovery_outage_when_streamer_goes_live(self) -> None:
+        observed_recovery = threading.Event()
+        stop = threading.Event()
+        logs = []
+
+        class Source(FakeSource):
+            last_successful_poll_at = None
+            ingest_cursor_seconds = 0
+
+        class Session:
+            def __init__(self, source, **kwargs):
+                self.source = source
+
+            def run(self):
+                self.source.last_successful_poll_at = 1.0
+                assert observed_recovery.wait(1)
+                stop.set()
+
+            def stop(self):
+                observed_recovery.set()
+
+        def out(line):
+            logs.append(line)
+            if "event=controller_recovered streamer=alice phase=archive_discovery" in line:
+                observed_recovery.set()
+
+        monitor = FakeMonitor(live_sequence=[False, True])
+        with patch.object(monitor, "list_archive_vods_since", side_effect=twitch_failure()):
+            run_hybrid_ingest(
+                "alice", monitor=monitor, out=out,
+                build_storage=lambda: FakeRepositories(FakeStore()),
+                build_ingest=lambda: {"embedder": object()},
+                live_source_factory=Source, session_factory=Session,
+                should_stop=stop.is_set, retry_seconds=0.001, session_wait_seconds=0.001,
+            )
+        assert observed_recovery.is_set()
+        assert not any("event=controller_progress" in line for line in logs)
+
+    def test_unexpected_backlog_poll_failure_stops_and_joins_existing_session(self) -> None:
+        started = threading.Event()
+        finished = threading.Event()
+        stop = threading.Event()
+
+        class Session:
+            def __init__(self, source, **kwargs):
+                pass
+
+            def run(self):
+                started.set()
+                assert stop.wait(1)
+                finished.set()
+
+            def stop(self):
+                stop.set()
+
+        monitor = FakeMonitor(vods=[{"id": "vod", "url": "https://www.twitch.tv/videos/vod"}])
+
+        def is_live(streamer):
+            if not started.is_set():
+                return False
+            raise RuntimeError("unexpected controller poll failure")
+
+        with patch.object(monitor, "is_live", side_effect=is_live):
+            with pytest.raises(RuntimeError, match="unexpected controller poll failure"):
+                run_hybrid_ingest(
+                    "alice", monitor=monitor, out=lambda line: None,
+                    build_storage=lambda: FakeRepositories(FakeStore()),
+                    build_ingest=lambda: {"embedder": object()},
+                    historical_source_factory=FakeSource, session_factory=Session,
+                    backlog_live_poll_seconds=0.001,
+                )
+        assert stop.is_set() and finished.is_set()
+
+    def test_transient_preemption_poll_failure_keeps_backlog_session_processing(self) -> None:
+        failed_poll = threading.Event()
+        committed = threading.Event()
+        completed = threading.Event()
+        stops = []
+        logs = []
+        monitor = FakeMonitor(vods=[{"id": "vod", "url": "https://www.twitch.tv/videos/vod"}])
+
+        class Session:
+            def __init__(self, source, **kwargs):
+                pass
+
+            def run(self):
+                assert failed_poll.wait(1)
+                committed.set()
+
+            def stop(self):
+                stops.append(True)
+                failed_poll.set()
+
+        checks = []
+
+        def is_live(streamer):
+            checks.append(True)
+            if len(checks) == 1:
+                return False
+            if not committed.is_set():
+                raise twitch_failure()
+            return False
+
+        def out(line):
+            logs.append(line)
+            if "phase=backlog_live_check" in line:
+                failed_poll.set()
+            if line.startswith("completed mode=backlog"):
+                completed.set()
+
+        with patch.object(monitor, "is_live", side_effect=is_live):
+            result = run_hybrid_ingest(
+                "alice", monitor=monitor, out=out,
+                build_storage=lambda: FakeRepositories(FakeStore()),
+                build_ingest=lambda: {"embedder": object()},
+                historical_source_factory=FakeSource, session_factory=Session,
+                should_stop=completed.is_set, backlog_live_poll_seconds=0.001,
+            )
+        assert committed.is_set() and completed.is_set()
+        assert result.backlog_ingested == 1
+        assert stops == []
+        assert any("phase=backlog_live_check error=TimeoutError" in line for line in logs)
+
+    @pytest.mark.parametrize("retryable", [True, False])
+    def test_saved_cursor_lookup_propagates_twitch_failures_without_marking_absent(self, retryable) -> None:
+        store = FakeStore()
+        store.set_video(video_id=1, creator_id=1, url="https://www.twitch.tv/videos/saved", title="saved", processed=False, status="indexing")
+        store.set_state(vod_platform_id="saved", video_id=1, streamer="alice", last_ingested_seconds=60, last_seen_duration_seconds=120)
+        monitor = FakeMonitor()
+        with patch.object(monitor, "get_archive_vod_by_id", side_effect=twitch_failure(retryable=retryable)):
+            with pytest.raises(TwitchRequestError):
+                _build_backlog(
+                    twitch_monitor=monitor, videos=store, ingest_states=store,
+                    streamer="alice", user_id="user-1", days=1,
+                    skipped_vods_logged=set(), out=lambda line: None,
+                )
+        assert store.get_video_status(1) == "indexing"
+        assert store.vod_state["saved"].last_ingested_seconds == 60
 
     def test_normalize_streamers_accepts_repeated_and_csv_values(self) -> None:
         assert _normalize_streamers(
