@@ -46,7 +46,6 @@ export function ShortcutDialog({ open, returnFocusRef, onClose }: ShortcutDialog
       ref={dialogRef}
       id="vodhunter-shortcut-dialog"
       aria-labelledby="vodhunter-shortcut-title"
-      aria-describedby="vodhunter-shortcut-description"
       onCancel={(event) => {
         event.preventDefault();
         onClose();
@@ -83,10 +82,6 @@ export function ShortcutDialog({ open, returnFocusRef, onClose }: ShortcutDialog
             <X aria-hidden="true" className="size-5" />
           </button>
         </div>
-
-        <p id="vodhunter-shortcut-description" className="mt-2 text-sm leading-6 text-gray-300 sm:text-base">
-          Find the original Twitch VOD from TikTok.
-        </p>
 
         <a
           href="/shortcuts/vodhunter-search.shortcut"
